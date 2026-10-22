@@ -7,7 +7,7 @@ Enforces Part A Zero-Hardcoding standard:
 """
 
 import json
-from typing import List, Union
+from typing import List, Optional, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     # Optimization & Token Estimation Heuristics
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0
     MAX_VALIDATION_RETRY_ATTEMPTS: int = 1
+
+    # Main LLM Provider Settings (Phase 4)
+    MAIN_LLM_PROVIDER: str = "openai"
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_API_BASE: str = "https://api.openai.com/v1"
+    MAIN_LLM_MODEL: str = "gpt-4o"
+    MAIN_LLM_TIMEOUT_SECONDS: float = 60.0
+    MAIN_LLM_TEMPERATURE: float = 0.2
+    MAIN_LLM_MAX_TOKENS: int = 1500
+    LIVE_BENCHMARK_ENABLED: bool = False
 
     CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:5173",

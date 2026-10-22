@@ -3,10 +3,10 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import App from '../src/App';
 
 describe('Argus Application Navigation & Smoke Test', () => {
-  it('renders Argus brand header with tagline and Phase 3 badge', () => {
+  it('renders Argus brand header with tagline and Phase 4 badge', () => {
     render(<App />);
     expect(screen.getAllByText('Argus').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Phase 3')).toBeInTheDocument();
+    expect(screen.getByText('Phase 4')).toBeInTheDocument();
     expect(
       screen.getAllByText(/Understand\. Optimize\. Execute\./i).length
     ).toBeGreaterThanOrEqual(1);
@@ -16,14 +16,20 @@ describe('Argus Application Navigation & Smoke Test', () => {
     render(<App />);
     expect(screen.getAllByText(/Local LLM:/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/Main LLM:/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/Disconnected \(Phase 4\)/i)).toBeInTheDocument();
   });
 
-  it('switches between Workspace and System Status tabs', () => {
+  it('switches between Workspace, Benchmark, and System Status tabs', () => {
     render(<App />);
     // Defaults to Workspace tab
     expect(
       screen.getByText('Optimize Input Tokens & Preserve Constraints')
+    ).toBeInTheDocument();
+
+    // Click Benchmark tab
+    const benchmarkTabBtn = screen.getByRole('button', { name: /benchmark/i });
+    fireEvent.click(benchmarkTabBtn);
+    expect(
+      screen.getByText('Empirical Cost & Quality Benchmark')
     ).toBeInTheDocument();
 
     // Click System Status tab

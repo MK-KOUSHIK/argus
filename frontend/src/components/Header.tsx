@@ -1,22 +1,25 @@
 import React from 'react';
 import { StatusBadge } from './StatusBadge';
-import { OllamaStatus } from '@/types';
-import { Shield, Sparkles, Cpu, Server, Activity } from 'lucide-react';
+import { OllamaStatus, MainLLMStatus } from '@/types';
+import { Shield, Sparkles, Cpu, Server, Activity, BarChart2 } from 'lucide-react';
 
 export interface HeaderProps {
   apiStatus?: 'online' | 'offline' | 'idle';
   ollamaStatus?: OllamaStatus | null;
-  activeTab?: 'workspace' | 'system';
-  onTabChange?: (tab: 'workspace' | 'system') => void;
+  mainLLMStatus?: MainLLMStatus | null;
+  activeTab?: 'workspace' | 'benchmark' | 'system';
+  onTabChange?: (tab: 'workspace' | 'benchmark' | 'system') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   apiStatus = 'idle',
   ollamaStatus,
+  mainLLMStatus,
   activeTab = 'workspace',
   onTabChange,
 }) => {
   const isOllamaReady = Boolean(ollamaStatus?.connected && ollamaStatus?.model_installed);
+  const isMainLLMReady = Boolean(mainLLMStatus?.is_configured);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/[0.08] bg-[#070c17]/95 backdrop-blur-md">
@@ -31,7 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-100 tracking-tight text-lg">Argus</span>
                 <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-500/20">
-                  Phase 3
+                  Phase 4
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block tracking-wide">
@@ -54,6 +57,18 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Workspace</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onTabChange('benchmark')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                  activeTab === 'benchmark'
+                    ? 'bg-cyan-500 text-navy-950 font-semibold shadow-sm'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-white/5'
+                }`}
+              >
+                <BarChart2 className="w-3.5 h-3.5" />
+                <span>Benchmark</span>
               </button>
               <button
                 type="button"
@@ -92,14 +107,24 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
 
-            {/* Main LLM Gateway Status (Marked clearly as Disconnected in Phase 3) */}
+            {/* Main LLM Gateway Status (Phase 4 Real External Provider Adapter) */}
             <div
-              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono bg-[#0c1424] border border-white/5 text-slate-400"
-              title="Cloud frontier LLM gateway scheduled for Phase 4"
+              className={`hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono border ${
+                isMainLLMReady
+                  ? 'bg-cyan-950/60 border-cyan-500/30 text-cyan-300'
+                  : 'bg-[#0c1424] border-white/5 text-slate-400'
+              }`}
+              title={
+                isMainLLMReady
+                  ? `Configured: ${mainLLMStatus?.provider} (${mainLLMStatus?.model})`
+                  : mainLLMStatus?.message || 'Set OPENAI_API_KEY in backend environment to enable external API dispatch'
+              }
             >
-              <Server className="w-3.5 h-3.5 text-slate-500" />
+              <Server className={`w-3.5 h-3.5 ${isMainLLMReady ? 'text-cyan-400' : 'text-slate-500'}`} />
               <span>Main LLM:</span>
-              <span className="text-slate-500 font-sans text-[11px]">Disconnected (Phase 4)</span>
+              <span className={`font-sans text-[11px] ${isMainLLMReady ? 'text-cyan-200 font-medium' : 'text-slate-400'}`}>
+                {isMainLLMReady ? `Ready (${mainLLMStatus?.model || 'gpt-4o'})` : 'Unconfigured'}
+              </span>
             </div>
 
             {/* FastAPI Backend Status */}
@@ -123,11 +148,12 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Local LLM: {isOllamaReady ? 'Online (qwen2.5:1.5b)' : 'Offline'}</span>
           </div>
           <div className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-            <span>Main Gateway: Standby</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${isMainLLMReady ? 'bg-cyan-400' : 'bg-slate-500'}`} />
+            <span>Main Gateway: {isMainLLMReady ? 'Ready' : 'Unconfigured'}</span>
           </div>
         </div>
       </div>
     </header>
   );
 };
+

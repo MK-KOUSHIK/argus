@@ -166,7 +166,58 @@ Returns Ollama runtime connectivity and model availability.
 
 ---
 
-## 5. Running Automated Tests
+## 5. Main LLM & Reproducible Benchmark API Reference (Phase 4)
+
+### `GET /api/main-llm/status`
+Returns external frontier LLM provider configuration and availability without exposing secrets.
+
+### `POST /api/main-llm/compare`
+Executes both **Path A (Baseline: original prompt &rarr; main LLM)** and **Path B (Optimized: original prompt &rarr; Argus local optimizer &rarr; main LLM)** using identical provider generation settings. Returns side-by-side prompt tokens, provider token usage, actual costs, and latency telemetry.
+
+**Request Body (`application/json`)**:
+```json
+{
+  "prompt": "Could you please explain how DNS works from browser query to IP resolution?",
+  "mode": "concise",
+  "target_model": "gpt-4o"
+}
+```
+
+### `GET /api/main-llm/benchmark/dataset`
+Returns the 5 version-controlled benchmark dataset cases covering simple informational, verbose/redundant, coding with constraints, structured JSON extraction, and already-concise baseline scenarios.
+
+### `POST /api/main-llm/benchmark/run`
+Executes the reproducible benchmark across the full dataset.
+- In default mock mode (`live: false`), executes deterministic evaluations with zero paid API calls.
+- In live mode (`live: true`), dispatches real API calls to OpenAI using server-side credentials (`OPENAI_API_KEY`).
+
+### `GET /api/main-llm/pricing`
+Returns the published token pricing registry for all supported models.
+
+---
+
+## 6. Running the Reproducible Benchmark CLI
+
+The benchmark can be executed directly from the terminal:
+
+### 6.1 Mock Benchmark (Default — Zero Paid Calls)
+```bash
+cd backend
+.\.venv\Scripts\python.exe -m app.benchmarks.runner
+```
+
+### 6.2 Opt-in Live Benchmark (Requires External API Key)
+Set your `OPENAI_API_KEY` in environment or `backend/.env`, then execute:
+```bash
+cd backend
+$env:OPENAI_API_KEY="sk-your-openai-api-key"
+.\.venv\Scripts\python.exe -m app.benchmarks.runner --live --model gpt-4o --output benchmark_report.json
+```
+
+---
+
+## 7. Running Automated Tests
+
 
 ### 5.1 Backend Tests
 Run the pytest test suite inside the `backend/` directory (Ollama HTTP calls are mocked in automated tests so running Ollama is not required for unit testing):

@@ -52,20 +52,73 @@ Strict architectural boundaries are maintained across the stack:
 
 ## 4. Phase-by-Phase Roadmap
 
-| Phase | Milestone | Focus Area |
-| :--- | :--- | :--- |
-| **Phase 1** | **Repository Foundation & Project Organization** | Scaffolding, design tokens, FastAPI structure, health endpoint, CI, testing harness. *(Current)* |
-| **Phase 2** | **Core Prompt Processing Pipeline** | Intent extraction, prompt token analysis, and compression rule framework. |
-| **Phase 3** | **Local LLM Integration** | Ollama integration with `Qwen2.5-1.5B-Instruct`, local inference benchmarks. |
-| **Phase 4** | **Main LLM Dispatch & Provider Adapters** | Provider clients (OpenAI, Anthropic, etc.), streaming proxying, and fallbacks. |
-| **Phase 5** | **Dashboard & Optimization Telemetry** | Interactive prompt playground, token savings metrics, cost estimation analytics. |
-| **Phase 6** | **Cloud Deployment & Production Hardening** | Dockerization, Azure Container Apps / AWS ECS deployment, and observability. |
+| Phase | Milestone | Focus Area | Status |
+| :--- | :--- | :--- | :---: |
+| **Phase 1** | **Repository Foundation & Project Organization** | Scaffolding, design tokens, FastAPI structure, health endpoint, CI, testing harness. | ✅ Complete |
+| **Phase 2** | **Core Prompt Processing Pipeline** | Intent extraction, prompt token analysis, and compression rule framework. | ✅ Complete |
+| **Phase 3** | **Local LLM Integration** | Ollama integration with `Qwen2.5-1.5B-Instruct`, local inference benchmarks. | ✅ Complete |
+| **Phase 4** | **Main LLM Dispatch & Provider Adapters** | Configurable external provider adapter (OpenAI), Baseline vs. Optimized paths, reproducible benchmark suite, token & cost telemetry. | ✅ Complete |
+| **Phase 5** | **Dashboard & Optimization Telemetry** | Interactive prompt playground, token savings metrics, cost estimation analytics. | ⏳ Planned |
+| **Phase 6** | **Cloud Deployment & Production Hardening** | Dockerization, Azure Container Apps / AWS ECS deployment, and observability. | ⏳ Planned |
 
 ---
 
-## 5. Technology Stack Reference
+## 5. Phase 4 Architecture: Main-LLM Integration & Reproducible Benchmark
+
+Phase 4 bridges Argus's local neural optimization pipeline with real external frontier LLM APIs and introduces an empirical, reproducible benchmark.
+
+```mermaid
+graph TD
+    Client[Client / Web UI / Benchmark Runner] -->|Raw Prompt| Router[FastAPI Router]
+
+    subgraph Path A: Baseline Direct Execution
+        Router -->|1A. Original Prompt| TokenizerA[Tokenizer Service<br/>tiktoken o200k_base]
+        TokenizerA --> ProviderA[Main LLM Provider Adapter<br/>OpenAI gpt-4o]
+        ProviderA --> ResponseA[Baseline Response + Token Usage]
+    end
+
+    subgraph Path B: Optimized Execution
+        Router -->|1B. Original Prompt| LocalOpt[Local Argus Optimizer<br/>Ollama Qwen2.5-1.5B]
+        LocalOpt --> Rewritten[Verified Rewrite / Preserved]
+        Rewritten --> TokenizerB[Tokenizer Service<br/>tiktoken o200k_base]
+        TokenizerB --> ProviderB[Main LLM Provider Adapter<br/>OpenAI gpt-4o]
+        ProviderB --> ResponseB[Optimized Response + Token Usage]
+    end
+
+    ResponseA --> Evaluator[Automated Constraint & Quality Evaluator]
+    ResponseB --> Evaluator
+    Evaluator --> CostEngine[Cost & Telemetry Engine<br/>Estimated vs. Actual Cost]
+    CostEngine --> Client
+```
+
+### Key Architectural Tenets of Phase 4:
+
+1. **Provider Adapter Abstraction**:
+   - `BaseLLMProvider`: Common interface defining `generate()`, `is_configured()`, and `get_status()`.
+   - `OpenAIProvider`: Production-grade HTTP adapter using official OpenAI Chat Completions API with server-side environment secrets.
+   - `MockLLMProvider`: Deterministic adapter for automated CI testing guaranteeing zero paid external API calls.
+
+2. **Zero Client Credential Exposure**:
+   - API keys (`OPENAI_API_KEY`) remain strictly on the backend.
+   - Provider status endpoints (`GET /api/main-llm/status`) report configuration state without ever exposing credentials.
+
+3. **Strict Cost & Token Distinction**:
+   - **Provider Tokenizer Counting**: Uses official BPE encodings (`tiktoken` `o200k_base` for `gpt-4o` and `gpt-4o-mini`) rather than crude heuristic estimations when measuring prompt tokens.
+   - **Estimated vs. Actual Costs**: Pre-execution estimates are explicitly tagged `is_estimated=True`; costs derived from provider-reported usage numbers are tagged `is_estimated=False`. Never conflated.
+
+4. **Automated Quality & Safety Verification**:
+   - `BenchmarkEvaluator`: Programmatically verifies that:
+     - Negative constraints (e.g., `"do not use pandas"`) are respected in LLM outputs.
+     - Critical entities, filenames, and output keys are strictly retained.
+     - Output schemas (e.g. valid JSON parseability) are preserved.
+
+---
+
+## 6. Technology Stack Reference
 
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS v4, Lucide Icons, Vitest.
-- **Backend**: Python 3.10+, FastAPI, Pydantic v2, Pydantic-Settings, Uvicorn, Pytest.
+- **Backend**: Python 3.10+, FastAPI, Pydantic v2, Pydantic-Settings, Uvicorn, HTTPX, Tiktoken, Pytest.
 - **Local Inference**: Ollama with `Qwen2.5-1.5B-Instruct`.
+- **Frontier LLM Provider**: OpenAI Chat Completions API (`gpt-4o`, `gpt-4o-mini`).
 - **Target Deployment**: Docker, Azure Container Apps / AWS ECS, CloudFront / Azure Static Web Apps.
+
