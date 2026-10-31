@@ -8,9 +8,6 @@ import {
   OllamaStatus,
   OptimizationResult,
   OptimizeRequestPayload,
-  MainLLMStatus,
-  ComparisonResult,
-  BenchmarkReport,
 } from '@/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
@@ -163,108 +160,6 @@ export class ApiService {
       timestamp: data.timestamp,
       isSimulated: false,
     };
-  }
-
-  /**
-   * Main LLM Provider status endpoint (Phase 4)
-   */
-  async getMainLLMStatus(): Promise<MainLLMStatus> {
-    try {
-      const response = await fetch(`${this.baseUrl}/main-llm/status`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-      });
-      if (!response.ok) {
-        return {
-          provider: 'openai',
-          model: 'gpt-4o',
-          is_configured: false,
-          base_url: 'https://api.openai.com/v1',
-          message: 'Unable to check provider status',
-        };
-      }
-      return response.json();
-    } catch {
-      return {
-        provider: 'openai',
-        model: 'gpt-4o',
-        is_configured: false,
-        base_url: 'https://api.openai.com/v1',
-        message: 'Backend service offline',
-      };
-    }
-  }
-
-  /**
-   * Compare Baseline vs. Optimized paths on Main LLM (Phase 4)
-   */
-  async compareMainLLM(payload: {
-    prompt: string;
-    mode: string;
-    target_model: string;
-    temperature?: number;
-    max_tokens?: number;
-  }): Promise<ComparisonResult> {
-    const response = await fetch(`${this.baseUrl}/main-llm/compare`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      let msg = `Comparison failed (HTTP ${response.status})`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error?.message) msg = errJson.error.message;
-        else if (errJson?.detail) msg = errJson.detail;
-      } catch {}
-      throw new Error(msg);
-    }
-
-    return response.json();
-  }
-
-  /**
-   * Get version-controlled benchmark dataset (Phase 4)
-   */
-  async getBenchmarkDataset(): Promise<any[]> {
-    const response = await fetch(`${this.baseUrl}/main-llm/benchmark/dataset`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to load benchmark dataset (HTTP ${response.status})`);
-    }
-    return response.json();
-  }
-
-  /**
-   * Run reproducible benchmark suite (Phase 4)
-   */
-  async runBenchmark(live: boolean = false, model: string = 'gpt-4o'): Promise<BenchmarkReport> {
-    const response = await fetch(`${this.baseUrl}/main-llm/benchmark/run`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({ live, model }),
-    });
-
-    if (!response.ok) {
-      let msg = `Benchmark execution failed (HTTP ${response.status})`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error?.message) msg = errJson.error.message;
-        else if (errJson?.detail) msg = errJson.detail;
-      } catch {}
-      throw new Error(msg);
-    }
-
-    return response.json();
   }
 }
 

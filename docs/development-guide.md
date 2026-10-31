@@ -166,7 +166,7 @@ Returns Ollama runtime connectivity and model availability.
 
 ---
 
-## 5. Main LLM & Reproducible Benchmark API Reference (Phase 4)
+## 5. Main LLM Integration & Comparative Execution API Reference (Phase 4)
 
 ### `GET /api/main-llm/status`
 Returns external frontier LLM provider configuration and availability without exposing secrets.
@@ -179,44 +179,16 @@ Executes both **Path A (Baseline: original prompt &rarr; main LLM)** and **Path 
 {
   "prompt": "Could you please explain how DNS works from browser query to IP resolution?",
   "mode": "concise",
-  "target_model": "gpt-4o"
+  "target_model": "gemini-1.5-flash"
 }
 ```
-
-### `GET /api/main-llm/benchmark/dataset`
-Returns the 5 version-controlled benchmark dataset cases covering simple informational, verbose/redundant, coding with constraints, structured JSON extraction, and already-concise baseline scenarios.
-
-### `POST /api/main-llm/benchmark/run`
-Executes the reproducible benchmark across the full dataset.
-- In default mock mode (`live: false`), executes deterministic evaluations with zero paid API calls.
-- In live mode (`live: true`), dispatches real API calls to OpenAI using server-side credentials (`OPENAI_API_KEY`).
 
 ### `GET /api/main-llm/pricing`
 Returns the published token pricing registry for all supported models.
 
 ---
 
-## 6. Running the Reproducible Benchmark CLI
-
-The benchmark can be executed directly from the terminal:
-
-### 6.1 Mock Benchmark (Default — Zero Paid Calls)
-```bash
-cd backend
-.\.venv\Scripts\python.exe -m app.benchmarks.runner
-```
-
-### 6.2 Opt-in Live Benchmark (Requires External API Key)
-Set your `OPENAI_API_KEY` in environment or `backend/.env`, then execute:
-```bash
-cd backend
-$env:OPENAI_API_KEY="sk-your-openai-api-key"
-.\.venv\Scripts\python.exe -m app.benchmarks.runner --live --model gpt-4o --output benchmark_report.json
-```
-
----
-
-## 7. Running Automated Tests
+## 6. Running Automated Tests
 
 
 ### 5.1 Backend Tests

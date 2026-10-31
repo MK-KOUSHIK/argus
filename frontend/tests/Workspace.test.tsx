@@ -85,7 +85,7 @@ describe('Argus Workspace Dashboard (Phase 3)', () => {
     fireEvent.click(conciseRadio);
     expect(conciseRadio).toBeChecked();
 
-    const modelSelect = screen.getByLabelText(/Target Main LLM/i) as HTMLSelectElement;
+    const modelSelect = screen.getByLabelText(/Target Model/i) as HTMLSelectElement;
     fireEvent.change(modelSelect, { target: { value: 'claude-3-5-sonnet' } });
     expect(modelSelect.value).toBe('claude-3-5-sonnet');
   });
@@ -127,7 +127,7 @@ describe('Argus Workspace Dashboard (Phase 3)', () => {
     expect(optimizeSpy).toHaveBeenCalledWith({
       prompt: expect.stringContaining('expert principal software engineer'),
       mode: 'balanced',
-      target_model: 'gpt-4o',
+      target_model: 'gemini-1-5-flash',
     });
 
     // Check latency and model

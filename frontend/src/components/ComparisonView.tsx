@@ -201,8 +201,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
 
       {/* Token Approximation Notice */}
       <div className="text-[11px] text-slate-500 italic px-1">
-        * Token counts are approximations based on standard ~4 characters per token heuristics. Actual
-        tokenization and cost savings are verified upon provider dispatch in Phase 4.
+        * Token counts are approximations based on standard ~4 characters per token heuristics.
       </div>
     </div>
   );

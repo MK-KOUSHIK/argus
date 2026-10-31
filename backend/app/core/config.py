@@ -7,16 +7,19 @@ Enforces Part A Zero-Hardcoding standard:
 """
 
 import json
+from pathlib import Path
 from typing import List, Optional, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables and defaults."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", str(BACKEND_DIR / ".env")),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -45,15 +48,18 @@ class Settings(BaseSettings):
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0
     MAX_VALIDATION_RETRY_ATTEMPTS: int = 1
 
-    # Main LLM Provider Settings (Phase 4)
-    MAIN_LLM_PROVIDER: str = "openai"
-    OPENAI_API_KEY: Optional[str] = None
-    OPENAI_API_BASE: str = "https://api.openai.com/v1"
-    MAIN_LLM_MODEL: str = "gpt-4o"
+    # Main LLM Provider Settings (Phase 4 - Google Gemini as Default)
+    MAIN_LLM_PROVIDER: str = "gemini"
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_API_BASE: str = "https://generativelanguage.googleapis.com/v1beta"
+    MAIN_LLM_MODEL: str = "gemini-1.5-flash"
     MAIN_LLM_TIMEOUT_SECONDS: float = 60.0
     MAIN_LLM_TEMPERATURE: float = 0.2
     MAIN_LLM_MAX_TOKENS: int = 1500
-    LIVE_BENCHMARK_ENABLED: bool = False
+
+    # Optional / Alternative Providers (OpenAI)
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_API_BASE: str = "https://api.openai.com/v1"
 
     CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:5173",
@@ -75,3 +81,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def reload_settings() -> Settings:
+    """Reload settings from environment and .env files."""
+    global settings
+    settings = Settings()
+    return settings

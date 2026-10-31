@@ -30,7 +30,7 @@ export interface WorkspacePageProps {
 export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) => {
   const [rawPrompt, setRawPrompt] = useState<string>('');
   const [mode, setMode] = useState<OptimizationMode>('balanced');
-  const [targetModel, setTargetModel] = useState<TargetModel>('gpt-4o');
+  const [targetModel, setTargetModel] = useState<TargetModel>('gemini-1-5-flash');
   const [status, setStatus] = useState<OptimizationStatus>('idle');
   const [result, setResult] = useState<OptimizationResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -110,9 +110,8 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
           </div>
         </div>
         <p className="text-xs sm:text-sm text-slate-400 max-w-3xl leading-relaxed">
-          Prepare, compress, and refine prompts using local neural inference before dispatching to
-          frontier LLMs. Select an optimization profile, evaluate token reduction, and inspect
-          side-by-side output.
+          Prepare, compress, and refine prompts using local neural inference before downstream execution.
+          Select an optimization profile, evaluate token reduction, and inspect side-by-side prompt diffs.
         </p>
       </section>
 

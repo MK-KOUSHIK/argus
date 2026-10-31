@@ -32,9 +32,16 @@ export function estimateTokens(text: string): TokenEstimation {
 }
 
 /**
- * Illustrative Target Model Options (Phase 4 Gateway Options)
+ * Illustrative Target Model Options
  */
 export const ILLUSTRATIVE_MODELS: ModelOption[] = [
+  {
+    id: 'gemini-1-5-flash',
+    name: 'Gemini 1.5 Flash',
+    provider: 'Google Gemini',
+    contextWindow: '1M',
+    isIllustrative: true,
+  },
   {
     id: 'gpt-4o',
     name: 'GPT-4o',

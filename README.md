@@ -392,55 +392,32 @@ npm run build
 | **Phase 3.2** | **Semantic Preservation & Zero-Hardcoding** | Action/deliverable intent extraction, anti-turn-reversal validation, corrective retry/fallback, generalized taxonomies, centralized configuration. | ✅ **Complete** |
 | **Phase 3.2.1** | **Required-Operation Preservation Fix** | Multi-clause operation extraction, computation/transformation preservation validation, concept synonym mapping, retry/fallback integration. | ✅ **Complete** |
 | **Phase 3.2.2** | **Strategy Accuracy, Minimal Rewriting & Honest Metrics** | Profile refinement, unsupported addition prevention, accurate applied strategy metadata, consistent character delta (`final - original`), honest status badges. | ✅ **Complete** |
-| **Phase 4** | **Main LLM Dispatch & Provider Adapters** | Configurable external provider adapter (OpenAI), Baseline vs. Optimized paths, reproducible benchmark suite, token & cost telemetry. | ✅ **Complete** |
+| **Phase 4** | **Main LLM Dispatch & Provider Integration** | Configurable external provider adapter (Google Gemini default), Baseline vs. Optimized comparative execution, token & cost telemetry. | ✅ **Complete** |
 | **Phase 5** | **Dashboard & Optimization Telemetry** | Interactive prompt optimization playground, token savings metrics, cost estimation analytics. | ⏳ Planned |
 | **Phase 6** | **Cloud Deployment & Production Hardening** | Dockerization, Azure Container Apps / AWS ECS deployment, and observability. | ⏳ Planned |
 
 ---
 
-## 📊 Main-LLM Integration & Reproducible Benchmark (Phase 4)
+## 📊 Main-LLM Integration & Comparative Execution (Phase 4)
 
-Phase 4 introduces an empirical, reproducible benchmark measuring whether Argus's local prompt optimization reduces external LLM inference costs without degrading answer accuracy or violating explicit constraints.
+Phase 4 bridges Argus's local neural prompt optimization pipeline with real external frontier LLM APIs (defaulting to Google Gemini) and provides real-time comparative execution telemetry to measure input token reduction, cost savings, and latency overhead.
 
 ### 1. Main-LLM Provider Integration
-- **Configurable Provider Adapter**: Supports external LLMs using official HTTP API standards (OpenAI `gpt-4o` and `gpt-4o-mini`).
-- **Zero Client Credential Exposure**: API keys (`OPENAI_API_KEY`) are read exclusively from server-side environment variables and never exposed to the frontend, logs, test fixtures, or Git.
+- **Configurable Provider Adapter**: Supports external LLMs using official HTTP API standards (Google Gemini `gemini-1.5-flash`, `gemini-1.5-pro`, `gemini-2.0-flash` as default, with optional OpenAI support).
+- **Zero Client Credential Exposure**: API keys (`GEMINI_API_KEY`) are read exclusively from server-side environment variables and never exposed to the frontend, logs, test fixtures, or Git.
 - **Local Ollama Optimization Intact**: Prompt rewriting continues to be handled locally by Ollama (`qwen2.5:1.5b`) regardless of whether external credentials are set.
 - **Strict Error Handling**: Detailed, typed exceptions for missing credentials (HTTP 400), rate limits (HTTP 429), timeouts (HTTP 504), and provider failures (HTTP 502).
 
-### 2. Baseline vs. Optimized Execution Pipeline
-Argus supports two comparable paths using the identical target model and generation settings (`temperature=0.2`, `max_tokens=1500`):
+### 2. Baseline vs. Optimized Comparative Execution
+Argus supports two comparable paths using identical target models and generation settings:
 - **Path A (Baseline)**: Original prompt &rarr; Main LLM.
 - **Path B (Optimized)**: Original prompt &rarr; Local Argus Optimizer &rarr; Main LLM.
 
-Both prompts and their individual token and cost footprints are preserved and measured separately.
-
-### 3. Reproducible Benchmark Dataset (5 Scenarios)
-A version-controlled benchmark dataset (`backend/app/benchmarks/dataset.json`) covers:
-1. **Simple Informational**: Direct queries requiring concise answers.
-2. **Verbose / Redundant**: Prompts loaded with conversational filler and pleasantries.
-3. **Coding with Explicit Constraints**: Tasks with prohibitions (e.g. `"do not use pandas"`), filenames, and required outputs.
-4. **Structured JSON Extraction**: Schema extraction demanding strict JSON parseability and required keys.
-5. **Concise Baseline (Preserve)**: Already-effective prompts where Argus verifies that no optimization should be applied (`strategy: preserve`).
-
-### 4. Empirical Benchmark Measurements
-Running the reproducible benchmark against real local Ollama inference produces:
-- **Test Cases Passed**: 5 of 5 (100.0%)
-- **Prompt Token Reduction**: **33.46%** (254 &rarr; 169 tokens)
-- **Total Cost Reduction**: **6.78%** ($0.003135 &rarr; $0.002923)
-- **Constraint Retention Rate**: **100.0%** (zero negative constraint violations or key drops)
-- **Average Optimizer Latency**: ~373 ms overhead
-
-### 5. Running the Benchmark CLI
-```bash
-# Run safe mock benchmark (zero paid API calls):
-cd backend
-.\.venv\Scripts\python.exe -m app.benchmarks.runner
-
-# Run opt-in live benchmark with real OpenAI API:
-$env:OPENAI_API_KEY="sk-your-openai-api-key"
-.\.venv\Scripts\python.exe -m app.benchmarks.runner --live --model gpt-4o --output benchmark_report.json
-```
+Both prompts and their individual token and cost footprints are measured and compared side-by-side in the Workspace:
+- **Prompt Token Savings**: Reduction in input tokens passed to the external frontier LLM.
+- **Dollar Cost Reduction**: Real-time dollar savings calculated from published model pricing registries.
+- **Response Comparison**: Side-by-side inspection of generated responses to verify semantic fidelity and answer completeness.
+- **Latency Telemetry**: Provider LLM generation latency vs. local optimizer pipeline latency.
 
 ---
 
