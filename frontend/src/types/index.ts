@@ -52,9 +52,11 @@ export type OptimizationOutcome = 'validated_rewrite' | 'unchanged_original' | '
 export type LengthResult = 'compressed' | 'expanded' | 'unchanged';
 
 export type TargetModel =
+  | 'gemini-1-5-flash'
+  | 'gemini-1-5-pro'
+  | 'gemini-2.0-flash'
   | 'gpt-4o'
   | 'claude-3-5-sonnet'
-  | 'gemini-1-5-pro'
   | 'deepseek-v3';
 
 export interface ModelOption {
@@ -127,3 +129,4 @@ export interface OllamaStatus {
   available_models: string[];
   error?: string | null;
 }
+

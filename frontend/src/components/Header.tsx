@@ -1,7 +1,7 @@
 import React from 'react';
 import { StatusBadge } from './StatusBadge';
 import { OllamaStatus } from '@/types';
-import { Shield, Sparkles, Cpu, Server, Activity } from 'lucide-react';
+import { Shield, Sparkles, Cpu, Activity } from 'lucide-react';
 
 export interface HeaderProps {
   apiStatus?: 'online' | 'offline' | 'idle';
@@ -31,7 +31,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-100 tracking-tight text-lg">Argus</span>
                 <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-500/20">
-                  Phase 3
+                  Optimizer
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block tracking-wide">
@@ -72,7 +72,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Connection Indicators */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Real Local Optimizer Status (Phase 3 Active Connection) */}
+            {/* Real Local Optimizer Status */}
             <div
               className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono border ${
                 isOllamaReady
@@ -90,16 +90,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span className={`font-sans text-[11px] ${isOllamaReady ? 'text-cyan-200 font-medium' : 'text-amber-400/90'}`}>
                 {isOllamaReady ? `Connected (${ollamaStatus?.model || 'qwen2.5:1.5b'})` : 'Offline / Standby'}
               </span>
-            </div>
-
-            {/* Main LLM Gateway Status (Marked clearly as Disconnected in Phase 3) */}
-            <div
-              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono bg-[#0c1424] border border-white/5 text-slate-400"
-              title="Cloud frontier LLM gateway scheduled for Phase 4"
-            >
-              <Server className="w-3.5 h-3.5 text-slate-500" />
-              <span>Main LLM:</span>
-              <span className="text-slate-500 font-sans text-[11px]">Disconnected (Phase 4)</span>
             </div>
 
             {/* FastAPI Backend Status */}
@@ -123,8 +113,8 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Local LLM: {isOllamaReady ? 'Online (qwen2.5:1.5b)' : 'Offline'}</span>
           </div>
           <div className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-            <span>Main Gateway: Standby</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${apiStatus === 'online' ? 'bg-cyan-400' : 'bg-amber-400'}`} />
+            <span>Backend: {apiStatus}</span>
           </div>
         </div>
       </div>

@@ -120,10 +120,10 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label htmlFor="target-model-select" className="text-xs font-semibold text-slate-200">
-                Target Main LLM (Illustrative)
+                Target Model (Illustrative)
               </label>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 bg-[#080d19] px-1.5 py-0.5 rounded border border-white/5">
-                Phase 4 Gateway
+              <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 bg-[#080d19] px-1.5 py-0.5 rounded border border-white/5">
+                Model Profile
               </span>
             </div>
 
@@ -141,8 +141,7 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
             </select>
 
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Select the intended destination model. In Phase 4, Argus will tailor the compression
-              dialect to the specific frontier model's tokenizer.
+              Select the intended destination model for token estimation and prompt structure tuning.
             </p>
           </div>
 

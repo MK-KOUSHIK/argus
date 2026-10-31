@@ -392,9 +392,32 @@ npm run build
 | **Phase 3.2** | **Semantic Preservation & Zero-Hardcoding** | Action/deliverable intent extraction, anti-turn-reversal validation, corrective retry/fallback, generalized taxonomies, centralized configuration. | ✅ **Complete** |
 | **Phase 3.2.1** | **Required-Operation Preservation Fix** | Multi-clause operation extraction, computation/transformation preservation validation, concept synonym mapping, retry/fallback integration. | ✅ **Complete** |
 | **Phase 3.2.2** | **Strategy Accuracy, Minimal Rewriting & Honest Metrics** | Profile refinement, unsupported addition prevention, accurate applied strategy metadata, consistent character delta (`final - original`), honest status badges. | ✅ **Complete** |
-| **Phase 4** | **Main LLM Dispatch & Provider Adapters** | Provider client integrations (OpenAI, Anthropic, Gemini), stream forwarding, and fallback handlers. | ⏳ Planned |
+| **Phase 4** | **Main LLM Dispatch & Provider Integration** | Configurable external provider adapter (Google Gemini default), Baseline vs. Optimized comparative execution, token & cost telemetry. | ✅ **Complete** |
 | **Phase 5** | **Dashboard & Optimization Telemetry** | Interactive prompt optimization playground, token savings metrics, cost estimation analytics. | ⏳ Planned |
 | **Phase 6** | **Cloud Deployment & Production Hardening** | Dockerization, Azure Container Apps / AWS ECS deployment, and observability. | ⏳ Planned |
+
+---
+
+## 📊 Main-LLM Integration & Comparative Execution (Phase 4)
+
+Phase 4 bridges Argus's local neural prompt optimization pipeline with real external frontier LLM APIs (defaulting to Google Gemini) and provides real-time comparative execution telemetry to measure input token reduction, cost savings, and latency overhead.
+
+### 1. Main-LLM Provider Integration
+- **Configurable Provider Adapter**: Supports external LLMs using official HTTP API standards (Google Gemini `gemini-1.5-flash`, `gemini-1.5-pro`, `gemini-2.0-flash` as default, with optional OpenAI support).
+- **Zero Client Credential Exposure**: API keys (`GEMINI_API_KEY`) are read exclusively from server-side environment variables and never exposed to the frontend, logs, test fixtures, or Git.
+- **Local Ollama Optimization Intact**: Prompt rewriting continues to be handled locally by Ollama (`qwen2.5:1.5b`) regardless of whether external credentials are set.
+- **Strict Error Handling**: Detailed, typed exceptions for missing credentials (HTTP 400), rate limits (HTTP 429), timeouts (HTTP 504), and provider failures (HTTP 502).
+
+### 2. Baseline vs. Optimized Comparative Execution
+Argus supports two comparable paths using identical target models and generation settings:
+- **Path A (Baseline)**: Original prompt &rarr; Main LLM.
+- **Path B (Optimized)**: Original prompt &rarr; Local Argus Optimizer &rarr; Main LLM.
+
+Both prompts and their individual token and cost footprints are measured and compared side-by-side in the Workspace:
+- **Prompt Token Savings**: Reduction in input tokens passed to the external frontier LLM.
+- **Dollar Cost Reduction**: Real-time dollar savings calculated from published model pricing registries.
+- **Response Comparison**: Side-by-side inspection of generated responses to verify semantic fidelity and answer completeness.
+- **Latency Telemetry**: Provider LLM generation latency vs. local optimizer pipeline latency.
 
 ---
 

@@ -31,7 +31,7 @@ class TokenEstimation(BaseModel):
 
     char_count: int = Field(description="Total character count")
     estimated_tokens: int = Field(
-        description="Estimated token count (~4 characters per token heuristic)"
+        description="Estimated token count (~4 characters per token )"
     )
 
 
@@ -49,7 +49,7 @@ class OptimizeRequest(BaseModel):
     )
     target_model: str = Field(
         default="gpt-4o",
-        description="Target destination frontier model (illustrative / Phase 4 gateway)",
+        description="Target destination model profile for illustrative token estimation",
     )
 
     @field_validator("prompt")

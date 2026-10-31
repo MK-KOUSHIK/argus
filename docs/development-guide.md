@@ -166,7 +166,30 @@ Returns Ollama runtime connectivity and model availability.
 
 ---
 
-## 5. Running Automated Tests
+## 5. Main LLM Integration & Comparative Execution API Reference (Phase 4)
+
+### `GET /api/main-llm/status`
+Returns external frontier LLM provider configuration and availability without exposing secrets.
+
+### `POST /api/main-llm/compare`
+Executes both **Path A (Baseline: original prompt &rarr; main LLM)** and **Path B (Optimized: original prompt &rarr; Argus local optimizer &rarr; main LLM)** using identical provider generation settings. Returns side-by-side prompt tokens, provider token usage, actual costs, and latency telemetry.
+
+**Request Body (`application/json`)**:
+```json
+{
+  "prompt": "Could you please explain how DNS works from browser query to IP resolution?",
+  "mode": "concise",
+  "target_model": "gemini-1.5-flash"
+}
+```
+
+### `GET /api/main-llm/pricing`
+Returns the published token pricing registry for all supported models.
+
+---
+
+## 6. Running Automated Tests
+
 
 ### 5.1 Backend Tests
 Run the pytest test suite inside the `backend/` directory (Ollama HTTP calls are mocked in automated tests so running Ollama is not required for unit testing):

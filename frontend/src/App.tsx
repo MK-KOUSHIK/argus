@@ -36,7 +36,7 @@ export const App: React.FC = () => {
             <span className="text-slate-400">Understand. Optimize. Execute.</span>
           </div>
           <div className="flex items-center gap-4 font-mono text-[11px] text-slate-400">
-            <span>Phase 3: Real Local Inference</span>
+            <span>Prompt Optimization Middleware</span>
             <span className="text-slate-600">&bull;</span>
             <span className={isOllamaReady ? 'text-cyan-400' : 'text-slate-400'}>
               Local LLM: {isOllamaReady ? `Active (${ollamaStatus?.model})` : 'Offline'}

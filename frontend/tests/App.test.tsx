@@ -3,20 +3,19 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import App from '../src/App';
 
 describe('Argus Application Navigation & Smoke Test', () => {
-  it('renders Argus brand header with tagline and Phase 3 badge', () => {
+  it('renders Argus brand header with tagline and Optimizer badge', () => {
     render(<App />);
     expect(screen.getAllByText('Argus').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Phase 3')).toBeInTheDocument();
+    expect(screen.getByText('Optimizer')).toBeInTheDocument();
     expect(
       screen.getAllByText(/Understand\. Optimize\. Execute\./i).length
     ).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders status indicators for local LLM and main LLM gateway', () => {
+  it('renders status indicators for local LLM and backend API', () => {
     render(<App />);
     expect(screen.getAllByText(/Local LLM:/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/Main LLM:/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/Disconnected \(Phase 4\)/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/API/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it('switches between Workspace and System Status tabs', () => {
@@ -30,9 +29,9 @@ describe('Argus Application Navigation & Smoke Test', () => {
     const systemTabBtn = screen.getByRole('button', { name: /system status/i });
     fireEvent.click(systemTabBtn);
 
-    // Verifies Phase 1 system overview is displayed with health check button
+    // Verifies system status overview is displayed with health check button
     expect(
-      screen.getByText('Cost-Efficient LLM Inference Architecture')
+      screen.getByText('System Status & Provider Gateway')
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /verify backend health/i })
