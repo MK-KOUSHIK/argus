@@ -78,6 +78,16 @@ class Settings(BaseSettings):
         "http://localhost:3000",
     ]
 
+    @field_validator("OLLAMA_MAX_NUM_CTX")
+    @classmethod
+    def validate_max_num_ctx(cls, v: int, info) -> int:
+        num_ctx = info.data.get("OLLAMA_NUM_CTX", 4096)
+        if v < num_ctx:
+            raise ValueError(
+                f"OLLAMA_MAX_NUM_CTX ({v}) must be greater than or equal to OLLAMA_NUM_CTX ({num_ctx})"
+            )
+        return v
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:

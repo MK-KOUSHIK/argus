@@ -241,8 +241,9 @@ class OllamaService:
         """Invoke Ollama and retain native runtime telemetry when provided."""
 
         url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+        formatted_prompt = f"Original prompt to optimize:\n\n{prompt}"
         estimated_input_tokens = cls.estimate_tokens(
-            f"{system_instruction}\n{prompt}"
+            f"{system_instruction}\n{formatted_prompt}"
         ).estimated_tokens
         required_context = (
             estimated_input_tokens
@@ -264,7 +265,7 @@ class OllamaService:
         payload = {
             "model": settings.OLLAMA_MODEL,
             "system": system_instruction,
-            "prompt": f"Original prompt to optimize:\n\n{prompt}",
+            "prompt": formatted_prompt,
             "stream": False,
             "options": {
                 "temperature": settings.OLLAMA_TEMPERATURE,
@@ -349,7 +350,7 @@ class OllamaService:
                 and eval_duration > 0 else None
             ),
             "native_metrics_available": any(
-                key in data for key in (
+                data.get(key) is not None for key in (
                     "load_duration", "prompt_eval_count", "prompt_eval_duration",
                     "eval_count", "eval_duration"
                 )
