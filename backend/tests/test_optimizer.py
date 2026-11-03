@@ -19,6 +19,11 @@ MOCK_OLLAMA_RESPONSE = {
     "created_at": "2026-10-16T17:00:00Z",
     "response": "Review Python code for SQL injection and memory leaks. Provide refactored code.",
     "done": True,
+    "load_duration": 1000000,
+    "prompt_eval_count": 120,
+    "prompt_eval_duration": 200000000,
+    "eval_count": 40,
+    "eval_duration": 400000000,
 }
 
 
@@ -77,6 +82,13 @@ async def test_optimize_balanced_profile_success(async_client: AsyncClient):
         assert data["token_reduction_percent"] > 0
         assert "execution_time_ms" in data
         assert data["model"] == "qwen2.5:1.5b"
+        assert data["inference_telemetry"]["native_metrics_available"] is True
+        call_metrics = data["inference_telemetry"]["calls"][0]
+        assert call_metrics["prompt_eval_count"] == 120
+        assert call_metrics["eval_count"] == 40
+        assert call_metrics["generation_tokens_per_second"] == 100.0
+        assert call_metrics["selected_num_ctx"] >= 4096
+        assert data["kv_runtime_policy"]["server_settings_verified"] is False
 
 
 @pytest.mark.asyncio
