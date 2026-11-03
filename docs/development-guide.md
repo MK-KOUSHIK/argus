@@ -323,3 +323,20 @@ npm.cmd run build
 
 3. **Git Hygiene**:
    - Never commit `.env` files, model weights, virtual environments (`.venv`), or build artifacts (`dist/`).
+
+
+## Ollama KV Cache and Request Budget Settings
+
+The backend environment example documents these controls:
+
+| Setting | Purpose |
+|---|---|
+| `OLLAMA_KV_CACHE_TYPE` | Desired Ollama server KV-cache type (for example, `q8_0`); configure in the Ollama server environment |
+| `OLLAMA_FLASH_ATTENTION` | Desired Flash Attention server setting; configure in the Ollama server environment |
+| `OLLAMA_NUM_CTX` | Baseline per-request context size |
+| `OLLAMA_MAX_NUM_CTX` | Hard upper bound for Argus's estimated context budget |
+| `OLLAMA_NUM_PREDICT` | Per-request output-token limit |
+| `OLLAMA_CONTEXT_RESERVE_TOKENS` | Context headroom reserved beyond estimated input and output |
+| `OLLAMA_MAX_CONCURRENT_REQUESTS` | Maximum concurrent inference calls admitted by this backend process |
+
+Changing KV cache type or Flash Attention requires configuring and restarting the Ollama server. The backend cannot mutate an already-running Ollama process. See [KV cache optimization audit](kv-cache-optimization-audit.md).

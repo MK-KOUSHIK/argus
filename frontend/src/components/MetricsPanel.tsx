@@ -222,6 +222,39 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ result }) => {
         </div>
       </div>
 
+      {/* Runtime measurements are native Ollama counters when available. */}
+      <div className="rounded-xl bg-[#080d19] border border-white/5 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-slate-200">Inference runtime telemetry</div>
+          <span className="text-[10px] font-mono text-slate-500">
+            {result.inferenceTelemetry?.native_metrics_available ? 'Ollama-reported' : 'Native counters unavailable'}
+          </span>
+        </div>
+        {result.inferenceTelemetry?.calls?.length ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {result.inferenceTelemetry.calls.map((call, index) => (
+              <div key={index} className="space-y-1">
+                <div className="text-[10px] text-slate-500">Call {index + 1} · queue wait</div>
+                <div className="text-sm font-mono text-slate-200">{call.queue_wait_ms} ms</div>
+                <div className="text-[10px] text-slate-500">Prompt tokens: {call.prompt_eval_count ?? 'n/a'}</div>
+                <div className="text-[10px] text-slate-500">Prompt eval: {call.prompt_eval_duration_ns != null ? (call.prompt_eval_duration_ns / 1e6).toFixed(1) + ' ms' : 'n/a'}</div>
+                <div className="text-[10px] text-slate-500">Generated tokens: {call.eval_count ?? 'n/a'}</div>
+                <div className="text-[10px] text-slate-500">Decode: {call.generation_tokens_per_second != null ? call.generation_tokens_per_second + ' tok/s' : 'n/a'}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-slate-500">This response did not include native Ollama token/timing counters. The heuristic token estimates above are not runtime KV-cache measurements.</p>
+        )}
+        {result.kvRuntimePolicy && (
+          <div className="border-t border-white/5 pt-2 text-[10px] text-slate-500 space-y-1">
+            <div>Selected context: {result.inferenceTelemetry?.calls?.map((call) => call.selected_num_ctx).filter(Boolean).join(', ') || 'not available'} tokens · output limit: {result.kvRuntimePolicy.requested_num_predict}</div>
+            <div>Desired KV type: {result.kvRuntimePolicy.configured_kv_cache_type} · Flash Attention: {result.kvRuntimePolicy.configured_flash_attention ? 'enabled in desired server config' : 'not requested'}</div>
+            <div>Ollama server settings verified: {result.kvRuntimePolicy.server_settings_verified ? 'yes' : 'no — configure and restart Ollama separately'}</div>
+          </div>
+        )}
+      </div>
+
       {/* Explicit Constraints & Preserved Guardrails */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pt-1 border-t border-white/5">
         <div className="space-y-2 flex-1">

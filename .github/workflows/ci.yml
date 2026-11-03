@@ -2,7 +2,7 @@ name: Argus CI Pipeline
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, develop, phase-4-main-llm-benchmark, kv-cache-runtime-optimization]
   pull_request:
     branches: [main, master, develop]
 

@@ -446,3 +446,16 @@ For local setup instructions, coding conventions, testing guidelines, and troubl
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+
+## KV Cache and Inference Runtime Optimization
+
+The `kv-cache-runtime-optimization` development branch adds configurable Ollama request budgets and exposes native inference telemetry when the Ollama runtime returns it.
+
+- Per-request `num_ctx` is selected from a heuristic estimate of the system instruction and prompt, plus reserved output and safety budgets. It is bounded by `OLLAMA_MAX_NUM_CTX`; oversized requests are rejected rather than silently truncated.
+- `num_predict` and an Argus-side concurrent inference ceiling are configurable.
+- Native Ollama prompt-evaluation and generation counters/durations are passed through as runtime telemetry. They are distinct from Argus's character-based token estimates.
+- `OLLAMA_KV_CACHE_TYPE` and `OLLAMA_FLASH_ATTENTION` document the desired Ollama server configuration. These are not changed by the FastAPI process and are not verified by the generation endpoint. Configure the Ollama server environment and restart Ollama to apply them.
+- Prefix-cache hit rates, actual KV memory usage, and GPU memory pressure are not reported unless a supported runtime telemetry source provides them.
+
+See [the KV cache compatibility audit](docs/kv-cache-optimization-audit.md) for the reference-tool comparison, compatibility decisions, and verification plan.

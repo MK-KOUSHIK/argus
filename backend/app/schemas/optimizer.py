@@ -1,6 +1,6 @@
 """Pydantic schemas for prompt optimization and Ollama status."""
 
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -140,6 +140,14 @@ class OptimizeResponse(BaseModel):
     execution_time_ms: int = Field(description="Inference duration in milliseconds")
     model: str = Field(description="Local model used for inference")
     timestamp: str = Field(description="ISO-8601 UTC timestamp")
+    inference_telemetry: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Native Ollama runtime counters and durations; null when unavailable (not estimated).",
+    )
+    kv_runtime_policy: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Argus request policy settings; does not assert Ollama server configuration was applied.",
+    )
 
 
 class OllamaStatusResponse(BaseModel):
