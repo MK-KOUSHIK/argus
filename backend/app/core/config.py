@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     OLLAMA_TIMEOUT_SECONDS: float = 60.0
     OLLAMA_STATUS_TIMEOUT_SECONDS: float = 4.0
 
+    # Ollama KV-cache and request-budget controls.
+    # These values describe Argus policy; Flash Attention and KV quantization
+    # must also be configured in the Ollama server process itself.
+    OLLAMA_KV_CACHE_TYPE: str = "q8_0"
+    OLLAMA_FLASH_ATTENTION: bool = True
+    OLLAMA_NUM_CTX: int = 4096
+    OLLAMA_MAX_NUM_CTX: int = 8192
+    OLLAMA_NUM_PREDICT: int = 512
+    OLLAMA_CONTEXT_RESERVE_TOKENS: int = 256
+    OLLAMA_MAX_CONCURRENT_REQUESTS: int = 1
+
     # Model Generation Hyperparameters
     OLLAMA_TEMPERATURE: float = 0.2
     OLLAMA_TOP_P: float = 0.9
