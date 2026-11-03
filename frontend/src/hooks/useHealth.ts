@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { HealthResponse } from '@/types';
 import { apiService } from '@/services/api';
 
@@ -13,41 +13,52 @@ export function useHealth(autoCheck = false): UseHealthReturn {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchHealth = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    if (isMountedRef.current) {
+      setIsLoading(true);
+      setError(null);
+    }
+
     try {
-      const data = await apiService.getHealth();
-      setHealth(data);
+      const data = await apiService.getHealth(controller.signal);
+      if (isMountedRef.current && !controller.signal.aborted) {
+        setHealth(data);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reach API');
+      if (controller.signal.aborted || (err as { name?: string })?.name === 'AbortError') {
+        return;
+      }
+      if (isMountedRef.current) {
+        setError(err instanceof Error ? err.message : 'Failed to reach API');
+      }
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current && !controller.signal.aborted) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
+    isMountedRef.current = true;
     if (autoCheck) {
-      apiService.getHealth()
-        .then((data) => {
-          if (mounted) {
-            setHealth(data);
-            setIsLoading(false);
-          }
-        })
-        .catch((err) => {
-          if (mounted) {
-            setError(err instanceof Error ? err.message : 'Failed to reach API');
-            setIsLoading(false);
-          }
-        });
+      void fetchHealth();
     }
     return () => {
-      mounted = false;
+      isMountedRef.current = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
-  }, [autoCheck]);
+  }, [autoCheck, fetchHealth]);
 
   return { health, isLoading, error, refetch: fetchHealth };
 }
