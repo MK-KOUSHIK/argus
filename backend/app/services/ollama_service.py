@@ -241,6 +241,26 @@ class OllamaService:
         """Invoke Ollama and retain native runtime telemetry when provided."""
 
         url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+        estimated_input_tokens = cls.estimate_tokens(
+            f"{system_instruction}\n{prompt}"
+        ).estimated_tokens
+        required_context = (
+            estimated_input_tokens
+            + settings.OLLAMA_CONTEXT_RESERVE_TOKENS
+            + settings.OLLAMA_NUM_PREDICT
+        )
+        if required_context > settings.OLLAMA_MAX_NUM_CTX:
+            raise OllamaServiceError(
+                "Prompt and reserved output budget exceed the configured maximum "
+                f"context ({settings.OLLAMA_MAX_NUM_CTX} tokens). Increase "
+                "OLLAMA_MAX_NUM_CTX or reduce the prompt/output budget; no input "
+                "was silently truncated.",
+                status_code=413,
+            )
+        selected_num_ctx = min(
+            settings.OLLAMA_MAX_NUM_CTX,
+            max(settings.OLLAMA_NUM_CTX, required_context),
+        )
         payload = {
             "model": settings.OLLAMA_MODEL,
             "system": system_instruction,
@@ -249,7 +269,7 @@ class OllamaService:
             "options": {
                 "temperature": settings.OLLAMA_TEMPERATURE,
                 "top_p": settings.OLLAMA_TOP_P,
-                "num_ctx": settings.OLLAMA_NUM_CTX,
+                "num_ctx": selected_num_ctx,
                 "num_predict": settings.OLLAMA_NUM_PREDICT,
             },
         }
@@ -308,6 +328,9 @@ class OllamaService:
         telemetry = {
             "queue_wait_ms": queue_wait_ms,
             "wall_time_ms": duration_ms,
+            "estimated_input_tokens_for_budget": estimated_input_tokens,
+            "selected_num_ctx": selected_num_ctx,
+            "num_predict_limit": settings.OLLAMA_NUM_PREDICT,
             "load_duration_ns": data.get("load_duration"),
             "prompt_eval_count": prompt_eval_count,
             "prompt_eval_duration_ns": prompt_eval_duration,
