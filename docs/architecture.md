@@ -228,25 +228,28 @@ graph TD
 
 1. **`AdaptiveContextManager` ([`backend/app/services/adaptive_context_manager.py`](file:///D:/Projects/Argus/backend/app/services/adaptive_context_manager.py))**:
    - Calculates total token budget: $\text{System} + \text{Wrapper} + \text{Prompt} + \text{Output (512)} + \text{Headroom (256)}$.
-   - Snaps `num_ctx` to discrete tiers (`4096`, `6144`, `8192`). This prevents Ollama/llama.cpp from reallocating KV cache buffers across slight prompt variations, preserving prefix cache entries.
-   - Raises `ContextOverflowError` triggering a clean **HTTP 413** when the budget exceeds the configured ceiling (8,192 tokens), ensuring zero user input is silently truncated.
+   - Dynamically derives eligible tiers (`get_eligible_tiers`) bounded by `OLLAMA_MAX_NUM_CTX` (e.g. 4096, 6144, 8192). This prevents Ollama/llama.cpp from continuously reallocating KV cache buffers across slight prompt variations, preserving prefix cache entries.
+   - Low-VRAM safeguard: when free VRAM is constrained (<1,000 MiB), restricts allocation to the safe baseline tier (4096). If required budget exceeds this tier, immediately raises `ContextOverflowError` (clean **HTTP 413**) rather than risking GPU out-of-memory or silently truncating prompts.
+   - Preserves full budget breakdown and prompt token source attribution (`prompt_token_source`).
 
 2. **`HardwareTelemetryProvider` ([`backend/app/services/hardware_telemetry.py`](file:///D:/Projects/Argus/backend/app/services/hardware_telemetry.py))**:
    - Queries dedicated NVIDIA GPU VRAM metrics via cached `nvidia-smi` queries.
-   - Queries system host RAM via `ctypes.windll.kernel32.GlobalMemoryStatusEx`.
+   - Queries system host RAM via Win32 `ctypes.windll.kernel32.GlobalMemoryStatusEx`.
 
 3. **`RuntimeAwareConcurrencyController` ([`backend/app/services/concurrency_controller.py`](file:///D:/Projects/Argus/backend/app/services/concurrency_controller.py))**:
-   - Manages asynchronous request admission based on real GPU memory pressure.
-   - Throttles concurrent requests when VRAM $< 400\text{ MiB}$ and rejects requests when VRAM $< 150\text{ MiB}$.
-   - Measures exact `queue_wait_ms` latency for telemetry attribution.
-   - Guarantees slot release on timeouts or unhandled exceptions.
-   - Provides a static conservative fallback when GPU telemetry is unavailable.
+   - Manages asynchronous request admission via an `asyncio.Condition`-based capacity gate that dynamically evaluates hardware conditions at admission time.
+   - Automatically throttles capacity from 3 down to 1 when GPU VRAM $< 400\text{ MiB}$ or host RAM $< 1,024\text{ MiB}$. New requests are safely queued until active requests drain below the reduced capacity.
+   - Rejects requests immediately with HTTP 503 (`InferenceCapacityExceededError`) when VRAM $< 150\text{ MiB}$ or host RAM $< 512\text{ MiB}$.
+   - Accurately tracks `queue_depth`, cleans up on client cancellation, and measures `queue_wait_ms` latency for telemetry attribution.
+   - Provides a static conservative fallback proxy when hardware telemetry is unavailable.
 
 4. **`OllamaProcessManager` ([`backend/app/services/ollama_process_manager.py`](file:///D:/Projects/Argus/backend/app/services/ollama_process_manager.py))**:
    - Inspects active listening ports and verifies running Ollama PID.
-   - Scans server stdout/stderr logs independently to confirm activation of `OLLAMA_KV_CACHE_TYPE=q8_0` and Flash Attention.
-   - Tracks launcher process manifest (`backend/data/ollama_runtime.json`).
+   - Detects stale manifests via PID and process creation time verification (Win32 `GetProcessTimes`).
+   - Automatically handles both UTF-16LE and UTF-8 PowerShell redirection logs.
+   - Evaluates session-tied log evidence (rejecting logs older than process start) to independently confirm `OLLAMA_KV_CACHE_TYPE=q8_0` and Flash Attention across 4 discrete verification states (`independently_confirmed`, `partially_confirmed_kv_only`, `partially_confirmed_fa_only`, `observed_in_server_logs`).
 
 5. **Native Telemetry Extraction**:
    - Directly extracts native counters from Ollama's HTTP `/api/generate` response: `prompt_eval_count`, `prompt_eval_cached_count`, `prompt_eval_duration`, `eval_count`, and `eval_duration`.
+   - Computes `cache_hit_ratio` based on native counter semantics (`prompt_eval_cached_count / prompt_eval_count`).
    - Distinct source attribution (`telemetry_source: "ollama_native"`) ensures full transparency between heuristic estimates and authoritative hardware metrics.

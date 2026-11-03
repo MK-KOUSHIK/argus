@@ -112,7 +112,8 @@ Argus/
 │   ├── tests/                         # Pytest test suite (mocked Ollama client)
 │   │   ├── conftest.py                # Test fixtures and async client configuration
 │   │   ├── test_health.py             # Health endpoint tests
-│   │   └── test_optimizer.py          # 34 prompt optimization and validation tests
+│   │   ├── test_kv_cache_adaptive.py  # 23 adaptive KV cache, concurrency & process tests
+│   │   └── test_optimizer.py          # 40 prompt optimization and validation tests
 │   ├── .env.example                   # Backend environment configuration template
 │   ├── pyproject.toml                 # Backend project metadata and tools
 │   ├── requirements.txt               # Production dependencies
@@ -401,7 +402,7 @@ $$\text{estimated\_tokens} = \max\left(1, \left\lceil \frac{\text{len}(\text{tri
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 ```
-- **58 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, adaptive context tier snapping, 413 overflow safeguards, hardware telemetry, and dynamic concurrency control.
+- **65 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, dynamic context tier derivation, 413 overflow safeguards, hardware telemetry, independent process verification, and dynamic concurrency capacity enforcement.
 - HTTP calls to Ollama are mocked in automated unit tests, allowing the suite to run offline.
 
 ### 2. Frontend Tests (Vitest)
@@ -429,20 +430,20 @@ Argus includes a production-grade KV-cache runtime optimization and telemetry en
    - Activates Flash Attention kernels (`llama_context: flash_attn = enabled`) to eliminate quadratic memory expansion during attention computation.
    - Managed via the reproducible PowerShell launcher: [`scripts/launch_ollama.ps1`](scripts/launch_ollama.ps1).
 
-2. **Adaptive Context-Length Management**:
-   - Enforces token budgeting: $\text{Prompt} + \text{System} + \text{Wrapper} + \text{Predict (512)} + \text{Headroom (256)}$.
-   - **Tier Snapping (`4096, 6144, 8192`)**: Context length snaps to discrete tiers to prevent continuous KV cache reallocations, preserving prefix reuse across varying prompt lengths.
-   - **Fail-Fast Context Guard**: Prompts requiring > 8,192 tokens are rejected cleanly with **HTTP 413 Payload Too Large** in ~75 ms without silent truncation.
+2. **Adaptive Context-Length Management & Dynamic Tier Derivation**:
+   - Enforces token budgeting: $\\text{Prompt} + \\text{System} + \\text{Wrapper} + \\text{Predict (512)} + \\text{Headroom (256)}$.
+   - **Dynamic Tier Derivation (4096, 6144, 8192)**: Tiers are dynamically derived and strictly bounded by OLLAMA_MAX_NUM_CTX. Prevents continuous KV cache reallocations while respecting configured maximum context limits.
+   - **Low-VRAM & Overflow Guards**: Under low VRAM (<1,000 MiB), restricts allocation to safe baseline tier (4096) and returns **HTTP 413 Payload Too Large** if budget exceeds that capacity. Prompts exceeding maximum context are rejected cleanly in ~50 ms with zero silent truncation.
 
-3. **Memory-Aware Concurrency Controller**:
-   - Dynamic admission control backed by real-time `nvidia-smi` and Win32 `GlobalMemoryStatusEx` telemetry.
-   - Automatically restricts concurrent requests if free VRAM drops below 400 MiB, and cleanly rejects requests with HTTP 503 if VRAM drops below 150 MiB to prevent CUDA OOM crashes.
-   - Guaranteed slot release via `async with slot()` context manager on timeouts or exceptions.
-   - Conservative static semaphore fallback if GPU telemetry is unavailable.
+3. **Genuine Dynamic Concurrency Capacity Enforcement**:
+   - Condition-based admission gate (syncio.Condition) that evaluates hardware telemetry dynamically at admission time.
+   - Automatically throttles admission capacity from 3 down to 1 under low GPU VRAM (<400 MiB) or host RAM (<1024 MiB), draining active requests safely without permit race conditions.
+   - Rejects requests immediately with HTTP 503 when VRAM <150 MiB or RAM <512 MiB.
+   - Accurately tracks queue depth, cleans up on cancellation, measures queue_wait_ms, and provides static conservative fallback.
 
 4. **KV Cache Prefix Reuse**:
    - Aligns system instructions and prompt prefixes identically to maximize llama.cpp prefix caching.
-   - Empirical experiment demonstrated **90.5% cache hit ratio** (190 / 210 prompt tokens cached) and **1.85x prefill throughput speedup** (8,887 tok/s vs 4,804 tok/s).
+   - Empirical experiment demonstrated **90.7% cache hit ratio** (190.0 / 209.5 prompt tokens cached), **1.45x prefill latency speedup** (17.38 ms vs 25.23 ms), and **2.09x effective prompt throughput** (12,093.5 tok/s vs 5,779.7 tok/s).
 
 5. **Authoritative Native Telemetry**:
    - Directly exposes Ollama's native inference metrics: `prompt_eval_count`, `prompt_eval_cached_count`, `prompt_eval_duration_ns`, `eval_count`, `eval_duration_ns`, and `prompt_tokens_per_second`.

@@ -286,7 +286,7 @@ Optimizes an input prompt using the 4-stage modular pipeline (`TaskAnalyzer` &ra
   Token counts in `original_metrics` and `optimized_metrics` are **estimates** calculated using a standard character heuristic ($\text{estimated\_tokens} = \lceil \text{length} / 4.0 \rceil$). They provide an immediate local indicator of text volume changes and are not exact tokenizer counts.
 
 - **Error Responses**:
-  - `413 Payload Too Large`: Total prompt and safety budget exceeds `OLLAMA_MAX_NUM_CTX` (8,192 tokens). Rejection happens cleanly without truncation.
+  - `413 Payload Too Large`: Total prompt and safety budget exceeds `OLLAMA_MAX_NUM_CTX` (or exceeds safe baseline tier under low VRAM <1,000 MiB). Rejection happens cleanly without truncation.
   - `422 Unprocessable Content`: Prompt is empty, whitespace-only, or JSON payload is malformed.
   - `502 Bad Gateway`: Ollama returned an invalid or unparseable response.
   - `503 Service Unavailable`: Local Ollama service is unreachable or GPU memory is below critical threshold (<150 MiB).
@@ -302,7 +302,7 @@ Backend tests run without requiring a live Ollama instance because HTTP calls ar
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 ```
-*Expected result: 58 passed.*
+*Expected result: 65 passed across 3 test files (test_health.py, test_kv_cache_adaptive.py, test_optimizer.py).*
 
 ### 6.2 Frontend Tests (Vitest)
 Unit and integration tests for React components, Workspace interactions, and state management.
