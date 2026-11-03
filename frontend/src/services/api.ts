@@ -159,6 +159,13 @@ export class ApiService {
       model: data.model,
       timestamp: data.timestamp,
       isSimulated: false,
+      inferenceTelemetry: data.inference_telemetry
+        ? {
+            calls: data.inference_telemetry.calls || [],
+            native_metrics_available: Boolean(data.inference_telemetry.native_metrics_available),
+          }
+        : null,
+      kvRuntimePolicy: data.kv_runtime_policy || null,
     };
   }
 }
