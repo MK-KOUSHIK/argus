@@ -190,3 +190,12 @@ where `CHARS_PER_TOKEN_HEURISTIC` defaults to `4.0` in configuration.
 - **Backend**: Python 3.10–3.13, FastAPI, Pydantic v2, Pydantic-Settings, Uvicorn, HTTPX, Pytest, AnyIO.
 - **Local Inference**: Ollama with `qwen2.5:1.5b`.
 - **Target Deployment**: Docker, Azure Container Apps / AWS ECS.
+
+
+## KV Cache and Inference Runtime Controls
+
+The Ollama adapter passes a per-request context and output budget through the native generation options. The context estimate uses Argus's documented character heuristic over the system instruction and prompt, adds configured output/context reserves, and is bounded by the configured maximum. Requests exceeding that maximum fail explicitly; Argus does not silently truncate prompt content.
+
+Inference requests pass through a configurable semaphore. Queue wait is measured separately from the HTTP inference wall time. Ollama-native prompt-evaluation counts/durations, generated-token counts/durations, and model-load duration are retained when present in the response. Missing runtime fields remain null and are never synthesized.
+
+KV cache quantization and Flash Attention are Ollama server-process settings. Argus exposes their desired configuration for diagnostics but cannot apply or verify them through `/api/generate`. The audit document records the compatibility boundary for external serving engines and KV-cache research projects.
