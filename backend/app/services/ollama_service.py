@@ -7,6 +7,7 @@ Coordinates Stages A through D:
 - Stage D: Candidate validation & safe fallback (CandidateValidator)
 """
 
+import asyncio
 import math
 import re
 import time
@@ -60,6 +61,8 @@ class OllamaResponseError(OllamaServiceError):
 
 class OllamaService:
     """Encapsulates task-aware prompt optimization and Ollama model communication."""
+
+    _inference_slots = asyncio.Semaphore(max(1, settings.OLLAMA_MAX_CONCURRENT_REQUESTS))
 
     @staticmethod
     def estimate_tokens(text: str) -> TokenEstimation:
@@ -234,8 +237,9 @@ class OllamaService:
         cls,
         system_instruction: str,
         prompt: str,
-    ) -> Tuple[str, int]:
-        """Low-level model invocation via Ollama generate API."""
+    ) -> Tuple[str, int, dict]:
+        """Invoke Ollama and retain native runtime telemetry when provided."""
+
         url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
         payload = {
             "model": settings.OLLAMA_MODEL,
@@ -245,9 +249,14 @@ class OllamaService:
             "options": {
                 "temperature": settings.OLLAMA_TEMPERATURE,
                 "top_p": settings.OLLAMA_TOP_P,
+                "num_ctx": settings.OLLAMA_NUM_CTX,
+                "num_predict": settings.OLLAMA_NUM_PREDICT,
             },
         }
 
+        queue_started = time.perf_counter()
+        await cls._inference_slots.acquire()
+        queue_wait_ms = int((time.perf_counter() - queue_started) * 1000)
         start_time = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=settings.OLLAMA_TIMEOUT_SECONDS) as client:
@@ -269,6 +278,8 @@ class OllamaService:
             raise OllamaServiceError(
                 f"Error communicating with Ollama: {str(exc)}", status_code=500
             ) from exc
+        finally:
+            cls._inference_slots.release()
 
         duration_ms = int((time.perf_counter() - start_time) * 1000)
 
@@ -290,7 +301,38 @@ class OllamaService:
         if not isinstance(raw_output, str):
             raise OllamaResponseError("Ollama response payload missing 'response' text field")
 
-        return raw_output, duration_ms
+        prompt_eval_count = data.get("prompt_eval_count")
+        prompt_eval_duration = data.get("prompt_eval_duration")
+        eval_count = data.get("eval_count")
+        eval_duration = data.get("eval_duration")
+        telemetry = {
+            "queue_wait_ms": queue_wait_ms,
+            "wall_time_ms": duration_ms,
+            "load_duration_ns": data.get("load_duration"),
+            "prompt_eval_count": prompt_eval_count,
+            "prompt_eval_duration_ns": prompt_eval_duration,
+            "prompt_tokens_per_second": (
+                round(prompt_eval_count / (prompt_eval_duration / 1_000_000_000), 2)
+                if isinstance(prompt_eval_count, (int, float))
+                and isinstance(prompt_eval_duration, (int, float))
+                and prompt_eval_duration > 0 else None
+            ),
+            "eval_count": eval_count,
+            "eval_duration_ns": eval_duration,
+            "generation_tokens_per_second": (
+                round(eval_count / (eval_duration / 1_000_000_000), 2)
+                if isinstance(eval_count, (int, float))
+                and isinstance(eval_duration, (int, float))
+                and eval_duration > 0 else None
+            ),
+            "native_metrics_available": any(
+                key in data for key in (
+                    "load_duration", "prompt_eval_count", "prompt_eval_duration",
+                    "eval_count", "eval_duration"
+                )
+            ),
+        }
+        return raw_output, duration_ms, telemetry
 
     @classmethod
     async def optimize_prompt(cls, request: OptimizeRequest) -> OptimizeResponse:
@@ -302,6 +344,7 @@ class OllamaService:
         strategy = StrategySelector.select_strategy(analysis, request.mode)
 
         total_duration_ms = 0
+        inference_telemetry = []
         optimized_prompt: str
         validation_status = "passed"
         is_preserved = False
@@ -321,10 +364,11 @@ class OllamaService:
                 mode=request.mode,
             )
 
-            raw_candidate, call_ms = await cls._execute_model_call(
+            raw_candidate, call_ms, call_telemetry = await cls._execute_model_call(
                 system_instruction=system_instruction,
                 prompt=request.prompt,
             )
+            inference_telemetry.append(call_telemetry)
             total_duration_ms += call_ms
             cleaned_candidate = cls.clean_optimized_output(raw_candidate, request.prompt)
 
@@ -349,10 +393,11 @@ class OllamaService:
                 )
 
                 try:
-                    retry_raw, retry_ms = await cls._execute_model_call(
+                    retry_raw, retry_ms, retry_telemetry = await cls._execute_model_call(
                         system_instruction=retry_instruction,
                         prompt=request.prompt,
                     )
+                    inference_telemetry.append(retry_telemetry)
                     total_duration_ms += retry_ms
                     retry_cleaned = cls.clean_optimized_output(retry_raw, request.prompt)
                     retry_validation = CandidateValidator.validate(
@@ -464,4 +509,21 @@ class OllamaService:
             execution_time_ms=total_duration_ms,
             model=settings.OLLAMA_MODEL,
             timestamp=datetime.now(timezone.utc).isoformat(),
+            inference_telemetry=(
+                {
+                    "calls": inference_telemetry,
+                    "native_metrics_available": any(
+                        call["native_metrics_available"] for call in inference_telemetry
+                    ),
+                } if inference_telemetry else None
+            ),
+            kv_runtime_policy={
+                "requested_num_ctx": settings.OLLAMA_NUM_CTX,
+                "requested_num_predict": settings.OLLAMA_NUM_PREDICT,
+                "argus_max_concurrent_requests": settings.OLLAMA_MAX_CONCURRENT_REQUESTS,
+                "configured_kv_cache_type": settings.OLLAMA_KV_CACHE_TYPE,
+                "configured_flash_attention": settings.OLLAMA_FLASH_ATTENTION,
+                "server_settings_verified": False,
+                "note": "KV cache type and Flash Attention are Ollama server-process settings; Argus cannot apply or verify them through /api/generate.",
+            },
         )
