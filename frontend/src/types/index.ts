@@ -80,6 +80,22 @@ export interface OptimizeRequestPayload {
   target_model: TargetModel;
 }
 
+export interface OllamaCallTelemetry {
+  queue_wait_ms: number;
+  wall_time_ms: number;
+  estimated_input_tokens_for_budget?: number;
+  selected_num_ctx?: number;
+  num_predict_limit?: number;
+  load_duration_ns?: number | null;
+  prompt_eval_count?: number | null;
+  prompt_eval_duration_ns?: number | null;
+  prompt_tokens_per_second?: number | null;
+  eval_count?: number | null;
+  eval_duration_ns?: number | null;
+  generation_tokens_per_second?: number | null;
+  native_metrics_available: boolean;
+}
+
 export interface OptimizationResult {
   originalPrompt: string;
   optimizedPrompt: string;
@@ -111,6 +127,19 @@ export interface OptimizationResult {
   model: string;
   timestamp: string;
   isSimulated?: boolean;
+  inferenceTelemetry?: {
+    calls: OllamaCallTelemetry[];
+    native_metrics_available: boolean;
+  } | null;
+  kvRuntimePolicy?: {
+    requested_num_ctx: number;
+    requested_num_predict: number;
+    argus_max_concurrent_requests: number;
+    configured_kv_cache_type: string;
+    configured_flash_attention: boolean;
+    server_settings_verified: boolean;
+    note: string;
+  } | null;
 }
 
 export interface ExamplePrompt {

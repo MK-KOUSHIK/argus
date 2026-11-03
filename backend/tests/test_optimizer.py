@@ -19,6 +19,11 @@ MOCK_OLLAMA_RESPONSE = {
     "created_at": "2026-10-16T17:00:00Z",
     "response": "Review Python code for SQL injection and memory leaks. Provide refactored code.",
     "done": True,
+    "load_duration": 1000000,
+    "prompt_eval_count": 120,
+    "prompt_eval_duration": 200000000,
+    "eval_count": 40,
+    "eval_duration": 400000000,
 }
 
 
@@ -77,6 +82,13 @@ async def test_optimize_balanced_profile_success(async_client: AsyncClient):
         assert data["token_reduction_percent"] > 0
         assert "execution_time_ms" in data
         assert data["model"] == "qwen2.5:1.5b"
+        assert data["inference_telemetry"]["native_metrics_available"] is True
+        call_metrics = data["inference_telemetry"]["calls"][0]
+        assert call_metrics["prompt_eval_count"] == 120
+        assert call_metrics["eval_count"] == 40
+        assert call_metrics["generation_tokens_per_second"] == 100.0
+        assert call_metrics["selected_num_ctx"] >= 4096
+        assert data["kv_runtime_policy"]["server_settings_verified"] is False
 
 
 @pytest.mark.asyncio
@@ -1032,3 +1044,138 @@ async def test_phase_3_2_2_test_h_metric_consistency(async_client: AsyncClient):
 
 
 
+
+
+# ==============================================================================
+# KV-Cache Runtime Optimization & Budget Policy Tests (PR #2)
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_context_budget_accounts_for_prompt_wrapper_and_system(async_client: AsyncClient):
+    """Verify that context budgeting accounts for the complete prompt payload sent to Ollama."""
+    mock_resp = httpx.Response(
+        status_code=200,
+        json=MOCK_OLLAMA_RESPONSE,
+        request=httpx.Request("POST", "http://127.0.0.1:11434/api/generate"),
+    )
+
+    with patch("app.services.ollama_service.httpx.AsyncClient", create_mock_client(post_response=mock_resp)):
+        payload = {
+            "prompt": "Test prompt for wrapper estimation check.",
+            "mode": "balanced",
+            "target_model": "gpt-4o",
+        }
+        response = await async_client.post("/api/optimize", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        call_telemetry = data["inference_telemetry"]["calls"][0]
+        # The estimated input tokens must be greater than just the raw prompt tokens
+        raw_prompt_tokens = len(payload["prompt"]) // 4
+        assert call_telemetry["estimated_input_tokens_for_budget"] > raw_prompt_tokens
+        assert call_telemetry["selected_num_ctx"] >= 4096
+
+
+@pytest.mark.asyncio
+async def test_context_overflow_exceeding_max_num_ctx_raises_413(async_client: AsyncClient):
+    """Verify that a prompt whose required context exceeds OLLAMA_MAX_NUM_CTX returns HTTP 413."""
+    # 8192 max tokens * 4 chars/token ~ 32,768 chars. A prompt of 40,000 chars will exceed it.
+    massive_prompt = "Explain quantum computing in complete detail. " * 1000
+
+    payload = {
+        "prompt": massive_prompt,
+        "mode": "balanced",
+        "target_model": "gpt-4o",
+    }
+    response = await async_client.post("/api/optimize", json=payload)
+    assert response.status_code == 413
+    body = response.json()
+    message = body.get("error", {}).get("message") or body.get("detail", "")
+    assert "exceed the configured maximum context" in message
+    assert "no input was silently truncated" in message
+
+
+@pytest.mark.asyncio
+async def test_adaptive_context_scales_up_with_large_prompt(async_client: AsyncClient):
+    """Verify that required context larger than 4096 scales selected_num_ctx up towards MAX_NUM_CTX."""
+    # Prompt of ~15,000 chars -> ~3,750 tokens + system (~100 tokens) + reserve (256) + predict (512) > 4096
+    large_prompt = "Analyze the following system architecture and performance characteristics: " + ("word " * 3200)
+
+    mock_resp = httpx.Response(
+        status_code=200,
+        json=MOCK_OLLAMA_RESPONSE,
+        request=httpx.Request("POST", "http://127.0.0.1:11434/api/generate"),
+    )
+
+    with patch("app.services.ollama_service.httpx.AsyncClient", create_mock_client(post_response=mock_resp)):
+        payload = {
+            "prompt": large_prompt,
+            "mode": "balanced",
+            "target_model": "gpt-4o",
+        }
+        response = await async_client.post("/api/optimize", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        call_telemetry = data["inference_telemetry"]["calls"][0]
+        # Should dynamically scale above default 4096 but <= 8192
+        assert call_telemetry["selected_num_ctx"] > 4096
+        assert call_telemetry["selected_num_ctx"] <= 8192
+
+
+@pytest.mark.asyncio
+async def test_concurrency_semaphore_releases_on_error(async_client: AsyncClient):
+    """Verify that concurrency semaphore slots are released when Ollama raises an error."""
+    from app.services.ollama_service import OllamaService
+    initial_slots = OllamaService._inference_slots._value
+
+    with patch("app.services.ollama_service.httpx.AsyncClient", create_mock_client(post_side_effect=httpx.ConnectError("Connection refused"))):
+        payload = {
+            "prompt": "Test prompt for semaphore release.",
+            "mode": "balanced",
+            "target_model": "gpt-4o",
+        }
+        response = await async_client.post("/api/optimize", json=payload)
+        assert response.status_code == 503
+
+    # Semaphore slot must be fully restored
+    assert OllamaService._inference_slots._value == initial_slots
+
+
+@pytest.mark.asyncio
+async def test_missing_native_telemetry_graceful_handling(async_client: AsyncClient):
+    """Verify that when Ollama omits native metrics, telemetry falls back gracefully without errors."""
+    resp_without_telemetry = {
+        "model": "qwen2.5:1.5b",
+        "created_at": "2026-10-16T17:00:00Z",
+        "response": "Refactored prompt without metrics.",
+        "done": True,
+    }
+    mock_resp = httpx.Response(
+        status_code=200,
+        json=resp_without_telemetry,
+        request=httpx.Request("POST", "http://127.0.0.1:11434/api/generate"),
+    )
+
+    with patch("app.services.ollama_service.httpx.AsyncClient", create_mock_client(post_response=mock_resp)):
+        payload = {
+            "prompt": SAMPLE_PROMPT,
+            "mode": "balanced",
+            "target_model": "gpt-4o",
+        }
+        response = await async_client.post("/api/optimize", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["inference_telemetry"]["native_metrics_available"] is False
+        call_telemetry = data["inference_telemetry"]["calls"][0]
+        assert call_telemetry["prompt_eval_count"] is None
+        assert call_telemetry["eval_count"] is None
+        assert call_telemetry["prompt_tokens_per_second"] is None
+        assert call_telemetry["generation_tokens_per_second"] is None
+
+
+def test_settings_validation_max_num_ctx():
+    """Verify that OLLAMA_MAX_NUM_CTX < OLLAMA_NUM_CTX raises a validation error."""
+    from app.core.config import Settings
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Settings(OLLAMA_NUM_CTX=4096, OLLAMA_MAX_NUM_CTX=2048)
