@@ -22,12 +22,13 @@ export class ApiService {
   /**
    * Health check endpoint
    */
-  async getHealth(): Promise<HealthResponse> {
+  async getHealth(signal?: AbortSignal): Promise<HealthResponse> {
     const response = await fetch(`${this.baseUrl}/health`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
       },
+      signal,
     });
 
     if (!response.ok) {
@@ -40,13 +41,17 @@ export class ApiService {
   /**
    * Ollama status and local model availability endpoint (Phase 3)
    */
-  async getOllamaStatus(): Promise<OllamaStatus> {
+  async getOllamaStatus(signal?: AbortSignal): Promise<OllamaStatus> {
+    if (signal?.aborted) {
+      throw new DOMException('The user aborted a request.', 'AbortError');
+    }
     try {
       const response = await fetch(`${this.baseUrl}/ollama/status`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
         },
+        signal,
       });
 
       if (!response.ok) {
@@ -62,6 +67,9 @@ export class ApiService {
 
       return response.json();
     } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError' || signal?.aborted) {
+        throw err;
+      }
       return {
         connected: false,
         base_url: 'http://127.0.0.1:11434',
@@ -76,7 +84,7 @@ export class ApiService {
   /**
    * Real Prompt Optimization endpoint powered by local Ollama LLM (Phase 3 & 3.1)
    */
-  async optimizePrompt(payload: OptimizeRequestPayload): Promise<OptimizationResult> {
+  async optimizePrompt(payload: OptimizeRequestPayload, signal?: AbortSignal): Promise<OptimizationResult> {
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}/optimize`, {
@@ -86,8 +94,12 @@ export class ApiService {
           'Accept': 'application/json',
         },
         body: JSON.stringify(payload),
+        signal,
       });
     } catch (networkErr) {
+      if ((networkErr as { name?: string })?.name === 'AbortError' || signal?.aborted) {
+        throw networkErr;
+      }
       throw new Error(
         `Failed to reach Argus backend at ${this.baseUrl}. Ensure the FastAPI server is running.`
       );
