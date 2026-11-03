@@ -94,6 +94,15 @@ export interface OllamaCallTelemetry {
   eval_duration_ns?: number | null;
   generation_tokens_per_second?: number | null;
   native_metrics_available: boolean;
+  prompt_eval_cached_count?: number | null;
+  cache_hit_ratio?: number | null;
+  telemetry_source?: string;
+  hardware_snapshot?: {
+    vram_before_mb?: number | null;
+    vram_after_mb?: number | null;
+    ram_before_mb?: number | null;
+    ram_after_mb?: number | null;
+  };
 }
 
 export interface OptimizationResult {
@@ -138,6 +147,10 @@ export interface OptimizationResult {
     configured_kv_cache_type: string;
     configured_flash_attention: boolean;
     server_settings_verified: boolean;
+    server_process_verified?: boolean;
+    runtime_configuration_status?: string;
+    confirmation_evidence?: string;
+    active_pid?: number | null;
     note: string;
   } | null;
 }
@@ -157,5 +170,35 @@ export interface OllamaStatus {
   model_installed: boolean;
   available_models: string[];
   error?: string | null;
+  runtime_process?: {
+    requested_num_ctx: number;
+    requested_num_predict: number;
+    argus_max_concurrent_requests: number;
+    configured_kv_cache_type: string;
+    configured_flash_attention: boolean;
+    server_endpoint: string;
+    server_process_status: string;
+    server_process_verified: boolean;
+    server_settings_verified?: boolean;
+    managed_by_argus: boolean;
+    managed_pid: number | null;
+    active_pid: number | null;
+    runtime_configuration_status: string;
+    confirmation_evidence: string;
+    note: string;
+  } | null;
+  hardware_telemetry?: {
+    gpu: {
+      total_mb: number;
+      free_mb: number;
+      used_mb: number;
+      source: string;
+    };
+    ram: {
+      total_mb: number;
+      free_mb: number;
+      used_mb: number;
+      source: string;
+    };
+  } | null;
 }
-

@@ -18,6 +18,29 @@ Ensure the following tools are installed on your workstation:
 
 Argus utilizes Ollama as its local neural inference runtime to rewrite prompts and prune redundant tokens.
 
+### 2.1 Starting Ollama with Optimized KV-Cache & Flash Attention
+
+For reproducible development with **Q8_0 KV-cache quantization** and **Flash Attention** on Windows, use the dedicated launcher script:
+
+```powershell
+# Start Ollama with Q8_0 KV cache and Flash Attention:
+.\scripts\launch_ollama.ps1 -Action start -KvCacheType q8_0 -FlashAttention
+
+# Check running status and port bindings:
+.\scripts\launch_ollama.ps1 -Action status
+
+# Stop Ollama:
+.\scripts\launch_ollama.ps1 -Action stop
+```
+
+Alternatively, to start manually:
+```powershell
+$env:OLLAMA_FLASH_ATTENTION="1"
+$env:OLLAMA_KV_CACHE_TYPE="q8_0"
+$env:OLLAMA_DEBUG="1"
+ollama serve
+```
+
 ### 2.1 Verify or Start Ollama
 1. **Check Ollama version**:
    ```bash
@@ -263,9 +286,10 @@ Optimizes an input prompt using the 4-stage modular pipeline (`TaskAnalyzer` &ra
   Token counts in `original_metrics` and `optimized_metrics` are **estimates** calculated using a standard character heuristic ($\text{estimated\_tokens} = \lceil \text{length} / 4.0 \rceil$). They provide an immediate local indicator of text volume changes and are not exact tokenizer counts.
 
 - **Error Responses**:
+  - `413 Payload Too Large`: Total prompt and safety budget exceeds `OLLAMA_MAX_NUM_CTX` (8,192 tokens). Rejection happens cleanly without truncation.
   - `422 Unprocessable Content`: Prompt is empty, whitespace-only, or JSON payload is malformed.
   - `502 Bad Gateway`: Ollama returned an invalid or unparseable response.
-  - `503 Service Unavailable`: Local Ollama service is unreachable (`ollama serve` is not running).
+  - `503 Service Unavailable`: Local Ollama service is unreachable or GPU memory is below critical threshold (<150 MiB).
   - `504 Gateway Timeout`: Local inference took longer than `OLLAMA_TIMEOUT_SECONDS`.
 
 ---
@@ -278,7 +302,7 @@ Backend tests run without requiring a live Ollama instance because HTTP calls ar
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 ```
-*Expected result: 36 passed.*
+*Expected result: 58 passed.*
 
 ### 6.2 Frontend Tests (Vitest)
 Unit and integration tests for React components, Workspace interactions, and state management.
@@ -286,7 +310,7 @@ Unit and integration tests for React components, Workspace interactions, and sta
 cd frontend
 npm.cmd test -- --run
 ```
-*Expected result: 11 passed across 2 test files.*
+*Expected result: 19 passed across 4 test files.*
 
 ### 6.3 Frontend Production Build
 Validates TypeScript compilation (`tsc -b`) and bundles production assets with Vite.

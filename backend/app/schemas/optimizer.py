@@ -167,3 +167,11 @@ class OllamaStatusResponse(BaseModel):
         default=None,
         description="Diagnostic error message if connection or model check failed",
     )
+    runtime_process: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Managed Ollama process verification state, launcher PID, and verified KV-cache settings",
+    )
+    hardware_telemetry: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Real-time GPU VRAM and host system RAM telemetry snapshot",
+    )

@@ -27,6 +27,11 @@ from app.services.task_analyzer import TaskAnalyzer, TaskAnalysisResult
 from app.services.strategy_selector import StrategySelector
 from app.services.prompt_rewriter import PromptRewriter
 from app.services.candidate_validator import CandidateValidator, ValidationResult
+from app.services.concurrency_controller import concurrency_controller
+from app.services.adaptive_context_manager import AdaptiveContextManager, ContextOverflowError
+from app.services.ollama_process_manager import OllamaProcessManager
+from app.services.hardware_telemetry import HardwareTelemetryProvider
+
 
 
 class OllamaServiceError(Exception):
@@ -62,7 +67,7 @@ class OllamaResponseError(OllamaServiceError):
 class OllamaService:
     """Encapsulates task-aware prompt optimization and Ollama model communication."""
 
-    _inference_slots = asyncio.Semaphore(max(1, settings.OLLAMA_MAX_CONCURRENT_REQUESTS))
+    _inference_slots = concurrency_controller._semaphore
 
     @staticmethod
     def estimate_tokens(text: str) -> TokenEstimation:
@@ -199,6 +204,11 @@ class OllamaService:
                     model_installed=model_installed,
                     available_models=available_models,
                     error=error_msg,
+                    runtime_process=OllamaProcessManager.get_runtime_policy(),
+                    hardware_telemetry={
+                        "gpu": HardwareTelemetryProvider.get_gpu_memory(),
+                        "ram": HardwareTelemetryProvider.get_system_ram(),
+                    },
                 )
 
         except httpx.ConnectError:
@@ -238,30 +248,18 @@ class OllamaService:
         system_instruction: str,
         prompt: str,
     ) -> Tuple[str, int, dict]:
-        """Invoke Ollama and retain native runtime telemetry when provided."""
+        """Invoke Ollama with adaptive context budgeting, memory-aware concurrency, and native telemetry."""
 
         url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
         formatted_prompt = f"Original prompt to optimize:\n\n{prompt}"
-        estimated_input_tokens = cls.estimate_tokens(
-            f"{system_instruction}\n{formatted_prompt}"
-        ).estimated_tokens
-        required_context = (
-            estimated_input_tokens
-            + settings.OLLAMA_CONTEXT_RESERVE_TOKENS
-            + settings.OLLAMA_NUM_PREDICT
-        )
-        if required_context > settings.OLLAMA_MAX_NUM_CTX:
-            raise OllamaServiceError(
-                "Prompt and reserved output budget exceed the configured maximum "
-                f"context ({settings.OLLAMA_MAX_NUM_CTX} tokens). Increase "
-                "OLLAMA_MAX_NUM_CTX or reduce the prompt/output budget; no input "
-                "was silently truncated.",
-                status_code=413,
-            )
-        selected_num_ctx = min(
-            settings.OLLAMA_MAX_NUM_CTX,
-            max(settings.OLLAMA_NUM_CTX, required_context),
-        )
+
+        # Adaptive Context Budgeting (snapped to stable tiers for KV prefix cache reuse)
+        try:
+            budget = AdaptiveContextManager.calculate_budget(system_instruction, formatted_prompt)
+        except ContextOverflowError as exc:
+            raise OllamaServiceError(exc.message, status_code=exc.status_code) from exc
+
+        selected_num_ctx = budget["selected_num_ctx"]
         payload = {
             "model": settings.OLLAMA_MODEL,
             "system": system_instruction,
@@ -275,34 +273,31 @@ class OllamaService:
             },
         }
 
-        queue_started = time.perf_counter()
-        await cls._inference_slots.acquire()
-        queue_wait_ms = int((time.perf_counter() - queue_started) * 1000)
-        start_time = time.perf_counter()
-        try:
-            async with httpx.AsyncClient(timeout=settings.OLLAMA_TIMEOUT_SECONDS) as client:
-                response = await client.post(url, json=payload)
+        # Memory-Aware Concurrency Control
+        async with concurrency_controller.slot() as slot_telemetry:
+            start_time = time.perf_counter()
+            try:
+                async with httpx.AsyncClient(timeout=settings.OLLAMA_TIMEOUT_SECONDS) as client:
+                    response = await client.post(url, json=payload)
 
-        except httpx.ConnectError as exc:
-            raise OllamaConnectionError(
-                f"Failed to connect to Ollama service at {settings.OLLAMA_BASE_URL}. "
-                "Ensure Ollama is running on your machine ('ollama serve')."
-            ) from exc
+            except httpx.ConnectError as exc:
+                raise OllamaConnectionError(
+                    f"Failed to connect to Ollama service at {settings.OLLAMA_BASE_URL}. "
+                    "Ensure Ollama is running on your machine ('ollama serve')."
+                ) from exc
 
-        except httpx.TimeoutException as exc:
-            raise OllamaTimeoutError(
-                f"Ollama inference timed out after {settings.OLLAMA_TIMEOUT_SECONDS}s. "
-                "The local model took too long to generate a response."
-            ) from exc
+            except httpx.TimeoutException as exc:
+                raise OllamaTimeoutError(
+                    f"Ollama inference timed out after {settings.OLLAMA_TIMEOUT_SECONDS}s. "
+                    "The local model took too long to generate a response."
+                ) from exc
 
-        except Exception as exc:
-            raise OllamaServiceError(
-                f"Error communicating with Ollama: {str(exc)}", status_code=500
-            ) from exc
-        finally:
-            cls._inference_slots.release()
+            except Exception as exc:
+                raise OllamaServiceError(
+                    f"Error communicating with Ollama: {str(exc)}", status_code=500
+                ) from exc
 
-        duration_ms = int((time.perf_counter() - start_time) * 1000)
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
 
         if response.status_code != 200:
             try:
@@ -323,18 +318,33 @@ class OllamaService:
             raise OllamaResponseError("Ollama response payload missing 'response' text field")
 
         prompt_eval_count = data.get("prompt_eval_count")
+        prompt_eval_cached_count = data.get("prompt_eval_cached_count")
         prompt_eval_duration = data.get("prompt_eval_duration")
         eval_count = data.get("eval_count")
         eval_duration = data.get("eval_duration")
+        load_duration = data.get("load_duration")
+
         telemetry = {
-            "queue_wait_ms": queue_wait_ms,
+            "queue_wait_ms": slot_telemetry["queue_wait_ms"],
             "wall_time_ms": duration_ms,
-            "estimated_input_tokens_for_budget": estimated_input_tokens,
+            "estimated_input_tokens_for_budget": budget["estimated_input_tokens"],
+            "token_estimation_source": budget["token_estimation_source"],
             "selected_num_ctx": selected_num_ctx,
+            "context_selection_reason": budget["selection_reason"],
+            "context_budget_breakdown": budget,
             "num_predict_limit": settings.OLLAMA_NUM_PREDICT,
-            "load_duration_ns": data.get("load_duration"),
+            "active_concurrency_capacity": slot_telemetry["active_concurrency_capacity"],
+            "active_concurrency_in_flight": slot_telemetry["active_concurrency_in_flight"],
+            "concurrency_mode": slot_telemetry["concurrency_mode"],
+            "vram_available_mb": slot_telemetry["vram_available_mb"],
+            "vram_used_mb": slot_telemetry["vram_used_mb"],
+            "ram_available_mb": slot_telemetry["ram_available_mb"],
+            "load_duration_ns": load_duration,
+            "load_duration_ms": round(load_duration / 1e6, 2) if isinstance(load_duration, (int, float)) else None,
             "prompt_eval_count": prompt_eval_count,
+            "prompt_eval_cached_count": prompt_eval_cached_count,
             "prompt_eval_duration_ns": prompt_eval_duration,
+            "prompt_eval_duration_ms": round(prompt_eval_duration / 1e6, 2) if isinstance(prompt_eval_duration, (int, float)) else None,
             "prompt_tokens_per_second": (
                 round(prompt_eval_count / (prompt_eval_duration / 1_000_000_000), 2)
                 if isinstance(prompt_eval_count, (int, float))
@@ -343,6 +353,7 @@ class OllamaService:
             ),
             "eval_count": eval_count,
             "eval_duration_ns": eval_duration,
+            "eval_duration_ms": round(eval_duration / 1e6, 2) if isinstance(eval_duration, (int, float)) else None,
             "generation_tokens_per_second": (
                 round(eval_count / (eval_duration / 1_000_000_000), 2)
                 if isinstance(eval_count, (int, float))
@@ -355,6 +366,20 @@ class OllamaService:
                     "eval_count", "eval_duration"
                 )
             ),
+            "telemetry_source_attribution": {
+                "prompt_eval_count": "ollama_native",
+                "prompt_eval_cached_count": "ollama_native",
+                "prompt_eval_duration": "ollama_native",
+                "eval_count": "ollama_native",
+                "eval_duration": "ollama_native",
+                "load_duration": "ollama_native",
+                "wall_time_ms": "argus_measurement",
+                "queue_wait_ms": "argus_measurement",
+                "selected_num_ctx": "argus_adaptive_budget",
+                "concurrency": "argus_concurrency_controller",
+                "vram": "gpu_telemetry_nvidia_smi",
+                "ram": "system_telemetry_win32",
+            },
         }
         return raw_output, duration_ms, telemetry
 
@@ -541,13 +566,5 @@ class OllamaService:
                     ),
                 } if inference_telemetry else None
             ),
-            kv_runtime_policy={
-                "requested_num_ctx": settings.OLLAMA_NUM_CTX,
-                "requested_num_predict": settings.OLLAMA_NUM_PREDICT,
-                "argus_max_concurrent_requests": settings.OLLAMA_MAX_CONCURRENT_REQUESTS,
-                "configured_kv_cache_type": settings.OLLAMA_KV_CACHE_TYPE,
-                "configured_flash_attention": settings.OLLAMA_FLASH_ATTENTION,
-                "server_settings_verified": False,
-                "note": "KV cache type and Flash Attention are Ollama server-process settings; Argus cannot apply or verify them through /api/generate.",
-            },
+            kv_runtime_policy=OllamaProcessManager.get_runtime_policy(),
         )
