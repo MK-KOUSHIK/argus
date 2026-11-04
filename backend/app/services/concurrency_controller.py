@@ -64,9 +64,14 @@ class RuntimeAwareConcurrencyController:
         gpu_telemetry = HardwareTelemetryProvider.get_gpu_memory()
         ram_telemetry = HardwareTelemetryProvider.get_system_ram()
 
-        # Check host RAM constraints
+        # Check host RAM constraints only if telemetry is available and authoritative
         ram_restricted = False
-        if ram_telemetry is not None:
+        ram_valid = (
+            ram_telemetry is not None
+            and ram_telemetry.get("source") not in (None, "unavailable")
+            and ram_telemetry.get("total_mb", 0) > 0
+        )
+        if ram_valid:
             free_ram = ram_telemetry.get("free_mb", 0)
             if free_ram < 512:
                 # Critical RAM exhaustion - capacity is 0 to trigger immediate rejection
@@ -74,7 +79,12 @@ class RuntimeAwareConcurrencyController:
             if free_ram < 1024:
                 ram_restricted = True
 
-        if gpu_telemetry is not None:
+        gpu_valid = (
+            gpu_telemetry is not None
+            and gpu_telemetry.get("source") not in (None, "unavailable")
+            and gpu_telemetry.get("total_mb", 0) > 0
+        )
+        if gpu_valid:
             free_vram = gpu_telemetry.get("free_mb", 0)
             # Critical VRAM exhaustion (<150 MiB)
             if free_vram < 150:

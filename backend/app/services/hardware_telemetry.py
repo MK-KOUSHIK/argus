@@ -96,6 +96,37 @@ class HardwareTelemetryProvider:
                     }
             except Exception:
                 pass
+        elif os.name == "posix":
+            try:
+                meminfo_path = "/proc/meminfo"
+                if os.path.exists(meminfo_path):
+                    meminfo: Dict[str, int] = {}
+                    with open(meminfo_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            parts = line.split(":")
+                            if len(parts) == 2:
+                                key = parts[0].strip()
+                                val_str = parts[1].strip().split()[0]
+                                if val_str.isdigit():
+                                    meminfo[key] = int(val_str)
+
+                    if "MemTotal" in meminfo:
+                        total_mb = round(meminfo["MemTotal"] / 1024.0, 1)
+                        # MemAvailable is present in Linux 3.14+; fallback to MemFree + Buffers + Cached
+                        avail_kb = meminfo.get(
+                            "MemAvailable",
+                            meminfo.get("MemFree", 0) + meminfo.get("Buffers", 0) + meminfo.get("Cached", 0),
+                        )
+                        free_mb = round(avail_kb / 1024.0, 1)
+                        used_mb = round(max(0.0, total_mb - free_mb), 1)
+                        return {
+                            "total_mb": total_mb,
+                            "free_mb": free_mb,
+                            "used_mb": used_mb,
+                            "source": "proc_meminfo",
+                        }
+            except Exception:
+                pass
 
         return {
             "total_mb": 0.0,

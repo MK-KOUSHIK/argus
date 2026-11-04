@@ -27,21 +27,67 @@ class OllamaProcessManager:
 
     @classmethod
     def get_port_listening_pid(cls, port: int = 11434) -> Optional[int]:
-        """Detect the PID of the process listening on the target port via netstat."""
-        try:
-            out = subprocess.check_output(
-                ["netstat", "-ano"],
-                text=True,
-                timeout=3,
-                stderr=subprocess.DEVNULL,
-            )
-            pattern = re.compile(rf":{port}\s+.*LISTENING\s+(\d+)", re.IGNORECASE)
-            for line in out.splitlines():
-                match = pattern.search(line)
-                if match:
-                    return int(match.group(1))
-        except Exception:
-            pass
+        """Detect the PID of the process listening on the target port."""
+        if os.name == "nt":
+            try:
+                out = subprocess.check_output(
+                    ["netstat", "-ano"],
+                    text=True,
+                    timeout=3,
+                    stderr=subprocess.DEVNULL,
+                )
+                pattern = re.compile(rf":{port}\s+.*LISTENING\s+(\d+)", re.IGNORECASE)
+                for line in out.splitlines():
+                    match = pattern.search(line)
+                    if match:
+                        return int(match.group(1))
+            except Exception:
+                pass
+        else:
+            # POSIX / Linux: try ss, lsof, or netstat
+            try:
+                out = subprocess.check_output(
+                    ["ss", "-tulpn"],
+                    text=True,
+                    timeout=3,
+                    stderr=subprocess.DEVNULL,
+                )
+                pattern = re.compile(rf":{port}\b.*pid=(\d+)", re.IGNORECASE)
+                for line in out.splitlines():
+                    match = pattern.search(line)
+                    if match:
+                        return int(match.group(1))
+            except Exception:
+                pass
+
+            try:
+                out = subprocess.check_output(
+                    ["lsof", "-i", f":{port}", "-t"],
+                    text=True,
+                    timeout=3,
+                    stderr=subprocess.DEVNULL,
+                )
+                pids = [int(p.strip()) for p in out.strip().splitlines() if p.strip().isdigit()]
+                if pids:
+                    return pids[0]
+            except Exception:
+                pass
+
+            try:
+                out = subprocess.check_output(
+                    ["netstat", "-tlpn"],
+                    text=True,
+                    timeout=3,
+                    stderr=subprocess.DEVNULL,
+                )
+                pattern = re.compile(rf":{port}\s+.*LISTEN.*?(\d+)/", re.IGNORECASE)
+                for line in out.splitlines():
+                    match = pattern.search(line)
+                    if match:
+                        return int(match.group(1))
+            except Exception:
+                pass
+
         return None
 
     @classmethod
@@ -93,6 +139,12 @@ class OllamaProcessManager:
                 )
                 return "ollama" in out.lower()
             else:
+                try:
+                    comm_path = Path(f"/proc/{pid}/comm")
+                    if comm_path.exists():
+                        return "ollama" in comm_path.read_text(encoding="utf-8", errors="ignore").lower()
+                except Exception:
+                    pass
                 out = subprocess.check_output(["ps", "-p", str(pid), "-o", "comm="], text=True, timeout=3)
                 return "ollama" in out.lower()
         except Exception:

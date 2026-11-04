@@ -169,7 +169,7 @@ def test_hardware_telemetry_ram_query():
     assert "total_mb" in ram
     assert "free_mb" in ram
     assert "used_mb" in ram
-    assert ram["source"] in ("win32_global_memory_status", "unavailable")
+    assert ram["source"] in ("win32_global_memory_status", "proc_meminfo", "unavailable")
 
 
 def test_concurrency_controller_adaptive_healthy_gpu():
@@ -253,48 +253,46 @@ async def test_concurrency_controller_dynamic_restriction_from_3_to_1_while_acti
     task1_release = asyncio.Event()
     task2_admitted = False
 
-    async def task_1():
-        nonlocal current_gpu
-        with patch.object(HardwareTelemetryProvider, "get_gpu_memory", side_effect=lambda: current_gpu), \
-             patch.object(HardwareTelemetryProvider, "get_system_ram", return_value=mock_ram):
+    with patch.object(HardwareTelemetryProvider, "get_gpu_memory", side_effect=lambda: current_gpu), \
+         patch.object(HardwareTelemetryProvider, "get_system_ram", return_value=mock_ram):
+
+        async def task_1():
             async with controller.slot():
                 task1_started.set()
                 await task1_release.wait()
 
-    async def task_2():
-        nonlocal task2_admitted, current_gpu
-        with patch.object(HardwareTelemetryProvider, "get_gpu_memory", side_effect=lambda: current_gpu), \
-             patch.object(HardwareTelemetryProvider, "get_system_ram", return_value=mock_ram):
+        async def task_2():
+            nonlocal task2_admitted
             async with controller.slot():
                 task2_admitted = True
 
-    # 1. Start Task 1 under healthy conditions
-    t1 = asyncio.create_task(task_1())
-    await task1_started.wait()
+        # 1. Start Task 1 under healthy conditions
+        t1 = asyncio.create_task(task_1())
+        await task1_started.wait()
 
-    assert controller.in_flight == 1
-    assert controller.queue_depth == 0
+        assert controller.in_flight == 1
+        assert controller.queue_depth == 0
 
-    # 2. VRAM drops to 300 MiB (capacity reduces from 3 to 1)
-    current_gpu = {"total_mb": 6141, "free_mb": 300, "used_mb": 5841, "source": "nvidia_smi"}
+        # 2. VRAM drops to 300 MiB (capacity reduces from 3 to 1)
+        current_gpu = {"total_mb": 6141, "free_mb": 300, "used_mb": 5841, "source": "nvidia_smi"}
 
-    # 3. Launch Task 2: Since in-flight (1) >= new capacity (1), Task 2 must NOT be admitted!
-    t2 = asyncio.create_task(task_2())
-    await asyncio.sleep(0.05)
+        # 3. Launch Task 2: Since in-flight (1) >= new capacity (1), Task 2 must NOT be admitted!
+        t2 = asyncio.create_task(task_2())
+        await asyncio.sleep(0.05)
 
-    assert task2_admitted is False
-    assert controller.queue_depth == 1
-    assert controller.in_flight == 1
+        assert task2_admitted is False
+        assert controller.queue_depth == 1
+        assert controller.in_flight == 1
 
-    # 4. Release Task 1
-    task1_release.set()
-    await t1
+        # 4. Release Task 1
+        task1_release.set()
+        await t1
 
-    # 5. Task 2 now admits because in-flight dropped to 0 < 1
-    await asyncio.wait_for(t2, timeout=2.0)
-    assert task2_admitted is True
-    assert controller.in_flight == 0
-    assert controller.queue_depth == 0
+        # 5. Task 2 now admits because in-flight dropped to 0 < 1
+        await asyncio.wait_for(t2, timeout=2.0)
+        assert task2_admitted is True
+        assert controller.in_flight == 0
+        assert controller.queue_depth == 0
 
 
 @pytest.mark.asyncio
@@ -302,41 +300,43 @@ async def test_concurrency_controller_queue_wait_cancellation():
     """Cancelling a queued waiter decrements queue_depth without corrupting counters."""
     controller = RuntimeAwareConcurrencyController(max_concurrent_limit=1)
     mock_gpu = {"total_mb": 6141, "free_mb": 4000, "used_mb": 2141, "source": "nvidia_smi"}
+    mock_ram = {"total_mb": 16000, "free_mb": 4000, "used_mb": 12000, "source": "win32"}
 
     t1_started = asyncio.Event()
     t1_release = asyncio.Event()
 
-    async def task_1():
-        with patch.object(HardwareTelemetryProvider, "get_gpu_memory", return_value=mock_gpu):
+    with patch.object(HardwareTelemetryProvider, "get_gpu_memory", return_value=mock_gpu), \
+         patch.object(HardwareTelemetryProvider, "get_system_ram", return_value=mock_ram):
+
+        async def task_1():
             async with controller.slot():
                 t1_started.set()
                 await t1_release.wait()
 
-    async def task_2():
-        with patch.object(HardwareTelemetryProvider, "get_gpu_memory", return_value=mock_gpu):
+        async def task_2():
             async with controller.slot():
                 pass
 
-    t1 = asyncio.create_task(task_1())
-    await t1_started.wait()
+        t1 = asyncio.create_task(task_1())
+        await t1_started.wait()
 
-    t2 = asyncio.create_task(task_2())
-    await asyncio.sleep(0.02)
+        t2 = asyncio.create_task(task_2())
+        await asyncio.sleep(0.02)
 
-    assert controller.queue_depth == 1
-    assert controller.in_flight == 1
+        assert controller.queue_depth == 1
+        assert controller.in_flight == 1
 
-    # Cancel task 2 while it is waiting
-    t2.cancel()
-    await asyncio.sleep(0.02)
+        # Cancel task 2 while it is waiting
+        t2.cancel()
+        await asyncio.sleep(0.02)
 
-    assert controller.queue_depth == 0
-    assert controller.in_flight == 1
+        assert controller.queue_depth == 0
+        assert controller.in_flight == 1
 
-    # Clean up task 1
-    t1_release.set()
-    await t1
-    assert controller.in_flight == 0
+        # Clean up task 1
+        t1_release.set()
+        await t1
+        assert controller.in_flight == 0
 
 
 # ---------------------------------------------------------------------------
