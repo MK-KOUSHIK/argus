@@ -1,9 +1,9 @@
-"""Ollama Local LLM Service with Task-Aware Optimization Pipeline (Phase 3.1).
+"""Ollama Local LLM Service with Task-Aware Optimization Pipeline (Phase 3.1 & 4.1).
 
 Coordinates Stages A through D:
 - Stage A: Task analysis & constraint detection (TaskAnalyzer)
-- Stage B: Strategy selection (StrategySelector)
-- Stage C: Targeted model rewriting (PromptRewriter)
+- Stage B: Strategy selection (StrategySelector) & Output Budget Control (OutputBudgetController)
+- Stage C: Targeted model rewriting (PromptRewriter) with adaptive context & output budgets
 - Stage D: Candidate validation & safe fallback (CandidateValidator)
 """
 
@@ -21,6 +21,7 @@ from app.schemas.optimizer import (
     OptimizeRequest,
     OptimizeResponse,
     OllamaStatusResponse,
+    OutputBudgetTelemetry,
     TokenEstimation,
 )
 from app.services.task_analyzer import TaskAnalyzer, TaskAnalysisResult
@@ -29,9 +30,9 @@ from app.services.prompt_rewriter import PromptRewriter
 from app.services.candidate_validator import CandidateValidator, ValidationResult
 from app.services.concurrency_controller import concurrency_controller
 from app.services.adaptive_context_manager import AdaptiveContextManager, ContextOverflowError
+from app.services.output_budget_controller import OutputBudgetController, OutputBudgetAllocation
 from app.services.ollama_process_manager import OllamaProcessManager
 from app.services.hardware_telemetry import HardwareTelemetryProvider
-
 
 
 class OllamaServiceError(Exception):
@@ -44,69 +45,65 @@ class OllamaServiceError(Exception):
 
 
 class OllamaConnectionError(OllamaServiceError):
-    """Raised when the Ollama server cannot be reached."""
+    """Raised when cannot connect to Ollama daemon."""
 
-    def __init__(self, message: str = "Unable to connect to Ollama service"):
+    def __init__(self, message: str):
         super().__init__(message, status_code=503)
 
 
 class OllamaTimeoutError(OllamaServiceError):
-    """Raised when Ollama request exceeds timeout limit."""
+    """Raised when Ollama inference times out."""
 
-    def __init__(self, message: str = "Ollama request timed out"):
+    def __init__(self, message: str):
         super().__init__(message, status_code=504)
 
 
 class OllamaResponseError(OllamaServiceError):
-    """Raised when Ollama returns an invalid or error response."""
+    """Raised when Ollama returns an error or malformed response."""
 
-    def __init__(self, message: str = "Invalid response from Ollama"):
+    def __init__(self, message: str):
         super().__init__(message, status_code=502)
 
 
 class OllamaService:
-    """Encapsulates task-aware prompt optimization and Ollama model communication."""
+    """Core service encapsulating Ollama LLM interactions and optimization pipeline."""
 
     _inference_slots = concurrency_controller._semaphore
 
-    @staticmethod
-    def estimate_tokens(text: str) -> TokenEstimation:
-        """Estimate token footprint using documented ~4 characters per token heuristic."""
+    @classmethod
+    def estimate_tokens(cls, text: str) -> TokenEstimation:
+        """Estimate token count based on conservative character-based heuristic.
+
+        Frontier model benchmark standard: ~4 characters per token.
+        """
         trimmed = text.strip()
-        char_count = len(text)
-        if not trimmed:
+        char_count = len(trimmed)
+        if char_count == 0:
             return TokenEstimation(char_count=0, estimated_tokens=0)
+
         heuristic = settings.CHARS_PER_TOKEN_HEURISTIC or 4.0
-        estimated_tokens = max(1, math.ceil(len(trimmed) / heuristic))
-        return TokenEstimation(char_count=char_count, estimated_tokens=estimated_tokens)
+        tokens = max(1, math.ceil(char_count / heuristic))
+        return TokenEstimation(char_count=char_count, estimated_tokens=tokens)
 
     @classmethod
     def clean_optimized_output(cls, raw_output: str, original_prompt: str) -> str:
-        """Clean potential conversational artifacts from small local LLM outputs."""
+        """Strip conversational filler, meta-announcements, and echoed system instructions."""
         output = raw_output.strip()
 
-        # Check if model output contains embedded markers like "Rewritten prompt:" or "Optimized prompt:"
-        parts = re.split(
-            r"(?:^|\n)(?:rewritten|optimized|improved|final)\s+prompt:?\s*\n*",
-            output,
-            flags=re.IGNORECASE,
-        )
-        if len(parts) > 1 and parts[-1].strip():
-            output = parts[-1].strip()
-
-        # Remove common introductory phrases small LLMs prepend
-        intro_patterns = [
-            r"^(sure,?\s*(here'?s|here is)?\s*(the|an)?\s*(optimized|rewritten|improved)?\s*prompt:?)\s*",
-            r"^(certainly,?\s*(here'?s|here is)?\s*(the|an)?\s*(optimized|rewritten|improved)?\s*prompt:?)\s*",
-            r"^(here is (the|an)? (optimized|rewritten|improved)? prompt:?)\s*",
-            r"^(optimized prompt:?)\s*",
-            r"^(rewritten prompt:?)\s*",
-            r"^(here's (the|an)? (optimized|rewritten)? prompt:?)\s*",
+        # Regex patterns for conversational prefixes
+        conversational_prefixes = [
+            r"^Here is (?:an?|the) (?:optimized|rewritten|improved|concise|structured) (?:version|prompt)[^:\n]*:\s*\n*",
+            r"^Here'?s (?:an?|the) (?:optimized|rewritten|improved|concise|structured) (?:version|prompt)[^:\n]*:\s*\n*",
+            r"^Sure! Here is[^\n]*:\s*\n*",
+            r"^Certainly! Here is[^\n]*:\s*\n*",
+            r"^(?:Optimized|Rewritten) (?:Prompt|Version):\s*\n*",
+            r"^Below is (?:the|an) (?:optimized|improved) (?:prompt|version)[^:\n]*:\s*\n*",
         ]
-        for pattern in intro_patterns:
-            output = re.sub(pattern, "", output, flags=re.IGNORECASE).strip()
 
-        # Strip echoed system instructions
+        for pat in conversational_prefixes:
+            output = re.sub(pat, "", output, flags=re.IGNORECASE).strip()
+
+        # If model echoed the system instruction checklist
         instruction_echo_prefixes = [
             r"^- Organize instructions into clean[^\n]*\n*",
             r"^- Clearly delineate Task[^\n]*\n*",
@@ -247,15 +244,26 @@ class OllamaService:
         cls,
         system_instruction: str,
         prompt: str,
+        output_budget: Optional[OutputBudgetAllocation] = None,
     ) -> Tuple[str, int, dict]:
-        """Invoke Ollama with adaptive context budgeting, memory-aware concurrency, and native telemetry."""
+        """Invoke Ollama with adaptive context budgeting, output budget control, and native telemetry."""
 
         url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
         formatted_prompt = f"Original prompt to optimize:\n\n{prompt}"
 
+        target_num_predict = (
+            output_budget.allocated_budget
+            if output_budget is not None
+            else settings.OLLAMA_NUM_PREDICT
+        )
+
         # Adaptive Context Budgeting (snapped to stable tiers for KV prefix cache reuse)
         try:
-            budget = AdaptiveContextManager.calculate_budget(system_instruction, formatted_prompt)
+            budget = AdaptiveContextManager.calculate_budget(
+                system_instruction=system_instruction,
+                formatted_prompt=formatted_prompt,
+                output_budget=target_num_predict,
+            )
         except ContextOverflowError as exc:
             raise OllamaServiceError(exc.message, status_code=exc.status_code) from exc
 
@@ -269,7 +277,7 @@ class OllamaService:
                 "temperature": settings.OLLAMA_TEMPERATURE,
                 "top_p": settings.OLLAMA_TOP_P,
                 "num_ctx": selected_num_ctx,
-                "num_predict": settings.OLLAMA_NUM_PREDICT,
+                "num_predict": target_num_predict,
             },
         }
 
@@ -323,6 +331,25 @@ class OllamaService:
         eval_count = data.get("eval_count")
         eval_duration = data.get("eval_duration")
         load_duration = data.get("load_duration")
+        done_reason = data.get("done_reason")
+
+        # Determine if budget limit was hit and calculate utilization
+        if done_reason == "length":
+            hit_budget_limit = True
+        elif done_reason == "stop":
+            hit_budget_limit = False
+        elif isinstance(eval_count, int) and eval_count >= target_num_predict:
+            hit_budget_limit = True
+        elif isinstance(eval_count, int) and eval_count < target_num_predict:
+            hit_budget_limit = False
+        else:
+            hit_budget_limit = None
+
+        budget_utilization_percent = (
+            round((eval_count / target_num_predict) * 100, 1)
+            if isinstance(eval_count, int) and target_num_predict > 0
+            else None
+        )
 
         telemetry = {
             "queue_wait_ms": slot_telemetry["queue_wait_ms"],
@@ -332,7 +359,25 @@ class OllamaService:
             "selected_num_ctx": selected_num_ctx,
             "context_selection_reason": budget["selection_reason"],
             "context_budget_breakdown": budget,
-            "num_predict_limit": settings.OLLAMA_NUM_PREDICT,
+            "num_predict_limit": target_num_predict,
+            "done_reason": done_reason,
+            "hit_budget_limit": hit_budget_limit,
+            "budget_utilization_percent": budget_utilization_percent,
+            "output_budget_allocation": (
+                {
+                    "allocated_budget": output_budget.allocated_budget,
+                    "requested_budget": output_budget.requested_budget,
+                    "policy": output_budget.policy,
+                    "reason": output_budget.reason,
+                    "task_category": output_budget.task_category,
+                    "candidate_budget": output_budget.candidate_budget,
+                    "detected_constraint": output_budget.detected_constraint,
+                    "is_clamped_by_context": output_budget.is_clamped_by_context,
+                    "is_clamped_by_bounds": output_budget.is_clamped_by_bounds,
+                }
+                if output_budget
+                else None
+            ),
             "active_concurrency_capacity": slot_telemetry["active_concurrency_capacity"],
             "active_concurrency_in_flight": slot_telemetry["active_concurrency_in_flight"],
             "concurrency_mode": slot_telemetry["concurrency_mode"],
@@ -373,6 +418,8 @@ class OllamaService:
                 "eval_count": "ollama_native",
                 "eval_duration": "ollama_native",
                 "load_duration": "ollama_native",
+                "done_reason": "ollama_native",
+                "output_budget": "argus_output_budget_controller",
                 "wall_time_ms": "argus_measurement",
                 "queue_wait_ms": "argus_measurement",
                 "selected_num_ctx": "argus_adaptive_budget",
@@ -388,6 +435,17 @@ class OllamaService:
         """Task-aware prompt optimization pipeline orchestrating Stages A through D."""
         # --- STAGE A: Understand the Prompt ---
         analysis = TaskAnalyzer.analyze(request.prompt)
+
+        # Output Budget Allocation (Phase 4.1)
+        try:
+            output_allocation = OutputBudgetController.allocate_budget(
+                prompt=request.prompt,
+                mode=request.mode,
+                task_analysis=analysis,
+                requested_output_budget=request.requested_output_budget,
+            )
+        except ContextOverflowError as exc:
+            raise OllamaServiceError(exc.message, status_code=exc.status_code) from exc
 
         # --- STAGE B: Select Strategy ---
         strategy = StrategySelector.select_strategy(analysis, request.mode)
@@ -416,6 +474,7 @@ class OllamaService:
             raw_candidate, call_ms, call_telemetry = await cls._execute_model_call(
                 system_instruction=system_instruction,
                 prompt=request.prompt,
+                output_budget=output_allocation,
             )
             inference_telemetry.append(call_telemetry)
             total_duration_ms += call_ms
@@ -445,6 +504,7 @@ class OllamaService:
                     retry_raw, retry_ms, retry_telemetry = await cls._execute_model_call(
                         system_instruction=retry_instruction,
                         prompt=request.prompt,
+                        output_budget=output_allocation,
                     )
                     inference_telemetry.append(retry_telemetry)
                     total_duration_ms += retry_ms
@@ -532,6 +592,25 @@ class OllamaService:
             request.prompt, optimized_prompt, request.mode
         )
 
+        primary_call = inference_telemetry[0] if inference_telemetry else {}
+        output_budget_telemetry = (
+            OutputBudgetTelemetry(
+                requested_budget=output_allocation.requested_budget,
+                allocated_budget=output_allocation.allocated_budget,
+                policy=output_allocation.policy,
+                reason=output_allocation.reason,
+                task_category=output_allocation.task_category,
+                actual_generated_tokens=primary_call.get("eval_count"),
+                generation_duration_ms=primary_call.get("eval_duration_ms"),
+                generation_tokens_per_second=primary_call.get("generation_tokens_per_second"),
+                done_reason=primary_call.get("done_reason"),
+                hit_budget_limit=primary_call.get("hit_budget_limit"),
+                budget_utilization_percent=primary_call.get("budget_utilization_percent"),
+            )
+            if output_allocation
+            else None
+        )
+
         return OptimizeResponse(
             original_prompt=request.prompt,
             optimized_prompt=optimized_prompt,
@@ -566,5 +645,6 @@ class OllamaService:
                     ),
                 } if inference_telemetry else None
             ),
+            output_budget=output_budget_telemetry,
             kv_runtime_policy=OllamaProcessManager.get_runtime_policy(),
         )

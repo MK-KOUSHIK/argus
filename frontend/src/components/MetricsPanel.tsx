@@ -1,7 +1,19 @@
 import React from 'react';
 import { Card } from './Card';
 import { OptimizationResult } from '@/types';
-import { TrendingDown, TrendingUp, CheckCircle, ShieldCheck, Layers, Cpu, Clock, AlertTriangle, Tag, Info } from 'lucide-react';
+import {
+  TrendingDown,
+  TrendingUp,
+  CheckCircle,
+  ShieldCheck,
+  Layers,
+  Cpu,
+  Clock,
+  AlertTriangle,
+  Tag,
+  Info,
+  Sliders,
+} from 'lucide-react';
 
 export interface MetricsPanelProps {
   result: OptimizationResult;
@@ -26,6 +38,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ result }) => {
     targetModel,
     executionTimeMs,
     model,
+    outputBudget,
   } = result;
 
   // Percentage of original tokens retained (can be > 100% if expanded)
@@ -221,6 +234,97 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ result }) => {
           <span>Heuristic tokenization (~4 chars/token)</span>
         </div>
       </div>
+
+      {/* Output Budget Control & Generation Telemetry (Phase 4.1) */}
+      {outputBudget && (
+        <div className="rounded-xl bg-[#080d19] border border-white/5 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Output Budget Allocation</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono text-slate-400 capitalize">
+                Policy: {outputBudget.policy}
+              </span>
+              {outputBudget.done_reason && (
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono border ${
+                  outputBudget.hit_budget_limit
+                    ? 'bg-amber-950/40 border-amber-500/30 text-amber-300'
+                    : 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
+                }`}>
+                  {outputBudget.hit_budget_limit ? (
+                    <>
+                      <AlertTriangle className="w-3 h-3 text-amber-400" />
+                      Limit Reached ({outputBudget.done_reason})
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-3 h-3 text-emerald-400" />
+                      Natural EOS ({outputBudget.done_reason})
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="space-y-1">
+              <div className="text-[10px] text-slate-500">Allocated Budget</div>
+              <div className="text-sm font-mono text-cyan-300 font-bold">
+                {outputBudget.allocated_budget} tokens
+              </div>
+              <div className="text-[10px] text-slate-500">
+                {outputBudget.requested_budget ? `Requested: ${outputBudget.requested_budget}` : 'Adaptive allocation'}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-[10px] text-slate-500">Generated Tokens</div>
+              <div className="text-sm font-mono text-slate-200 font-bold">
+                {outputBudget.actual_generated_tokens ?? 'n/a'}
+              </div>
+              <div className="text-[10px] text-slate-500">
+                Ollama eval_count
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-[10px] text-slate-500">Budget Utilization</div>
+              <div className="text-sm font-mono text-slate-200 font-bold">
+                {outputBudget.budget_utilization_percent != null
+                  ? `${outputBudget.budget_utilization_percent}%`
+                  : 'n/a'}
+              </div>
+              <div className="text-[10px] text-slate-500">
+                {outputBudget.actual_generated_tokens != null
+                  ? `${outputBudget.actual_generated_tokens} / ${outputBudget.allocated_budget} tokens`
+                  : 'Native counter unavailable'}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-[10px] text-slate-500">Generation Rate</div>
+              <div className="text-sm font-mono text-slate-200 font-bold">
+                {outputBudget.generation_tokens_per_second != null
+                  ? `${outputBudget.generation_tokens_per_second} tok/s`
+                  : 'n/a'}
+              </div>
+              <div className="text-[10px] text-slate-500">
+                {outputBudget.generation_duration_ms != null
+                  ? `${outputBudget.generation_duration_ms} ms`
+                  : 'Duration unavailable'}
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-white/5 pt-2 text-[11px] text-slate-400 font-mono">
+            <span className="text-slate-500">Rationale: </span>
+            {outputBudget.reason}
+          </div>
+        </div>
+      )}
 
       {/* Runtime measurements are native Ollama counters when available. */}
       <div className="rounded-xl bg-[#080d19] border border-white/5 p-4 space-y-3">

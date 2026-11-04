@@ -71,6 +71,7 @@ class AdaptiveContextManager:
         formatted_prompt: str,
         min_ctx: Optional[int] = None,
         max_ctx: Optional[int] = None,
+        output_budget: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Calculate complete required context budget and select optimal context tier."""
         min_limit = min_ctx if min_ctx is not None else settings.OLLAMA_NUM_CTX
@@ -80,7 +81,7 @@ class AdaptiveContextManager:
         input_tokens, token_source = cls.estimate_tokens(full_input_text)
 
         reserve_tokens = settings.OLLAMA_CONTEXT_RESERVE_TOKENS
-        predict_tokens = settings.OLLAMA_NUM_PREDICT
+        predict_tokens = output_budget if output_budget is not None else settings.OLLAMA_NUM_PREDICT
         required_context = input_tokens + reserve_tokens + predict_tokens
 
         eligible_tiers = cls.get_eligible_tiers(min_limit, max_limit)
@@ -89,6 +90,7 @@ class AdaptiveContextManager:
             "estimated_input_tokens": input_tokens,
             "reserve_tokens": reserve_tokens,
             "predict_tokens": predict_tokens,
+            "output_budget_source": "dynamic_controller" if output_budget is not None else "static_setting",
             "total_required_context": required_context,
             "token_estimation_source": token_source,
             "max_num_ctx_limit": max_limit,

@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     OLLAMA_TEMPERATURE: float = 0.2
     OLLAMA_TOP_P: float = 0.9
 
+    # Output Budget Control Settings (Phase 4.1)
+    OUTPUT_BUDGET_ENABLED: bool = True
+    OUTPUT_BUDGET_POLICY: str = "adaptive"  # "adaptive", "fixed", or "conservative"
+    OUTPUT_BUDGET_MIN_TOKENS: int = 64
+    OUTPUT_BUDGET_MAX_TOKENS: int = 2048
+    OUTPUT_BUDGET_DEFAULT_TOKENS: int = 512
+    OUTPUT_BUDGET_SAFETY_HEADROOM: int = 64
+
     # Optimization & Token Estimation Heuristics
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0
     MAX_VALIDATION_RETRY_ATTEMPTS: int = 1
@@ -85,6 +93,16 @@ class Settings(BaseSettings):
         if v < num_ctx:
             raise ValueError(
                 f"OLLAMA_MAX_NUM_CTX ({v}) must be greater than or equal to OLLAMA_NUM_CTX ({num_ctx})"
+            )
+        return v
+
+    @field_validator("OUTPUT_BUDGET_MAX_TOKENS")
+    @classmethod
+    def validate_output_budget_max(cls, v: int, info) -> int:
+        min_budget = info.data.get("OUTPUT_BUDGET_MIN_TOKENS", 64)
+        if v < min_budget:
+            raise ValueError(
+                f"OUTPUT_BUDGET_MAX_TOKENS ({v}) must be greater than or equal to OUTPUT_BUDGET_MIN_TOKENS ({min_budget})"
             )
         return v
 
