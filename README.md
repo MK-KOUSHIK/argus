@@ -304,7 +304,7 @@ Argus implements a modular 4-stage optimization pipeline:
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 ```
-- **79 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, dynamic context tier derivation, 413 overflow safeguards, hardware telemetry, independent process verification, dynamic concurrency capacity enforcement, and **Output Budget Control** (task baselines, explicit word/sentence directives, bounds enforcement, headroom clamping, and native telemetry extraction).
+- **87 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, dynamic context tier derivation, 413 overflow safeguards, hardware telemetry, independent process verification, dynamic concurrency capacity enforcement, and **Output Budget Control** (task baselines, explicit word/sentence directives, policy semantics, bounds enforcement, centralized headroom clamping, and native telemetry extraction).
 
 ### 2. Frontend Tests (Vitest)
 ```bash
@@ -332,11 +332,14 @@ Argus includes a production-grade KV-cache runtime optimization and telemetry en
    - Managed via the reproducible PowerShell launcher: [`scripts/launch_ollama.ps1`](scripts/launch_ollama.ps1).
 
 2. **Output Budget Control (Phase 4.1)**:
-   - Replaces fixed 512-token output generation with intelligent, task-aware budgeting (`num_predict`).
-   - Automatically detects word count constraints (`under 50 words`), sentence constraints (`in one sentence`), paragraph limits, and brevity directives (`tl;dr`).
-   - Scales budgets across task categories and optimization modes (`concise`: 0.75x, `balanced`: 1.0x, `structure`: 1.2x).
-   - Coordinates with `AdaptiveContextManager` so context tier calculations reflect actual output headroom, reducing overall context requirements.
-   - Conserves **35.0% aggregate generation headroom** across test suites with **100% natural completions (`done_reason == "stop"`)**.
+   - Replaces fixed 512-token output generation with intelligent, task-aware generation ceilings (`num_predict`).
+   - Supports three distinct validated runtime policies (`adaptive`, `fixed`, `conservative`):
+     - `adaptive`: Dynamically calculates ceilings from validated task category baselines, mode scaling (`concise`: 0.75x, `balanced`: 1.0x, `structure`: 1.2x), complexity scores (+20%), and explicit prompt constraints (`under 50 words`, `in one sentence`, `tl;dr`).
+     - `fixed`: Uses `OUTPUT_BUDGET_DEFAULT_TOKENS` without dynamic variation.
+     - `conservative`: Minimizes memory footprint via 0.75x dampened baselines, 0 constraint headroom, and capped limits.
+   - Coordinates with `AdaptiveContextManager` via centralized headroom calculations, protecting against silent input truncation and enforcing HTTP 413 context boundaries.
+   - Strictly separates allocated budget ceiling from actual tokens generated, reporting native Ollama completion causes (`done_reason: stop` vs `length`).
+   - Conserves **35.0% aggregate generation ceiling headroom** across test suites with **100% natural completions (`done_reason == "stop"`)**.
 
 3. **Adaptive Context-Length Management & Dynamic Tier Derivation**:
    - Enforces token budgeting: $\text{Prompt} + \text{System} + \text{Wrapper} + \text{Predict (Dynamic)} + \text{Headroom (256)}$.

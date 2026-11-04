@@ -8,7 +8,7 @@ Enforces Part A Zero-Hardcoding standard:
 
 import json
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -62,6 +62,21 @@ class Settings(BaseSettings):
     OUTPUT_BUDGET_MAX_TOKENS: int = 2048
     OUTPUT_BUDGET_DEFAULT_TOKENS: int = 512
     OUTPUT_BUDGET_SAFETY_HEADROOM: int = 64
+    OUTPUT_BUDGET_TASK_BASELINES: Dict[str, int] = {
+        "summarization": 256,
+        "extraction": 256,
+        "data_analysis": 384,
+        "coding": 512,
+        "planning": 512,
+        "writing": 512,
+        "research": 512,
+        "general": 384,
+    }
+    OUTPUT_BUDGET_MODE_SCALING: Dict[str, float] = {
+        "concise": 0.75,
+        "balanced": 1.0,
+        "structure": 1.2,
+    }
 
     # Optimization & Token Estimation Heuristics
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0
@@ -95,6 +110,103 @@ class Settings(BaseSettings):
                 f"OLLAMA_MAX_NUM_CTX ({v}) must be greater than or equal to OLLAMA_NUM_CTX ({num_ctx})"
             )
         return v
+
+    @field_validator("OUTPUT_BUDGET_POLICY")
+    @classmethod
+    def validate_output_budget_policy(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        allowed = {"adaptive", "fixed", "conservative"}
+        if normalized not in allowed:
+            raise ValueError(
+                f"OUTPUT_BUDGET_POLICY must be one of {sorted(allowed)}; got '{v}'"
+            )
+        return normalized
+
+    @field_validator("OUTPUT_BUDGET_MIN_TOKENS")
+    @classmethod
+    def validate_output_budget_min(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"OUTPUT_BUDGET_MIN_TOKENS must be at least 1; got {v}")
+        return v
+
+    @field_validator("OUTPUT_BUDGET_DEFAULT_TOKENS")
+    @classmethod
+    def validate_output_budget_default(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"OUTPUT_BUDGET_DEFAULT_TOKENS must be at least 1; got {v}")
+        return v
+
+    @field_validator("OUTPUT_BUDGET_SAFETY_HEADROOM")
+    @classmethod
+    def validate_output_budget_safety_headroom(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"OUTPUT_BUDGET_SAFETY_HEADROOM must be non-negative; got {v}")
+        return v
+
+    @field_validator("OUTPUT_BUDGET_TASK_BASELINES", mode="before")
+    @classmethod
+    def validate_output_budget_task_baselines(cls, v: Union[str, Dict[str, int]]) -> Dict[str, int]:
+        if isinstance(v, str):
+            try:
+                v = json.loads(v)
+            except Exception as exc:
+                raise ValueError(f"OUTPUT_BUDGET_TASK_BASELINES must be valid JSON: {exc}") from exc
+        if not isinstance(v, dict):
+            raise ValueError("OUTPUT_BUDGET_TASK_BASELINES must be a dictionary")
+
+        required_categories = {
+            "coding", "data_analysis", "writing", "summarization",
+            "research", "extraction", "planning", "general"
+        }
+        missing = required_categories - set(v.keys())
+        if missing:
+            raise ValueError(
+                f"OUTPUT_BUDGET_TASK_BASELINES missing required categories: {sorted(missing)}"
+            )
+
+        validated: Dict[str, int] = {}
+        for cat, tokens in v.items():
+            if not isinstance(tokens, int) or isinstance(tokens, bool):
+                try:
+                    tokens = int(tokens)
+                except (ValueError, TypeError):
+                    raise ValueError(f"Baseline for task category '{cat}' must be an integer; got {tokens}")
+            if tokens <= 0:
+                raise ValueError(f"Baseline for task category '{cat}' must be positive; got {tokens}")
+            validated[cat] = tokens
+        return validated
+
+    @field_validator("OUTPUT_BUDGET_MODE_SCALING", mode="before")
+    @classmethod
+    def validate_output_budget_mode_scaling(cls, v: Union[str, Dict[str, float]]) -> Dict[str, float]:
+        if isinstance(v, str):
+            try:
+                v = json.loads(v)
+            except Exception as exc:
+                raise ValueError(f"OUTPUT_BUDGET_MODE_SCALING must be valid JSON: {exc}") from exc
+        if not isinstance(v, dict):
+            raise ValueError("OUTPUT_BUDGET_MODE_SCALING must be a dictionary")
+
+        required_modes = {"concise", "balanced", "structure"}
+        missing = required_modes - set(v.keys())
+        if missing:
+            raise ValueError(
+                f"OUTPUT_BUDGET_MODE_SCALING missing required modes: {sorted(missing)}"
+            )
+
+        validated: Dict[str, float] = {}
+        for mode, mult in v.items():
+            if not isinstance(mult, (int, float)) or isinstance(mult, bool):
+                try:
+                    mult = float(mult)
+                except (ValueError, TypeError):
+                    raise ValueError(f"Scaling factor for mode '{mode}' must be a number; got {mult}")
+            if mult <= 0.0 or mult > 5.0:
+                raise ValueError(
+                    f"Scaling factor for mode '{mode}' must be between 0.0 (exclusive) and 5.0 (inclusive); got {mult}"
+                )
+            validated[mode] = float(mult)
+        return validated
 
     @field_validator("OUTPUT_BUDGET_MAX_TOKENS")
     @classmethod

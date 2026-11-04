@@ -369,3 +369,250 @@ async def test_end_to_end_optimize_endpoint_with_requested_budget(async_client: 
         assert ob["done_reason"] == "stop"
         assert ob["hit_budget_limit"] is False
         assert ob["budget_utilization_percent"] == round((45 / 180) * 100, 1)
+
+
+def test_config_validation_policy_names():
+    """Verify OUTPUT_BUDGET_POLICY validator only accepts adaptive, fixed, conservative."""
+    from app.core.config import Settings
+
+    # Valid policies
+    for pol in ["adaptive", "fixed", "conservative", "ADAPTIVE", " Conservative "]:
+        s = Settings(OUTPUT_BUDGET_POLICY=pol)
+        assert s.OUTPUT_BUDGET_POLICY == pol.strip().lower()
+
+    # Invalid policy
+    with pytest.raises(Exception):
+        Settings(OUTPUT_BUDGET_POLICY="aggressive")
+
+    with pytest.raises(Exception):
+        Settings(OUTPUT_BUDGET_POLICY="dynamic")
+
+
+def test_config_validation_baselines():
+    """Verify OUTPUT_BUDGET_TASK_BASELINES requires all 8 categories and positive values."""
+    from app.core.config import Settings
+
+    # Missing a required category
+    incomplete_baselines = {
+        "coding": 512,
+        "data_analysis": 384,
+        "writing": 512,
+        "summarization": 256,
+        "research": 384,
+        "extraction": 256,
+        "planning": 512,
+        # missing "general"
+    }
+    with pytest.raises(Exception) as exc:
+        Settings(OUTPUT_BUDGET_TASK_BASELINES=incomplete_baselines)
+    assert "missing required categories" in str(exc.value).lower()
+
+    # Negative baseline value
+    invalid_val_baselines = dict(incomplete_baselines)
+    invalid_val_baselines["general"] = -50
+    with pytest.raises(Exception) as exc:
+        Settings(OUTPUT_BUDGET_TASK_BASELINES=invalid_val_baselines)
+    assert "must be positive" in str(exc.value).lower()
+
+
+def test_config_validation_mode_scaling():
+    """Verify OUTPUT_BUDGET_MODE_SCALING requires all modes and valid multipliers."""
+    from app.core.config import Settings
+
+    # Missing a mode
+    incomplete_scaling = {"concise": 0.75, "balanced": 1.0}
+    with pytest.raises(Exception) as exc:
+        Settings(OUTPUT_BUDGET_MODE_SCALING=incomplete_scaling)
+    assert "missing required modes" in str(exc.value).lower()
+
+    # Multiplier out of range (> 5.0)
+    out_of_range = {"concise": 0.75, "balanced": 1.0, "structure": 6.5}
+    with pytest.raises(Exception) as exc:
+        Settings(OUTPUT_BUDGET_MODE_SCALING=out_of_range)
+    assert "must be between" in str(exc.value).lower()
+
+
+def test_policy_semantics_fixed():
+    """Verify fixed policy always returns default tokens without heuristic modifications."""
+    orig_policy = settings.OUTPUT_BUDGET_POLICY
+    orig_enabled = settings.OUTPUT_BUDGET_ENABLED
+    try:
+        settings.OUTPUT_BUDGET_ENABLED = True
+        settings.OUTPUT_BUDGET_POLICY = "fixed"
+
+        # Explicit word constraint should be ignored under fixed policy
+        alloc = OutputBudgetController.allocate_budget(
+            prompt="Summarize the article in under 10 words.",
+            mode="concise",
+        )
+        assert alloc.policy == "fixed"
+        assert alloc.allocated_budget == settings.OUTPUT_BUDGET_DEFAULT_TOKENS
+    finally:
+        settings.OUTPUT_BUDGET_POLICY = orig_policy
+        settings.OUTPUT_BUDGET_ENABLED = orig_enabled
+
+
+def test_policy_semantics_conservative():
+    """Verify conservative policy applies 0.75x baseline, 0 headroom on constraints, and capped max."""
+    orig_policy = settings.OUTPUT_BUDGET_POLICY
+    orig_enabled = settings.OUTPUT_BUDGET_ENABLED
+    try:
+        settings.OUTPUT_BUDGET_ENABLED = True
+        settings.OUTPUT_BUDGET_POLICY = "conservative"
+
+        # 1. Category baseline should be dampened by 0.75x
+        # coding baseline is 512 -> 512 * 0.75 = 384
+        alloc_code = OutputBudgetController.allocate_budget(
+            prompt="Write a Python script to sort a list of numbers.",
+            mode="balanced",
+        )
+        assert alloc_code.policy == "conservative"
+        assert alloc_code.allocated_budget == int(math.ceil(512 * 0.75))
+
+        # 2. Explicit word limit has 0 safety headroom (not +64)
+        # 50 words * 1.33 = 67 tokens
+        alloc_word = OutputBudgetController.allocate_budget(
+            prompt="Summarize the key differences in under 50 words.",
+            mode="balanced",
+        )
+        assert alloc_word.allocated_budget == math.ceil(50 * 1.33)
+        assert "conservative" in alloc_word.reason.lower()
+    finally:
+        settings.OUTPUT_BUDGET_POLICY = orig_policy
+        settings.OUTPUT_BUDGET_ENABLED = orig_enabled
+
+
+@pytest.mark.asyncio
+async def test_telemetry_done_reason_boundary_cases():
+    """Verify hit_budget_limit relies strictly on native done_reason, not eval_count heuristic."""
+    # Case A: eval_count >= num_predict, but done_reason="stop" -> MUST BE False
+    fake_response_stop = {
+        "response": "Finished naturally right at or above the ceiling limit.",
+        "done": True,
+        "done_reason": "stop",
+        "eval_count": 200,
+        "eval_duration": 400_000_000,
+    }
+    mock_resp_a = MagicMock(status_code=200)
+    mock_resp_a.json.return_value = fake_response_stop
+    mock_client_a = AsyncMock()
+    mock_client_a.post.return_value = mock_resp_a
+    mock_client_a.__aenter__.return_value = mock_client_a
+    mock_client_a.__aexit__.return_value = None
+
+    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client_a):
+        alloc = OutputBudgetAllocation(
+            allocated_budget=200,
+            requested_budget=None,
+            policy="adaptive",
+            reason="test",
+            task_category="coding",
+            candidate_budget=200,
+        )
+        _, _, telemetry = await OllamaService._execute_model_call(
+            system_instruction="System test",
+            prompt="Test prompt",
+            output_budget=alloc,
+        )
+        assert telemetry["done_reason"] == "stop"
+        assert telemetry["hit_budget_limit"] is False
+
+    # Case B: eval_count < num_predict, but done_reason="length" -> MUST BE True
+    fake_response_len = {
+        "response": "Cut off due to internal length ceiling.",
+        "done": True,
+        "done_reason": "length",
+        "eval_count": 195,
+        "eval_duration": 400_000_000,
+    }
+    mock_resp_b = MagicMock(status_code=200)
+    mock_resp_b.json.return_value = fake_response_len
+    mock_client_b = AsyncMock()
+    mock_client_b.post.return_value = mock_resp_b
+    mock_client_b.__aenter__.return_value = mock_client_b
+    mock_client_b.__aexit__.return_value = None
+
+    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client_b):
+        alloc = OutputBudgetAllocation(
+            allocated_budget=200,
+            requested_budget=None,
+            policy="adaptive",
+            reason="test",
+            task_category="coding",
+            candidate_budget=200,
+        )
+        _, _, telemetry = await OllamaService._execute_model_call(
+            system_instruction="System test",
+            prompt="Test prompt",
+            output_budget=alloc,
+        )
+        assert telemetry["done_reason"] == "length"
+        assert telemetry["hit_budget_limit"] is True
+
+    # Case C: done_reason is missing, even if eval_count >= num_predict -> MUST BE None
+    fake_response_none = {
+        "response": "Response without done_reason.",
+        "done": True,
+        "eval_count": 200,
+    }
+    mock_resp_c = MagicMock(status_code=200)
+    mock_resp_c.json.return_value = fake_response_none
+    mock_client_c = AsyncMock()
+    mock_client_c.post.return_value = mock_resp_c
+    mock_client_c.__aenter__.return_value = mock_client_c
+    mock_client_c.__aexit__.return_value = None
+
+    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client_c):
+        alloc = OutputBudgetAllocation(
+            allocated_budget=200,
+            requested_budget=None,
+            policy="adaptive",
+            reason="test",
+            task_category="coding",
+            candidate_budget=200,
+        )
+        _, _, telemetry = await OllamaService._execute_model_call(
+            system_instruction="System test",
+            prompt="Test prompt",
+            output_budget=alloc,
+        )
+        assert telemetry["done_reason"] is None
+        assert telemetry["hit_budget_limit"] is None
+
+
+def test_task_confidence_derivation():
+    """Verify task analyzer derives empirical confidence and returns None for general tasks."""
+    # Definite coding task
+    analysis_code = TaskAnalyzer.analyze("Write a Python script to parse JSON and return data.")
+    assert analysis_code.task_category == "coding"
+    assert analysis_code.task_confidence is not None
+    assert 0.0 < analysis_code.task_confidence <= 1.0
+
+    # Definite summarization task
+    analysis_sum = TaskAnalyzer.analyze("Summarize the main points of this document.")
+    assert analysis_sum.task_category == "summarization"
+    assert analysis_sum.task_confidence is not None
+    assert 0.0 < analysis_sum.task_confidence <= 1.0
+
+    # Ambiguous / general prompt
+    analysis_gen = TaskAnalyzer.analyze("Hello there, how are you today?")
+    assert analysis_gen.task_category == "general"
+    assert analysis_gen.task_confidence is None
+
+
+def test_centralized_headroom_long_system_instruction():
+    """Verify centralized headroom deducts system instruction tokens accurately."""
+    system_inst = "A" * 2000  # ~500 tokens
+    prompt = "A" * 1000  # ~250 tokens
+    # max_num_ctx = 2048, reserve = 256
+
+    headroom_info = AdaptiveContextManager.calculate_headroom(
+        system_instruction=system_inst,
+        prompt=prompt,
+        max_num_ctx=2048,
+        reserve_tokens=256,
+    )
+    assert headroom_info["estimated_input_tokens"] > 700
+    assert headroom_info["reserve_tokens"] == 256
+    assert headroom_info["available_headroom"] == 2048 - headroom_info["estimated_input_tokens"] - 256
+

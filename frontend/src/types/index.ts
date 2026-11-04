@@ -80,6 +80,7 @@ export interface OutputBudgetTelemetry {
   policy: string;
   reason: string;
   task_category: string;
+  task_confidence?: number | null;
   actual_generated_tokens?: number | null;
   generation_duration_ms?: number | null;
   generation_tokens_per_second?: number | null;

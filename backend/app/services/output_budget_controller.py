@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
-from app.services.adaptive_context_manager import ContextOverflowError
+from app.services.adaptive_context_manager import AdaptiveContextManager, ContextOverflowError
 from app.services.task_analyzer import TaskAnalysisResult, TaskAnalyzer
 
 
@@ -28,7 +28,7 @@ class OutputBudgetAllocation:
     reason: str
     task_category: str
     candidate_budget: int
-    task_confidence: float = 1.0
+    task_confidence: Optional[float] = None
     detected_constraint: Optional[str] = None
     is_clamped_by_context: bool = False
     is_clamped_by_bounds: bool = False
@@ -37,24 +37,30 @@ class OutputBudgetAllocation:
 class OutputBudgetController:
     """Determines dynamic output token budgets for inference requests."""
 
-    # Default baseline output budgets by detected task category
-    TASK_BUDGET_BASELINES: Dict[str, int] = {
-        "summarization": 256,
-        "extraction": 256,
-        "data_analysis": 384,
-        "coding": 512,
-        "planning": 512,
-        "writing": 512,
-        "research": 512,
-        "general": 384,
-    }
+    @classmethod
+    def get_task_baselines(cls) -> Dict[str, int]:
+        """Return validated task budget baselines from application settings."""
+        baselines = settings.OUTPUT_BUDGET_TASK_BASELINES
+        if not isinstance(baselines, dict) or not baselines:
+            raise ValueError("OUTPUT_BUDGET_TASK_BASELINES configuration is invalid or missing.")
+        return baselines
 
-    # Optimization mode scaling multipliers
-    MODE_SCALING_FACTORS: Dict[str, float] = {
-        "concise": 0.75,
-        "balanced": 1.0,
-        "structure": 1.2,
-    }
+    @classmethod
+    def get_mode_scaling_factors(cls) -> Dict[str, float]:
+        """Return validated mode scaling multipliers from application settings."""
+        scaling = settings.OUTPUT_BUDGET_MODE_SCALING
+        if not isinstance(scaling, dict) or not scaling:
+            raise ValueError("OUTPUT_BUDGET_MODE_SCALING configuration is invalid or missing.")
+        return scaling
+
+    # Backwards-compatibility class attributes delegating to settings
+    @property
+    def TASK_BUDGET_BASELINES(self) -> Dict[str, int]:  # type: ignore[override]
+        return self.get_task_baselines()
+
+    @property
+    def MODE_SCALING_FACTORS(self) -> Dict[str, float]:  # type: ignore[override]
+        return self.get_mode_scaling_factors()
 
     # Regex patterns for explicit length constraints in prompts
     WORD_COUNT_PATTERNS = [
@@ -81,22 +87,27 @@ class OutputBudgetController:
     ]
 
     @classmethod
-    def detect_explicit_length_constraint(cls, prompt: str) -> Optional[Tuple[int, str]]:
+    def detect_explicit_length_constraint(
+        cls, prompt: str, is_conservative: bool = False
+    ) -> Optional[Tuple[int, str]]:
         """Extract explicit length directive (word/sentence/paragraph count) from prompt text.
 
         Returns:
             Tuple of (estimated_token_requirement, description) or None.
         """
+        # Conservative policy applies strict constraint tokens without adding padding headroom
+        safety_headroom = 0 if is_conservative else settings.OUTPUT_BUDGET_SAFETY_HEADROOM
+
         # 1. Check word count limits
         for pattern in cls.WORD_COUNT_PATTERNS:
             match = pattern.search(prompt)
             if match:
                 words = int(match.group(1))
                 if 1 <= words <= 4000:
-                    # Conservative word-to-token ratio: ~1.33 tokens per word + 32 token headroom
+                    # Conservative word-to-token ratio: ~1.33 tokens per word + safety headroom
                     tokens = max(
                         settings.OUTPUT_BUDGET_MIN_TOKENS,
-                        math.ceil(words * 1.33) + settings.OUTPUT_BUDGET_SAFETY_HEADROOM,
+                        math.ceil(words * 1.33) + safety_headroom,
                     )
                     desc = f"Explicit word limit '{match.group(0)}' -> ~{tokens} tokens"
                     return tokens, desc
@@ -110,7 +121,7 @@ class OutputBudgetController:
                 # ~35 tokens per sentence + safety headroom
                 tokens = max(
                     settings.OUTPUT_BUDGET_MIN_TOKENS,
-                    (count * 35) + settings.OUTPUT_BUDGET_SAFETY_HEADROOM,
+                    (count * 35) + safety_headroom,
                 )
                 desc = f"Explicit sentence limit '{match.group(0)}' -> ~{tokens} tokens"
                 return tokens, desc
@@ -124,7 +135,7 @@ class OutputBudgetController:
                 # ~120 tokens per paragraph + safety headroom
                 tokens = max(
                     settings.OUTPUT_BUDGET_MIN_TOKENS,
-                    (count * 120) + settings.OUTPUT_BUDGET_SAFETY_HEADROOM,
+                    (count * 120) + safety_headroom,
                 )
                 desc = f"Explicit paragraph limit '{match.group(0)}' -> ~{tokens} tokens"
                 return tokens, desc
@@ -133,8 +144,9 @@ class OutputBudgetController:
         for pattern, cue_tokens in cls.BREVITY_CUES:
             match = pattern.search(prompt)
             if match:
-                desc = f"Brevity directive '{match.group(0)}' -> ~{cue_tokens} tokens"
-                return cue_tokens, desc
+                target_tokens = max(settings.OUTPUT_BUDGET_MIN_TOKENS, int(cue_tokens * 0.75) if is_conservative else cue_tokens)
+                desc = f"Brevity directive '{match.group(0)}' -> ~{target_tokens} tokens"
+                return target_tokens, desc
 
         return None
 
@@ -152,11 +164,16 @@ class OutputBudgetController:
         max_ctx = max_num_ctx if max_num_ctx is not None else settings.OLLAMA_MAX_NUM_CTX
         min_bound = settings.OUTPUT_BUDGET_MIN_TOKENS
         max_bound = settings.OUTPUT_BUDGET_MAX_TOKENS
-        policy = settings.OUTPUT_BUDGET_POLICY
+
+        policy = (settings.OUTPUT_BUDGET_POLICY or "adaptive").strip().lower()
+        if policy not in {"adaptive", "fixed", "conservative"}:
+            raise ValueError(
+                f"Unsupported OUTPUT_BUDGET_POLICY '{policy}'. Must be 'adaptive', 'fixed', or 'conservative'."
+            )
 
         # If output budget control is disabled, return default setting
         if not settings.OUTPUT_BUDGET_ENABLED or policy == "fixed":
-            default_val = min(settings.OLLAMA_NUM_PREDICT, max_bound)
+            default_val = min(settings.OUTPUT_BUDGET_DEFAULT_TOKENS, max_bound)
             return OutputBudgetAllocation(
                 allocated_budget=default_val,
                 requested_budget=requested_output_budget,
@@ -164,15 +181,25 @@ class OutputBudgetController:
                 reason=f"Static budget configured ({default_val} tokens)",
                 task_category="general",
                 candidate_budget=default_val,
+                task_confidence=None,
             )
 
         # 1. Analyze prompt if not already provided
         analysis = task_analysis or TaskAnalyzer.analyze(prompt)
         category = analysis.task_category if analysis else "general"
+        task_confidence = getattr(analysis, "task_confidence", None) if analysis else None
 
         candidate_budget: int
         detected_constraint_desc: Optional[str] = None
         reason: str
+
+        baselines = cls.get_task_baselines()
+        scaling_factors = cls.get_mode_scaling_factors()
+
+        if "general" not in baselines:
+            raise ValueError("Configured task baselines missing 'general' fallback category.")
+
+        is_conservative = (policy == "conservative")
 
         # 2. Priority 1: User / API explicit override
         if requested_output_budget is not None and requested_output_budget > 0:
@@ -182,59 +209,67 @@ class OutputBudgetController:
 
         else:
             # 3. Priority 2: Explicit prompt length directives
-            constraint_match = cls.detect_explicit_length_constraint(prompt)
+            constraint_match = cls.detect_explicit_length_constraint(prompt, is_conservative=is_conservative)
             if constraint_match:
                 tokens, desc = constraint_match
                 candidate_budget = tokens
                 detected_constraint_desc = desc
-                reason = f"Adaptive constraint: {desc}"
+                reason = f"{policy.capitalize()} constraint: {desc}"
 
             else:
                 # 4. Priority 3: Task category baseline
-                baseline = cls.TASK_BUDGET_BASELINES.get(category, cls.TASK_BUDGET_BASELINES["general"])
+                baseline = baselines.get(category, baselines["general"])
+                multiplier = scaling_factors.get(mode, 1.0)
 
-                # Scale by mode
-                multiplier = cls.MODE_SCALING_FACTORS.get(mode, 1.0)
-                scaled = baseline * multiplier
-
-                # Scale by complexity if multi-step or complex
-                complexity = getattr(analysis, "complexity_score", 1)
-                req_ops_count = len(getattr(analysis, "required_operations", []))
-                if complexity >= 3 or req_ops_count >= 3:
-                    scaled *= 1.2
-                    complexity_note = f", scaled for complexity score {complexity} ({req_ops_count} operations)"
+                if is_conservative:
+                    # Conservative policy: dampened baseline (0.75x), no complexity expansion
+                    scaled = baseline * 0.75 * multiplier
+                    candidate_budget = int(math.ceil(scaled))
+                    reason = (
+                        f"Conservative baseline for '{category}' task "
+                        f"({baseline} tokens dampened x0.75 and scaled x{multiplier} for {mode} mode)"
+                    )
                 else:
-                    complexity_note = ""
+                    # Adaptive policy: full baseline, mode scaling, complexity scaling
+                    scaled = baseline * multiplier
+                    complexity = getattr(analysis, "complexity_score", 1)
+                    req_ops_count = len(getattr(analysis, "required_operations", []))
+                    if complexity >= 3 or req_ops_count >= 3:
+                        scaled *= 1.2
+                        complexity_note = f", scaled for complexity score {complexity} ({req_ops_count} operations)"
+                    else:
+                        complexity_note = ""
 
-                candidate_budget = int(math.ceil(scaled))
-                reason = (
-                    f"Adaptive baseline for '{category}' task "
-                    f"({baseline} tokens scaled x{multiplier} for {mode} mode{complexity_note})"
-                )
+                    candidate_budget = int(math.ceil(scaled))
+                    reason = (
+                        f"Adaptive baseline for '{category}' task "
+                        f"({baseline} tokens scaled x{multiplier} for {mode} mode{complexity_note})"
+                    )
 
         # 5. Bound candidate by global configured limits
+        # For conservative policy, cap upper bound at default tokens to prevent runaway headroom
+        effective_max_bound = min(max_bound, settings.OUTPUT_BUDGET_DEFAULT_TOKENS) if is_conservative else max_bound
         is_clamped_by_bounds = False
         clamped_budget = candidate_budget
         if clamped_budget < min_bound:
             clamped_budget = min_bound
             is_clamped_by_bounds = True
-        elif clamped_budget > max_bound:
-            clamped_budget = max_bound
+        elif clamped_budget > effective_max_bound:
+            clamped_budget = effective_max_bound
             is_clamped_by_bounds = True
 
-        # 6. Context Window Headroom Coordination
-        # Estimate input tokens
-        full_input = f"{system_instruction or ''}\nOriginal prompt to optimize:\n\n{prompt}".strip()
-        heuristic = settings.CHARS_PER_TOKEN_HEURISTIC or 4.0
-        input_tokens = max(1, math.ceil(len(full_input) / heuristic))
-        reserve_tokens = settings.OLLAMA_CONTEXT_RESERVE_TOKENS
-
-        # Remaining context window available for generation
-        available_headroom = max_ctx - input_tokens - reserve_tokens
+        # 6. Centralized Context Window Headroom Coordination
+        headroom_info = AdaptiveContextManager.calculate_headroom(
+            system_instruction=system_instruction,
+            prompt=prompt,
+            max_num_ctx=max_ctx,
+        )
+        input_tokens = headroom_info["estimated_input_tokens"]
+        reserve_tokens = headroom_info["reserve_tokens"]
+        available_headroom = headroom_info["available_headroom"]
 
         # If available headroom cannot even accommodate the minimum token budget, reject with HTTP 413
         if available_headroom < min_bound:
-            required_min = input_tokens + reserve_tokens + min_bound
             raise ContextOverflowError(
                 f"Prompt footprint ({input_tokens} tokens) and reserved output budget ({min_bound} tokens) "
                 f"exceed the configured maximum context limit ({max_ctx} tokens). "
@@ -264,7 +299,7 @@ class OutputBudgetController:
             reason=reason,
             task_category=category,
             candidate_budget=candidate_budget,
-            task_confidence=1.0,
+            task_confidence=task_confidence,
             detected_constraint=detected_constraint_desc,
             is_clamped_by_context=is_clamped_by_context,
             is_clamped_by_bounds=is_clamped_by_bounds,

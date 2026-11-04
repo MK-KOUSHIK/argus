@@ -333,14 +333,11 @@ class OllamaService:
         load_duration = data.get("load_duration")
         done_reason = data.get("done_reason")
 
-        # Determine if budget limit was hit and calculate utilization
+        # Determine if budget limit was hit strictly from native done_reason
+        # Do not infer authoritative completion status from eval_count >= target_num_predict
         if done_reason == "length":
             hit_budget_limit = True
         elif done_reason == "stop":
-            hit_budget_limit = False
-        elif isinstance(eval_count, int) and eval_count >= target_num_predict:
-            hit_budget_limit = True
-        elif isinstance(eval_count, int) and eval_count < target_num_predict:
             hit_budget_limit = False
         else:
             hit_budget_limit = None
@@ -436,17 +433,6 @@ class OllamaService:
         # --- STAGE A: Understand the Prompt ---
         analysis = TaskAnalyzer.analyze(request.prompt)
 
-        # Output Budget Allocation (Phase 4.1)
-        try:
-            output_allocation = OutputBudgetController.allocate_budget(
-                prompt=request.prompt,
-                mode=request.mode,
-                task_analysis=analysis,
-                requested_output_budget=request.requested_output_budget,
-            )
-        except ContextOverflowError as exc:
-            raise OllamaServiceError(exc.message, status_code=exc.status_code) from exc
-
         # --- STAGE B: Select Strategy ---
         strategy = StrategySelector.select_strategy(analysis, request.mode)
 
@@ -456,6 +442,29 @@ class OllamaService:
         validation_status = "passed"
         is_preserved = False
 
+        # Build initial task-aware instruction if rewriting
+        system_instruction = (
+            PromptRewriter.build_system_instruction(
+                analysis=analysis,
+                strategy=strategy,
+                mode=request.mode,
+            )
+            if strategy != "preserve"
+            else None
+        )
+
+        # Output Budget Allocation (Phase 4.1) accounts for actual system instruction & formatted prompt
+        try:
+            output_allocation = OutputBudgetController.allocate_budget(
+                prompt=request.prompt,
+                mode=request.mode,
+                task_analysis=analysis,
+                requested_output_budget=request.requested_output_budget,
+                system_instruction=system_instruction,
+            )
+        except ContextOverflowError as exc:
+            raise OllamaServiceError(exc.message, status_code=exc.status_code) from exc
+
         # --- STAGE C: Rewrite Prompt (or PRESERVE directly) ---
         if strategy == "preserve":
             # Prompt is already concise, unambiguous, and effective
@@ -464,15 +473,8 @@ class OllamaService:
             is_preserved = True
             total_duration_ms = 1
         else:
-            # Build initial task-aware instruction
-            system_instruction = PromptRewriter.build_system_instruction(
-                analysis=analysis,
-                strategy=strategy,
-                mode=request.mode,
-            )
-
             raw_candidate, call_ms, call_telemetry = await cls._execute_model_call(
-                system_instruction=system_instruction,
+                system_instruction=system_instruction or "",
                 prompt=request.prompt,
                 output_budget=output_allocation,
             )
@@ -600,6 +602,7 @@ class OllamaService:
                 policy=output_allocation.policy,
                 reason=output_allocation.reason,
                 task_category=output_allocation.task_category,
+                task_confidence=output_allocation.task_confidence,
                 actual_generated_tokens=primary_call.get("eval_count"),
                 generation_duration_ms=primary_call.get("eval_duration_ms"),
                 generation_tokens_per_second=primary_call.get("generation_tokens_per_second"),
