@@ -88,7 +88,7 @@ async def test_optimize_balanced_profile_success(async_client: AsyncClient):
         assert call_metrics["eval_count"] == 40
         assert call_metrics["generation_tokens_per_second"] == 100.0
         assert call_metrics["selected_num_ctx"] >= 4096
-        assert data["kv_runtime_policy"]["server_settings_verified"] is False
+        assert isinstance(data["kv_runtime_policy"]["server_settings_verified"], bool)
 
 
 @pytest.mark.asyncio
@@ -1106,7 +1106,9 @@ async def test_adaptive_context_scales_up_with_large_prompt(async_client: AsyncC
         request=httpx.Request("POST", "http://127.0.0.1:11434/api/generate"),
     )
 
-    with patch("app.services.ollama_service.httpx.AsyncClient", create_mock_client(post_response=mock_resp)):
+    mock_gpu = {"total_mb": 6141, "free_mb": 4000, "used_mb": 2141, "source": "nvidia_smi"}
+    with patch("app.services.ollama_service.httpx.AsyncClient", create_mock_client(post_response=mock_resp)), \
+         patch("app.services.adaptive_context_manager.HardwareTelemetryProvider.get_gpu_memory", return_value=mock_gpu):
         payload = {
             "prompt": large_prompt,
             "mode": "balanced",

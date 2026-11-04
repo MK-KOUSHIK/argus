@@ -192,10 +192,64 @@ where `CHARS_PER_TOKEN_HEURISTIC` defaults to `4.0` in configuration.
 - **Target Deployment**: Docker, Azure Container Apps / AWS ECS.
 
 
-## KV Cache and Inference Runtime Controls
+## 9. KV Cache and Inference Runtime Controls
 
-The Ollama adapter passes a per-request context and output budget through the native generation options. The context estimate uses Argus's documented character heuristic over the system instruction and prompt, adds configured output/context reserves, and is bounded by the configured maximum. Requests exceeding that maximum fail explicitly; Argus does not silently truncate prompt content.
+Argus incorporates a complete inference runtime control architecture designed for hardware-efficient local Ollama execution:
 
-Inference requests pass through a configurable semaphore. Queue wait is measured separately from the HTTP inference wall time. Ollama-native prompt-evaluation counts/durations, generated-token counts/durations, and model-load duration are retained when present in the response. Missing runtime fields remain null and are never synthesized.
+```mermaid
+graph TD
+    UserReq["POST /api/optimize"] --> ContextMgr["AdaptiveContextManager<br/>(Token Budgeting & Tier Snapping: 4096 / 6144 / 8192)"]
+    ContextMgr -->|Context Overflow (>8192 tok)| Reject413["HTTP 413 Payload Too Large<br/>(Clean rejection, no truncation)"]
+    ContextMgr -->|Budget Accepted| ConcurrencyCtrl["RuntimeAwareConcurrencyController<br/>(Hardware-Telemetry Admission Control)"]
+    
+    subgraph HardwareTelemetry["Hardware Telemetry Provider"]
+        NvidiaSMI["nvidia-smi<br/>(GPU VRAM: Total, Used, Free)"]
+        Win32RAM["Win32 GlobalMemoryStatusEx<br/>(Host RAM: Total, Used, Free)"]
+    end
+    
+    HardwareTelemetry --> ConcurrencyCtrl
+    ConcurrencyCtrl -->|Critical VRAM < 150MB| Reject503["HTTP 503 Capacity Exceeded"]
+    ConcurrencyCtrl -->|Nominal Capacity| SlotGranted["Acquire Execution Slot<br/>(Track queue_wait_ms)"]
+    
+    SlotGranted --> OllamaExec["OllamaService._execute_model_call<br/>(num_ctx tier, num_predict: 512)"]
+    
+    subgraph OllamaRuntime["Ollama Local Daemon (127.0.0.1:11434)"]
+        FlashAttn["Flash Attention (Enabled)"]
+        Q8Cache["Q8_0 KV Cache (59.5 MiB CUDA0 buffer)"]
+        PrefixCache["Prefix KV Cache (Reused prompt tokens)"]
+    end
+    
+    OllamaExec <--> OllamaRuntime
+    OllamaExec --> TelemetryExtract["Native Telemetry Extractor<br/>(prompt_eval_count, prompt_eval_cached_count,<br/>prompt_eval_duration, eval_count, eval_duration)"]
+    TelemetryExtract --> SlotRelease["Release Execution Slot<br/>(Guaranteed in finally block)"]
+```
 
-KV cache quantization and Flash Attention are Ollama server-process settings. Argus exposes their desired configuration for diagnostics but cannot apply or verify them through `/api/generate`. The audit document records the compatibility boundary for external serving engines and KV-cache research projects.
+### Architecture Components:
+
+1. **`AdaptiveContextManager` ([`backend/app/services/adaptive_context_manager.py`](file:///D:/Projects/Argus/backend/app/services/adaptive_context_manager.py))**:
+   - Calculates total token budget: $\text{System} + \text{Wrapper} + \text{Prompt} + \text{Output (512)} + \text{Headroom (256)}$.
+   - Dynamically derives eligible tiers (`get_eligible_tiers`) bounded by `OLLAMA_MAX_NUM_CTX` (e.g. 4096, 6144, 8192). This prevents Ollama/llama.cpp from continuously reallocating KV cache buffers across slight prompt variations, preserving prefix cache entries.
+   - Low-VRAM safeguard: when free VRAM is constrained (<1,000 MiB), restricts allocation to the safe baseline tier (4096). If required budget exceeds this tier, immediately raises `ContextOverflowError` (clean **HTTP 413**) rather than risking GPU out-of-memory or silently truncating prompts.
+   - Preserves full budget breakdown and prompt token source attribution (`prompt_token_source`).
+
+2. **`HardwareTelemetryProvider` ([`backend/app/services/hardware_telemetry.py`](file:///D:/Projects/Argus/backend/app/services/hardware_telemetry.py))**:
+   - Queries dedicated NVIDIA GPU VRAM metrics via cached `nvidia-smi` queries.
+   - Queries system host RAM via Win32 `ctypes.windll.kernel32.GlobalMemoryStatusEx`.
+
+3. **`RuntimeAwareConcurrencyController` ([`backend/app/services/concurrency_controller.py`](file:///D:/Projects/Argus/backend/app/services/concurrency_controller.py))**:
+   - Manages asynchronous request admission via an `asyncio.Condition`-based capacity gate that dynamically evaluates hardware conditions at admission time.
+   - Automatically throttles capacity from 3 down to 1 when GPU VRAM $< 400\text{ MiB}$ or host RAM $< 1,024\text{ MiB}$. New requests are safely queued until active requests drain below the reduced capacity.
+   - Rejects requests immediately with HTTP 503 (`InferenceCapacityExceededError`) when VRAM $< 150\text{ MiB}$ or host RAM $< 512\text{ MiB}$.
+   - Accurately tracks `queue_depth`, cleans up on client cancellation, and measures `queue_wait_ms` latency for telemetry attribution.
+   - Provides a static conservative fallback proxy when hardware telemetry is unavailable.
+
+4. **`OllamaProcessManager` ([`backend/app/services/ollama_process_manager.py`](file:///D:/Projects/Argus/backend/app/services/ollama_process_manager.py))**:
+   - Inspects active listening ports and verifies running Ollama PID.
+   - Detects stale manifests via PID and process creation time verification (Win32 `GetProcessTimes`).
+   - Automatically handles both UTF-16LE and UTF-8 PowerShell redirection logs.
+   - Evaluates session-tied log evidence (rejecting logs older than process start) to independently confirm `OLLAMA_KV_CACHE_TYPE=q8_0` and Flash Attention across 4 discrete verification states (`independently_confirmed`, `partially_confirmed_kv_only`, `partially_confirmed_fa_only`, `observed_in_server_logs`).
+
+5. **Native Telemetry Extraction**:
+   - Directly extracts native counters from Ollama's HTTP `/api/generate` response: `prompt_eval_count`, `prompt_eval_cached_count`, `prompt_eval_duration`, `eval_count`, and `eval_duration`.
+   - Computes `cache_hit_ratio` based on native counter semantics (`prompt_eval_cached_count / prompt_eval_count`).
+   - Distinct source attribution (`telemetry_source: "ollama_native"`) ensures full transparency between heuristic estimates and authoritative hardware metrics.

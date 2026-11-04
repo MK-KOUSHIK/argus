@@ -78,3 +78,10 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Databases & local runtime data
+*.db
+*.sqlite
+*.sqlite3
+backend/data/*.json
+backend/data/*.log
