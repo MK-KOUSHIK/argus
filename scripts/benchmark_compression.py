@@ -1137,6 +1137,107 @@ def verify_workload_restoration(workload: Dict[str, Any], compressed_run: Dict[s
     }
 
 
+NEW_SCHEMA_IDENTIFIER_KEYS = {
+    "first_call_prompt_eval_count",
+    "first_call_eval_count",
+    "calls",
+    "call_count",
+    "telemetry_source",
+    "has_complete_telemetry",
+}
+
+
+def is_new_schema_optimizer_record(opt_dict: Dict[str, Any]) -> bool:
+    """Check if an optimizer telemetry record follows the new multi-call telemetry schema.
+
+    Identified by the presence of explicit new-schema keys such as 'first_call_prompt_eval_count',
+    'calls', 'call_count', 'telemetry_source', or 'has_complete_telemetry'.
+    """
+    if not isinstance(opt_dict, dict):
+        return False
+    return any(k in opt_dict for k in NEW_SCHEMA_IDENTIFIER_KEYS)
+
+
+def is_demonstrably_historical_single_call(opt_dict: Dict[str, Any]) -> bool:
+    """Determine whether an optimizer telemetry record demonstrably represents a valid legacy single-call run.
+
+    Historical benchmark records in Argus recorded only the primary (first) call directly in
+    'prompt_eval_count' along with optimizer run metadata ('validation_status', 'total_latency_ms',
+    or 'selected_num_ctx').
+    They never contained new-schema keys ('first_call_prompt_eval_count', 'calls', 'call_count')
+    and never had multi-call indicators ('retry_count' > 0, 'is_multi_call' = True, etc.).
+
+    Returns False for new-schema records, multi-call records, incomplete records, or arbitrary dicts.
+    """
+    if not isinstance(opt_dict, dict):
+        return False
+
+    # 1. Must NOT be a new-schema record
+    if any(k in opt_dict for k in NEW_SCHEMA_IDENTIFIER_KEYS):
+        return False
+
+    # 2. Must NOT indicate multi-call or retries
+    for k in ("retry_count", "retries", "retries_attempted"):
+        v = opt_dict.get(k)
+        if v is not None and isinstance(v, (int, float)) and v > 0:
+            return False
+
+    for k in ("is_multi_call", "multi_call"):
+        if opt_dict.get(k) is True:
+            return False
+
+    for k in ("total_calls", "call_count"):
+        v = opt_dict.get(k)
+        if v is not None and isinstance(v, (int, float)) and v > 1:
+            return False
+
+    # 3. Must have a valid non-negative prompt_eval_count
+    pe = opt_dict.get("prompt_eval_count")
+    if pe is None or not isinstance(pe, (int, float)) or pe < 0:
+        return False
+
+    # 4. Must demonstrably contain authentic Argus historical run context
+    # Historical records contain 'validation_status' (e.g. 'passed', 'fallback')
+    # and at least one execution metadata key ('total_latency_ms' or 'selected_num_ctx')
+    # Or explicitly flagged as historical single call
+    has_historical_context = (
+        ("validation_status" in opt_dict and ("total_latency_ms" in opt_dict or "selected_num_ctx" in opt_dict or "done_reason" in opt_dict))
+        or opt_dict.get("historical_single_call") is True
+    )
+
+    return has_historical_context
+
+
+def extract_primary_rewrite_prompt_tokens(opt_dict: Dict[str, Any]) -> Optional[int]:
+    """Extract primary rewrite prefill token count safely and strictly.
+
+    For new-schema records:
+      - STRICTLY uses 'first_call_prompt_eval_count'.
+      - NEVER falls back to 'prompt_eval_count' (which may be aggregate across retries).
+      - If first-call telemetry is missing or incomplete, returns None.
+
+    For historical records:
+      - ONLY allows fallback to 'prompt_eval_count' if demonstrably a legacy single-call record.
+      - If record has multi-call indicators or lacks historical run context, returns None.
+    """
+    if not isinstance(opt_dict, dict):
+        return None
+
+    if is_new_schema_optimizer_record(opt_dict):
+        val = opt_dict.get("first_call_prompt_eval_count")
+        if val is not None and isinstance(val, (int, float)) and val >= 0:
+            return int(val)
+        return None
+
+    if is_demonstrably_historical_single_call(opt_dict):
+        val = opt_dict.get("prompt_eval_count")
+        if val is not None and isinstance(val, (int, float)) and val >= 0:
+            return int(val)
+        return None
+
+    return None
+
+
 def calculate_primary_rewrite_savings(
     base_run: Dict[str, Any],
     comp_run: Dict[str, Any],
@@ -1144,34 +1245,21 @@ def calculate_primary_rewrite_savings(
     """Calculate prefill token savings for the primary (initial) rewrite attempt.
 
     Preserves comparability with historical first-call benchmark measurements.
-    Prioritizes 'first_call_prompt_eval_count' if present; safely falls back to
-    'prompt_eval_count' for historical benchmark records where only the first call was recorded.
+    Strictly uses 'first_call_prompt_eval_count' for new-schema records; never substitutes
+    aggregate multi-call telemetry if first-call telemetry is missing.
+    Allows fallback to 'prompt_eval_count' only for demonstrably valid historical single-call records.
     """
-    base_opt = base_run.get("optimizer_inference", {})
-    comp_opt = comp_run.get("optimizer_inference", {})
+    base_opt = base_run.get("optimizer_inference", {}) if isinstance(base_run, dict) else {}
+    comp_opt = comp_run.get("optimizer_inference", {}) if isinstance(comp_run, dict) else {}
 
-    base_tok = base_opt.get("first_call_prompt_eval_count")
-    if base_tok is None:
-        base_tok = base_opt.get("prompt_eval_count")
+    base_tok = extract_primary_rewrite_prompt_tokens(base_opt)
+    comp_tok = extract_primary_rewrite_prompt_tokens(comp_opt)
 
-    comp_tok = comp_opt.get("first_call_prompt_eval_count")
-    if comp_tok is None:
-        comp_tok = comp_opt.get("prompt_eval_count")
-
-    if (
-        base_tok is not None
-        and comp_tok is not None
-        and isinstance(base_tok, (int, float))
-        and isinstance(comp_tok, (int, float))
-    ):
-        base_int = int(base_tok)
-        comp_int = int(comp_tok)
-        saved = base_int - comp_int
-        pct = round((saved / max(1, base_int)) * 100.0, 2)
+    if base_tok is not None and comp_tok is not None:
+        saved = base_tok - comp_tok
+        pct = round((saved / max(1, base_tok)) * 100.0, 2)
         status = "evaluated"
     else:
-        base_int = None
-        comp_int = None
         saved = None
         pct = None
         status = "unavailable"
@@ -1180,8 +1268,8 @@ def calculate_primary_rewrite_savings(
         "metric_name": "primary_rewrite_call_savings",
         "measurement_scope": "first_call_only",
         "status": status,
-        "baseline_prompt_eval_count": base_int,
-        "compressed_prompt_eval_count": comp_int,
+        "baseline_prompt_eval_count": base_tok,
+        "compressed_prompt_eval_count": comp_tok,
         "tokens_saved": saved,
         "reduction_percent": pct,
     }
@@ -1198,8 +1286,8 @@ def calculate_total_optimizer_cost(
     If multi-call telemetry is unavailable (such as historical benchmarks where calls were not recorded),
     explicitly reports status as 'unavailable' and does not fabricate missing token counts.
     """
-    base_opt = base_run.get("optimizer_inference", {})
-    comp_opt = comp_run.get("optimizer_inference", {})
+    base_opt = base_run.get("optimizer_inference", {}) if isinstance(base_run, dict) else {}
+    comp_opt = comp_run.get("optimizer_inference", {}) if isinstance(comp_run, dict) else {}
 
     base_calls = base_opt.get("calls")
     comp_calls = comp_opt.get("calls")
@@ -1209,14 +1297,10 @@ def calculate_total_optimizer_cost(
     comp_complete = comp_opt.get("has_complete_telemetry")
 
     # If neither calls list nor call_count is present, this is historical single-call data
-    is_historical = (
-        base_calls is None
-        and comp_calls is None
-        and base_call_count is None
-        and comp_call_count is None
-    )
+    base_is_new = is_new_schema_optimizer_record(base_opt)
+    comp_is_new = is_new_schema_optimizer_record(comp_opt)
 
-    if is_historical:
+    if not base_is_new and not comp_is_new:
         return {
             "metric_name": "total_optimizer_inference_cost",
             "measurement_scope": "all_relevant_calls",
@@ -1232,6 +1316,22 @@ def calculate_total_optimizer_cost(
             "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated.",
         }
 
+    if not (base_is_new and comp_is_new):
+        return {
+            "metric_name": "total_optimizer_inference_cost",
+            "measurement_scope": "all_relevant_calls",
+            "status": "unavailable",
+            "baseline_total_prompt_eval_count": None,
+            "compressed_total_prompt_eval_count": None,
+            "tokens_saved": None,
+            "reduction_percent": None,
+            "baseline_call_count": None,
+            "compressed_call_count": None,
+            "has_complete_telemetry": False,
+            "telemetry_source": "incompatible_schema",
+            "note": "Mismatched telemetry schema between baseline and compressed runs; cannot compare total cost.",
+        }
+
     base_tot = base_opt.get("prompt_eval_count")
     comp_tot = comp_opt.get("prompt_eval_count")
     has_complete = bool(base_complete and comp_complete)
@@ -1241,6 +1341,8 @@ def calculate_total_optimizer_cost(
         and comp_tot is not None
         and isinstance(base_tot, (int, float))
         and isinstance(comp_tot, (int, float))
+        and base_tot >= 0
+        and comp_tot >= 0
     ):
         base_int = int(base_tot)
         comp_int = int(comp_tot)
