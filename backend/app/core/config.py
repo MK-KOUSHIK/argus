@@ -335,17 +335,27 @@ class Settings(BaseSettings):
         "ROUTING_CPU_ALLOWANCE_SMALL_MB",
         "ROUTING_CPU_ALLOWANCE_MEDIUM_MB",
         "ROUTING_CPU_ALLOWANCE_LARGE_MB",
+        mode="before",
     )
     @classmethod
-    def validate_cpu_allowance_mb(cls, v: int, info: ValidationInfo) -> int:
-        if isinstance(v, bool) or not isinstance(v, int):
+    def validate_cpu_allowance_mb(cls, v: Any, info: ValidationInfo) -> int:
+        # bool is a subclass of int in Python; reject it before Pydantic can coerce it.
+        if isinstance(v, bool):
+            raise ValueError(f"{info.field_name} must be an integer, not a boolean")
+
+        if isinstance(v, int):
+            parsed = v
+        elif isinstance(v, str):
             try:
-                v = int(v)
+                parsed = int(v.strip())
             except (ValueError, TypeError):
                 raise ValueError(f"{info.field_name} must be an integer; got {v}")
-        if v < 0:
-            raise ValueError(f"{info.field_name} must be non-negative; got {v}")
-        return v
+        else:
+            raise ValueError(f"{info.field_name} must be an integer; got {v}")
+
+        if parsed < 0:
+            raise ValueError(f"{info.field_name} must be non-negative; got {parsed}")
+        return parsed
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
