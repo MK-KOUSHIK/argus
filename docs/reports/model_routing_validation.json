@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-11-05T18:10:59Z",
+  "timestamp": "2026-11-05T18:22:27Z",
   "ollama_base_url": "http://127.0.0.1:11434",
   "hardware": {
     "gpu_available": true,
     "vram_total_mb": 6141,
     "vram_free_mb": 5920,
     "ram_total_mb": 15556.5,
-    "ram_free_mb": 3680.1
+    "ram_free_mb": 4013.6
   },
   "discovered_models": [
     {
@@ -43,7 +43,7 @@
       "routing_status": "routed",
       "prompt_eval_count": 535,
       "eval_count": 18,
-      "latency_ms": 3199,
+      "latency_ms": 3701,
       "done_reason": "stop",
       "status": "VERIFIED"
     },
@@ -58,8 +58,8 @@
       "heuristic_margin": 0.45,
       "routing_status": "routed",
       "prompt_eval_count": 637,
-      "eval_count": 72,
-      "latency_ms": 12082,
+      "eval_count": 68,
+      "latency_ms": 14901,
       "done_reason": "stop",
       "status": "VERIFIED"
     },
@@ -75,7 +75,7 @@
       "is_fallback": true,
       "prompt_eval_count": 639,
       "eval_count": 63,
-      "latency_ms": 6182,
+      "latency_ms": 7078,
       "status": "VERIFIED (SIMULATED_POLICY_FALLBACK)"
     },
     {
@@ -88,9 +88,9 @@
       "routing_status": "routed",
       "is_fallback": false,
       "measured_vram_free_mb": 4708,
-      "measured_ram_free_mb": 2955.9,
+      "measured_ram_free_mb": 3324.2,
       "vram_measurement_type": "architecture_proxy",
-      "finding": "Host hardware has sufficient natural headroom (4708 MiB free VRAM, 2956 MiB free RAM); normal routing to 'qwen2.5:7b' succeeded without fallback.",
+      "finding": "Host hardware has sufficient natural headroom (4708 MiB free VRAM, 3324 MiB free RAM); normal routing to 'qwen2.5:7b' succeeded without fallback.",
       "status": "VERIFIED (NATURAL_HEADROOM_SUFFICIENT_NO_FALLBACK)"
     },
     {
@@ -103,7 +103,7 @@
       "routing_status": "manual_override",
       "prompt_eval_count": 531,
       "eval_count": 12,
-      "latency_ms": 4355,
+      "latency_ms": 5226,
       "status": "VERIFIED"
     }
   ]

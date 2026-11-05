@@ -192,6 +192,7 @@ class LocalModelRegistry:
                         # Query /api/show for architecture metadata, parameter count, and context length
                         param_count = None
                         num_layers = None
+                        num_heads = None
                         num_kv_heads = None
                         head_dim = None
 
@@ -242,6 +243,7 @@ class LocalModelRegistry:
                             expires_at=expires_at,
                             tier=tier,
                             num_layers=num_layers,
+                            num_heads=num_heads,
                             num_kv_heads=num_kv_heads,
                             head_dim=head_dim,
                         )

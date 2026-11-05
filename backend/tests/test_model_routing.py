@@ -171,8 +171,10 @@ async def test_discovery_missing_metadata_no_fabrication():
             }
         ]
     }
-    with patch("httpx.AsyncClient.get", return_value=MagicMock(status_code=200, json=lambda: tags_payload)), \
-         patch("httpx.AsyncClient.post", return_value=MagicMock(status_code=404)):
+    mock_get = AsyncMock(return_value=MagicMock(status_code=200, json=lambda: tags_payload))
+    mock_post = AsyncMock(return_value=MagicMock(status_code=404))
+    with patch("httpx.AsyncClient.get", mock_get), \
+         patch("httpx.AsyncClient.post", mock_post):
         connected, _ = await LocalModelRegistry.refresh(force=True)
         assert connected is True
         model = await LocalModelRegistry.get_model("custom-unknown:latest")
@@ -1199,4 +1201,149 @@ def test_evaluate_resources_requires_architecture_metadata_policy():
         res = ModelRouter.evaluate_resources(m_rough, gpu_telemetry=gpu, ram_telemetry=ram)
         assert res.is_resource_sufficient is False
         assert "lacks verified architecture metadata" in str(res.resource_pressure_reason).lower()
+
+
+def test_evaluate_resources_cpu_only_rejected_when_ram_sufficient_for_weights_alone_but_insufficient_with_kv_and_margin():
+    """Verify CPU admission rejects model when RAM covers weights alone but not weights + KV cache + safety allowances."""
+    # 1000 MiB weights. Small tier: kv_mb = 100, cpu_allowance = 64, ram_margin = 512.
+    # Total required headroom: 1000 + 100 + 64 + 512 = 1676 MiB.
+    m_1b = DiscoveredModel(
+        name="test:1b", model="test:1b", digest="d1", size_bytes=1000 * 1024 * 1024,
+        modified_at="2026-10-01", parameter_size="1B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+    # 1200 MiB free host RAM > 1000 MiB weights, BUT < 1676 MiB total required!
+    ram = {"total_mb": 16000, "free_mb": 1200, "used_mb": 14800, "source": "win32"}
+
+    with patch.object(settings, "ROUTING_ALLOW_CPU_EXECUTION", True):
+        res = ModelRouter.evaluate_resources(m_1b, gpu_telemetry=None, ram_telemetry=ram)
+        assert res.is_resource_sufficient is False
+        assert res.vram_measurement_type == "cpu_only"
+        assert "insufficient host ram for cpu-only execution" in str(res.resource_pressure_reason).lower()
+        assert "1000 mib weights" in str(res.resource_pressure_reason).lower()
+        assert "100 mib kv cache" in str(res.resource_pressure_reason).lower()
+
+
+def test_evaluate_resources_cpu_only_requires_architecture_metadata_policy():
+    """Verify CPU-only execution rejects models relying on rough proxies when policy demands verified estimates."""
+    m_rough = DiscoveredModel(
+        name="rough:1.5b", model="rough:1.5b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1.5B", tier=ModelTier.SMALL,
+        is_loaded=False,
+        num_layers=None,
+    )
+    ram = {"total_mb": 16000, "free_mb": 8000, "used_mb": 8000, "source": "win32"}
+
+    with patch.object(settings, "ROUTING_ALLOW_CPU_EXECUTION", True), \
+         patch.object(settings, "ROUTING_REQUIRE_ARCHITECTURE_METADATA", True):
+        res = ModelRouter.evaluate_resources(m_rough, gpu_telemetry=None, ram_telemetry=ram)
+        assert res.is_resource_sufficient is False
+        assert "lacks verified architecture metadata for exact cpu ram kv-cache estimation" in str(res.resource_pressure_reason).lower()
+
+
+def test_estimate_kv_cache_standard_multi_head_attention():
+    """Verify architecture-derived KV-cache calculation for standard Multi-Head Attention (MHA)."""
+    m_mha = DiscoveredModel(
+        name="mha:7b", model="mha:7b", digest="d1", size_bytes=4_000_000_000,
+        modified_at="2026-10-01", parameter_size="7B", tier=ModelTier.MEDIUM,
+        is_loaded=False,
+        num_layers=32,
+        num_heads=32,
+        num_kv_heads=32,  # Standard MHA: num_kv_heads == num_heads
+        head_dim=128,
+        embedding_length=4096,
+        context_length=4096,
+    )
+    assert m_mha.effective_kv_dim == 4096
+    assert m_mha.has_architecture_metadata is True
+    assert m_mha.get_vram_measurement_type() == "architecture_proxy"
+
+    # For 4096 context with FP16 (2.0 bytes/elem):
+    # 2 (K+V) * 32 layers * 4096 dim * 4096 tokens * 2.0 = 2,147,483,648 bytes = 2048 MiB
+    kv_mb, method = m_mha.estimate_kv_cache_mb(context_tier=4096, kv_dtype="f16")
+    assert method == "architecture_derived"
+    assert kv_mb == 2048
+
+
+def test_estimate_kv_cache_grouped_query_attention():
+    """Verify GQA does not substitute embedding_length and calculates verified num_kv_heads * head_dim."""
+    m_gqa = DiscoveredModel(
+        name="gqa:1.5b", model="gqa:1.5b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1.5B", tier=ModelTier.SMALL,
+        is_loaded=False,
+        num_layers=28,
+        num_heads=12,
+        num_kv_heads=2,  # GQA: 2 KV heads vs 12 query heads
+        head_dim=128,
+        embedding_length=1536,  # 12 * 128 = 1536
+        context_length=32768,
+    )
+    # KV dimension per layer MUST be 2 * 128 = 256, NOT embedding_length (1536)!
+    assert m_gqa.effective_kv_dim == 256
+    assert m_gqa.has_architecture_metadata is True
+    assert m_gqa.get_vram_measurement_type() == "architecture_proxy"
+
+    # For 4096 context with Q8_0 (1.0625 bytes/elem):
+    # 2 * 28 layers * 256 dim * 4096 tokens * 1.0625 = 62,390,272 bytes ≈ 59.5 MiB
+    kv_mb, method = m_gqa.estimate_kv_cache_mb(context_tier=4096, kv_dtype="q8_0")
+    assert method == "architecture_derived"
+    assert 55 <= kv_mb <= 65
+
+
+def test_estimate_kv_cache_missing_kv_head_metadata_falls_back_to_rough_proxy():
+    """Verify when num_kv_heads is missing, router does NOT guess or substitute embedding_length."""
+    m_unknown_heads = DiscoveredModel(
+        name="unknown-kv:1.5b", model="unknown-kv:1.5b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1.5B", tier=ModelTier.SMALL,
+        is_loaded=False,
+        num_layers=28,
+        num_heads=12,
+        num_kv_heads=None,  # Missing! Cannot know if MHA, GQA, or MQA
+        head_dim=128,
+        embedding_length=1536,
+    )
+    assert m_unknown_heads.effective_kv_dim is None
+    assert m_unknown_heads.has_architecture_metadata is False
+    assert m_unknown_heads.get_vram_measurement_type() == "rough_proxy"
+
+    kv_mb, method = m_unknown_heads.estimate_kv_cache_mb(context_tier=4096)
+    assert method == "rough_proxy"
+    assert kv_mb == 100
+
+
+def test_estimate_kv_cache_missing_head_dimension_falls_back_to_rough_proxy():
+    """Verify when head dimension cannot be established, router falls back to rough proxy."""
+    m_no_dim = DiscoveredModel(
+        name="no-dim:1.5b", model="no-dim:1.5b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1.5B", tier=ModelTier.SMALL,
+        is_loaded=False,
+        num_layers=28,
+        num_kv_heads=2,
+        head_dim=None,
+        num_heads=None,
+        embedding_length=None,
+    )
+    assert m_no_dim.effective_head_dim is None
+    assert m_no_dim.effective_kv_dim is None
+    assert m_no_dim.has_architecture_metadata is False
+    assert m_no_dim.get_vram_measurement_type() == "rough_proxy"
+
+    kv_mb, method = m_no_dim.estimate_kv_cache_mb(context_tier=4096)
+    assert method == "rough_proxy"
+
+
+def test_estimate_kv_cache_unknown_architecture_metadata_falls_back_to_rough_proxy():
+    """Verify when model layers are unknown, router falls back to rough proxy."""
+    m_no_arch = DiscoveredModel(
+        name="no-arch:7b", model="no-arch:7b", digest="d1", size_bytes=4_000_000_000,
+        modified_at="2026-10-01", parameter_size="7B", tier=ModelTier.MEDIUM,
+        is_loaded=False,
+        num_layers=None,
+    )
+    assert m_no_arch.has_architecture_metadata is False
+    assert m_no_arch.get_vram_measurement_type() == "rough_proxy"
+
+    kv_mb, method = m_no_arch.estimate_kv_cache_mb(context_tier=4096)
+    assert method == "rough_proxy"
+    assert kv_mb == 350
 

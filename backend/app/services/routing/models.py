@@ -43,6 +43,7 @@ class DiscoveredModel:
     expires_at: Optional[str] = None
     tier: ModelTier = ModelTier.UNKNOWN
     num_layers: Optional[int] = None
+    num_heads: Optional[int] = None
     num_kv_heads: Optional[int] = None
     head_dim: Optional[int] = None
 
@@ -59,15 +60,66 @@ class DiscoveredModel:
         return None
 
     @property
+    def effective_head_dim(self) -> Optional[int]:
+        """Verified attention head dimension.
+
+        Uses explicit head_dim if verified; derives from embedding_length // num_heads
+        only if embedding_length is an exact integer multiple of num_heads.
+        """
+        if self.head_dim is not None and self.head_dim > 0:
+            return self.head_dim
+        if (
+            self.embedding_length is not None
+            and self.embedding_length > 0
+            and self.num_heads is not None
+            and self.num_heads > 0
+            and self.embedding_length % self.num_heads == 0
+        ):
+            return self.embedding_length // self.num_heads
+        return None
+
+    @property
+    def effective_kv_dim(self) -> Optional[int]:
+        """Verified key-value dimension per layer.
+
+        DO NOT substitute embedding_length directly when architecture is grouped-query
+        or multi-query attention, or when num_kv_heads is unknown.
+
+        Returns:
+            int if reliably established from verified architecture metadata;
+            None if ambiguous, unverified, or missing.
+        """
+        head_d = self.effective_head_dim
+
+        # 1. Grouped-Query Attention (GQA) / Multi-Query Attention (MQA)
+        # Requires verified num_kv_heads and head_dim
+        if self.num_kv_heads is not None and self.num_kv_heads > 0 and head_d is not None:
+            return self.num_kv_heads * head_d
+
+        # 2. Standard Multi-Head Attention (MHA)
+        # Valid only when num_kv_heads is explicitly verified to equal num_heads
+        if (
+            self.num_heads is not None
+            and self.num_heads > 0
+            and self.num_kv_heads is not None
+            and self.num_kv_heads == self.num_heads
+        ):
+            if head_d is not None:
+                return self.num_heads * head_d
+            if self.embedding_length is not None and self.embedding_length > 0:
+                return self.embedding_length
+
+        # In all other cases (e.g. missing num_kv_heads or missing head dimension):
+        # Never assume MHA or substitute embedding_length directly!
+        return None
+
+    @property
     def has_architecture_metadata(self) -> bool:
-        """Whether model has sufficient architectural metadata to calculate KV-cache dimensions."""
+        """Whether model has sufficient verified architectural metadata to calculate exact KV-cache dimensions."""
         return (
             self.num_layers is not None
             and self.num_layers > 0
-            and (
-                (self.num_kv_heads is not None and self.head_dim is not None)
-                or (self.embedding_length is not None and self.embedding_length > 0)
-            )
+            and self.effective_kv_dim is not None
         )
 
     def estimate_kv_cache_mb(
@@ -97,19 +149,11 @@ class DiscoveredModel:
         else:
             bytes_per_elem = 1.0
 
-        if self.has_architecture_metadata and self.num_layers is not None:
-            if self.num_kv_heads is not None and self.head_dim is not None:
-                kv_dim = self.num_kv_heads * self.head_dim
-            elif self.embedding_length is not None:
-                kv_dim = self.embedding_length
-            else:
-                kv_dim = None
-
-            if kv_dim:
-                # 2 (Key + Value) * layers * kv_dim * context_tokens * bytes_per_elem
-                total_kv_bytes = 2 * self.num_layers * kv_dim * ctx * bytes_per_elem
-                kv_mb = max(16, round(total_kv_bytes / (1024 * 1024)))
-                return kv_mb, "architecture_derived"
+        if self.has_architecture_metadata and self.num_layers is not None and self.effective_kv_dim is not None:
+            # 2 (Key + Value) * layers * kv_dim * context_tokens * bytes_per_elem
+            total_kv_bytes = 2 * self.num_layers * self.effective_kv_dim * ctx * bytes_per_elem
+            kv_mb = max(16, round(total_kv_bytes / (1024 * 1024)))
+            return kv_mb, "architecture_derived"
 
         # Clearly identified rough proxy scaled by context tier and model tier when architecture metadata is missing
         if self.tier == ModelTier.SMALL:

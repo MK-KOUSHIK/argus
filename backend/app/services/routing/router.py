@@ -324,8 +324,10 @@ class ModelRouter:
         # 3. GPU telemetry unavailable, but RAM is valid -> CPU-only execution policy
         if not gpu_valid:
             allow_cpu = getattr(settings, "ROUTING_ALLOW_CPU_EXECUTION", True)
-            runtime_req = candidate_model.estimate_runtime_vram_mb(context_tier=context_tier)
             weight_mb = round(candidate_model.weight_size_mb)
+            kv_mb, kv_method = candidate_model.estimate_kv_cache_mb(context_tier=context_tier)
+            cpu_allowance_mb = 64 if candidate_model.tier == ModelTier.SMALL else (128 if candidate_model.tier == ModelTier.MEDIUM else 256)
+            total_estimated_cpu_req_mb = weight_mb + kv_mb + cpu_allowance_mb
 
             if not allow_cpu:
                 return ResourceAssessment(
@@ -336,7 +338,7 @@ class ModelRouter:
                     ram_total_mb=ram_total,
                     ram_free_mb=ram_free,
                     ram_used_mb=ram_used,
-                    estimated_model_vram_mb=runtime_req,
+                    estimated_model_vram_mb=total_estimated_cpu_req_mb,
                     is_resource_sufficient=False,
                     resource_pressure_reason=(
                         "GPU acceleration is unavailable, and CPU-only execution is disabled by ROUTING_ALLOW_CPU_EXECUTION policy."
@@ -346,23 +348,56 @@ class ModelRouter:
                     concurrency_capacity=concurrency_capacity,
                     measured_vram_mb=None,
                     weight_footprint_mb=weight_mb,
-                    estimated_runtime_vram_mb=runtime_req,
+                    estimated_runtime_vram_mb=total_estimated_cpu_req_mb,
                     vram_measurement_type="none",
                 )
 
+            # Check if required architecture metadata is missing and policy requires verified estimates
+            require_arch = getattr(settings, "ROUTING_REQUIRE_ARCHITECTURE_METADATA", False)
+            if require_arch and kv_method == "rough_proxy":
+                return ResourceAssessment(
+                    gpu_available=False,
+                    vram_total_mb=None,
+                    vram_free_mb=None,
+                    vram_used_mb=None,
+                    ram_total_mb=ram_total,
+                    ram_free_mb=ram_free,
+                    ram_used_mb=ram_used,
+                    estimated_model_vram_mb=total_estimated_cpu_req_mb,
+                    is_resource_sufficient=False,
+                    resource_pressure_reason=(
+                        f"Candidate model '{candidate_model.name}' lacks verified architecture metadata for exact CPU RAM KV-cache estimation; "
+                        f"admission rejected by ROUTING_REQUIRE_ARCHITECTURE_METADATA policy."
+                    ),
+                    is_currently_loaded=is_loaded,
+                    concurrency_in_flight=in_flight,
+                    concurrency_capacity=concurrency_capacity,
+                    measured_vram_mb=None,
+                    weight_footprint_mb=weight_mb,
+                    estimated_runtime_vram_mb=total_estimated_cpu_req_mb,
+                    vram_measurement_type="cpu_only",
+                )
+
             # CPU execution is permitted: validate host RAM headroom
+            # Total CPU memory admission requirement includes:
+            # - Model weights footprint (unloaded)
+            # - Estimated KV-cache at target context and configured cache dtype
+            # - Explicit CPU runtime scratchpad and activation allowance (64-256 MiB)
+            # - Host system safety margin (512-1024 MiB) to prevent OS paging/swap churn
             ram_margin = getattr(settings, "ROUTING_RAM_SAFETY_MARGIN_MB", 1024)
             if candidate_model.tier == ModelTier.SMALL:
                 ram_margin = min(ram_margin, 512)
 
-            required_ram = ram_margin if is_loaded else (weight_mb + ram_margin)
+            required_ram = (kv_mb + cpu_allowance_mb + ram_margin) if is_loaded else (total_estimated_cpu_req_mb + ram_margin)
             assert ram_free is not None
             is_cpu_sufficient = ram_free >= required_ram
             cpu_pressure_reason: Optional[str] = None
             if not is_cpu_sufficient:
                 cpu_pressure_reason = (
                     f"Insufficient host RAM for CPU-only execution of '{candidate_model.name}' "
-                    f"({ram_free:.0f} MiB free < {required_ram} MiB required [weights: {weight_mb} MiB + {ram_margin} MiB margin])"
+                    f"({ram_free:.0f} MiB free < {required_ram} MiB required "
+                    f"[estimated requirement: {weight_mb} MiB weights + {kv_mb} MiB KV cache ({kv_method}) + "
+                    f"{cpu_allowance_mb} MiB runtime allowance + {ram_margin} MiB safety margin])"
                 )
 
             # Check unknown tier constraints
@@ -383,7 +418,7 @@ class ModelRouter:
                 ram_total_mb=ram_total,
                 ram_free_mb=ram_free,
                 ram_used_mb=ram_used,
-                estimated_model_vram_mb=runtime_req,
+                estimated_model_vram_mb=total_estimated_cpu_req_mb,
                 is_resource_sufficient=is_cpu_sufficient,
                 resource_pressure_reason=cpu_pressure_reason,
                 is_currently_loaded=is_loaded,
@@ -391,7 +426,7 @@ class ModelRouter:
                 concurrency_capacity=concurrency_capacity,
                 measured_vram_mb=None,
                 weight_footprint_mb=weight_mb,
-                estimated_runtime_vram_mb=runtime_req,
+                estimated_runtime_vram_mb=total_estimated_cpu_req_mb,
                 vram_measurement_type="cpu_only",
             )
 
