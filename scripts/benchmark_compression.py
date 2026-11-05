@@ -1386,7 +1386,7 @@ def calculate_total_optimizer_cost(
 
     base_tot = validate_token_count(base_opt.get("prompt_eval_count"))
     comp_tot = validate_token_count(comp_opt.get("prompt_eval_count"))
-    has_complete = bool(base_complete is True and comp_complete is True)
+    has_complete = base_complete is True and comp_complete is True
 
     b_calls_count = base_call_count if isinstance(base_call_count, int) and not isinstance(base_call_count, bool) and base_call_count >= 0 else len(base_calls or [])
     c_calls_count = comp_call_count if isinstance(comp_call_count, int) and not isinstance(comp_call_count, bool) and comp_call_count >= 0 else len(comp_calls or [])
