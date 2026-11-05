@@ -22,7 +22,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.schemas.optimizer import OptimizeRequest, OptimizeResponse
 from app.schemas.routing import (
     ModelCatalogResponse,
@@ -1346,4 +1346,114 @@ def test_estimate_kv_cache_unknown_architecture_metadata_falls_back_to_rough_pro
     kv_mb, method = m_no_arch.estimate_kv_cache_mb(context_tier=4096)
     assert method == "rough_proxy"
     assert kv_mb == 350
+
+
+def test_evaluate_resources_cpu_allowance_changes_admission_decision():
+    """Verify changing configured CPU runtime allowance directly toggles CPU admission decisions."""
+    # 1000 MiB model. Small tier has kv_mb=100 (rough proxy), ram_margin=min(1024, 512)=512.
+    m_1b = DiscoveredModel(
+        name="test:1b", model="test:1b", digest="d1", size_bytes=1000 * 1024 * 1024,
+        modified_at="2026-10-01", parameter_size="1B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+    # Available RAM = 1700 MiB
+    ram = {"total_mb": 16000, "free_mb": 1700, "used_mb": 14300, "source": "win32"}
+
+    # Case A: Default allowance = 64 MiB -> total required = 1000 + 100 + 64 + 512 = 1676 MiB <= 1700 MiB -> SUFFICIENT
+    with patch.object(settings, "ROUTING_ALLOW_CPU_EXECUTION", True), \
+         patch.object(settings, "ROUTING_CPU_ALLOWANCE_SMALL_MB", 64):
+        res_pass = ModelRouter.evaluate_resources(m_1b, gpu_telemetry=None, ram_telemetry=ram)
+        assert res_pass.is_resource_sufficient is True
+        assert res_pass.resource_pressure_reason is None
+
+    # Case B: Increased allowance = 200 MiB -> total required = 1000 + 100 + 200 + 512 = 1812 MiB > 1700 MiB -> INSUFFICIENT
+    with patch.object(settings, "ROUTING_ALLOW_CPU_EXECUTION", True), \
+         patch.object(settings, "ROUTING_CPU_ALLOWANCE_SMALL_MB", 200):
+        res_fail = ModelRouter.evaluate_resources(m_1b, gpu_telemetry=None, ram_telemetry=ram)
+        assert res_fail.is_resource_sufficient is False
+        assert "insufficient host ram for cpu-only execution" in str(res_fail.resource_pressure_reason).lower()
+        assert "200 mib runtime allowance" in str(res_fail.resource_pressure_reason).lower()
+
+
+def test_evaluate_resources_cpu_allowance_tier_independence():
+    """Verify CPU allowances can be configured independently per capacity tier."""
+    m_small = DiscoveredModel(
+        name="test:small", model="test:small", digest="d1", size_bytes=1000 * 1024 * 1024,
+        modified_at="2026-10-01", parameter_size="1B", tier=ModelTier.SMALL,
+    )
+    m_medium = DiscoveredModel(
+        name="test:medium", model="test:medium", digest="d2", size_bytes=4000 * 1024 * 1024,
+        modified_at="2026-10-01", parameter_size="7B", tier=ModelTier.MEDIUM,
+    )
+    m_large = DiscoveredModel(
+        name="test:large", model="test:large", digest="d3", size_bytes=8000 * 1024 * 1024,
+        modified_at="2026-10-01", parameter_size="14B", tier=ModelTier.LARGE,
+    )
+    m_unknown = DiscoveredModel(
+        name="test:unknown", model="test:unknown", digest="d4", size_bytes=2000 * 1024 * 1024,
+        modified_at="2026-10-01", tier=ModelTier.UNKNOWN,
+    )
+
+    with patch.object(settings, "ROUTING_CPU_ALLOWANCE_SMALL_MB", 50), \
+         patch.object(settings, "ROUTING_CPU_ALLOWANCE_MEDIUM_MB", 150), \
+         patch.object(settings, "ROUTING_CPU_ALLOWANCE_LARGE_MB", 350), \
+         patch.object(settings, "ROUTING_CPU_ALLOWANCE_DEFAULT_MB", 75):
+        assert ModelRouter.get_cpu_runtime_allowance_mb(m_small) == 50
+        assert ModelRouter.get_cpu_runtime_allowance_mb(m_medium) == 150
+        assert ModelRouter.get_cpu_runtime_allowance_mb(m_large) == 350
+        assert ModelRouter.get_cpu_runtime_allowance_mb(m_unknown) == 75
+
+
+def test_evaluate_resources_cpu_loaded_model_distinguishes_memory_from_unloaded():
+    """Verify diagnostics distinguish loaded resident memory from unloaded weights in CPU admission."""
+    # Model size = 2000 MiB, small tier (kv_mb = 100, cpu_allowance = 64, ram_margin = 512).
+    # Unloaded requirement = 2000 + 100 + 64 + 512 = 2676 MiB.
+    # Loaded requirement = 100 + 64 + 512 = 676 MiB (weights already resident).
+    m_loaded = DiscoveredModel(
+        name="resident:2b", model="resident:2b", digest="d1", size_bytes=2000 * 1024 * 1024,
+        modified_at="2026-10-01", parameter_size="2B", tier=ModelTier.SMALL,
+        is_loaded=True,
+    )
+    # Available RAM = 600 MiB (< 676 MiB required for loaded headroom)
+    ram_tight = {"total_mb": 16000, "free_mb": 600, "used_mb": 15400, "source": "win32"}
+
+    with patch.object(settings, "ROUTING_ALLOW_CPU_EXECUTION", True):
+        res = ModelRouter.evaluate_resources(m_loaded, gpu_telemetry=None, ram_telemetry=ram_tight)
+        assert res.is_resource_sufficient is False
+        reason = str(res.resource_pressure_reason).lower()
+        assert "insufficient host ram for cpu-only execution of loaded model" in reason
+        assert "model weights (2000 mib) are already loaded in ram" in reason
+        assert "runtime headroom requirement" in reason
+        assert "64 mib runtime allowance" in reason
+
+
+def test_settings_cpu_allowance_validation():
+    """Verify CPU runtime memory allowance settings enforce non-negative integers."""
+    from pydantic import ValidationError
+
+    # Valid configurations
+    s_valid = Settings(
+        ROUTING_CPU_ALLOWANCE_DEFAULT_MB=0,
+        ROUTING_CPU_ALLOWANCE_SMALL_MB=32,
+        ROUTING_CPU_ALLOWANCE_MEDIUM_MB=96,
+        ROUTING_CPU_ALLOWANCE_LARGE_MB=192,
+    )
+    assert s_valid.ROUTING_CPU_ALLOWANCE_DEFAULT_MB == 0
+    assert s_valid.ROUTING_CPU_ALLOWANCE_SMALL_MB == 32
+    assert s_valid.ROUTING_CPU_ALLOWANCE_MEDIUM_MB == 96
+    assert s_valid.ROUTING_CPU_ALLOWANCE_LARGE_MB == 192
+
+    # Negative values are rejected
+    with pytest.raises(ValidationError):
+        Settings(ROUTING_CPU_ALLOWANCE_SMALL_MB=-1)
+
+    with pytest.raises(ValidationError):
+        Settings(ROUTING_CPU_ALLOWANCE_MEDIUM_MB=-50)
+
+    with pytest.raises(ValidationError):
+        Settings(ROUTING_CPU_ALLOWANCE_LARGE_MB=-100)
+
+    with pytest.raises(ValidationError):
+        Settings(ROUTING_CPU_ALLOWANCE_DEFAULT_MB=-1)
+
 

@@ -8,8 +8,8 @@ Enforces Part A Zero-Hardcoding standard:
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Union
-from pydantic import field_validator
+from typing import Any, Dict, List, Optional, Union
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
@@ -104,6 +104,22 @@ class Settings(BaseSettings):
     ROUTING_ALLOW_OVERRIDE_FALLBACK: bool = False
     ROUTING_ALLOW_CPU_EXECUTION: bool = True
     ROUTING_REQUIRE_ARCHITECTURE_METADATA: bool = False
+    ROUTING_CPU_ALLOWANCE_DEFAULT_MB: int = 128
+    ROUTING_CPU_ALLOWANCE_SMALL_MB: int = 64
+    ROUTING_CPU_ALLOWANCE_MEDIUM_MB: int = 128
+    ROUTING_CPU_ALLOWANCE_LARGE_MB: int = 256
+
+    def get_cpu_runtime_allowance_mb(self, tier: Any = "default") -> int:
+        """Return configured CPU runtime memory allowance in MiB for a given model tier."""
+        tier_val = getattr(tier, "value", tier)
+        tier_str = str(tier_val).lower() if tier_val is not None else "default"
+        if tier_str == "small":
+            return self.ROUTING_CPU_ALLOWANCE_SMALL_MB
+        elif tier_str == "medium":
+            return self.ROUTING_CPU_ALLOWANCE_MEDIUM_MB
+        elif tier_str == "large":
+            return self.ROUTING_CPU_ALLOWANCE_LARGE_MB
+        return self.ROUTING_CPU_ALLOWANCE_DEFAULT_MB
 
     # Optimization & Token Estimation Heuristics
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0
@@ -312,6 +328,23 @@ class Settings(BaseSettings):
     def validate_registry_ttl(cls, v: float) -> float:
         if v <= 0.0:
             raise ValueError(f"ROUTING_REGISTRY_TTL_SECONDS must be positive; got {v}")
+        return v
+
+    @field_validator(
+        "ROUTING_CPU_ALLOWANCE_DEFAULT_MB",
+        "ROUTING_CPU_ALLOWANCE_SMALL_MB",
+        "ROUTING_CPU_ALLOWANCE_MEDIUM_MB",
+        "ROUTING_CPU_ALLOWANCE_LARGE_MB",
+    )
+    @classmethod
+    def validate_cpu_allowance_mb(cls, v: int, info: ValidationInfo) -> int:
+        if isinstance(v, bool) or not isinstance(v, int):
+            try:
+                v = int(v)
+            except (ValueError, TypeError):
+                raise ValueError(f"{info.field_name} must be an integer; got {v}")
+        if v < 0:
+            raise ValueError(f"{info.field_name} must be non-negative; got {v}")
         return v
 
     @field_validator("CORS_ORIGINS", mode="before")

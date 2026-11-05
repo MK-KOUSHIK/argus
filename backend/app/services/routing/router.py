@@ -181,6 +181,21 @@ class ModelRouter:
         )
 
     @classmethod
+    def get_cpu_runtime_allowance_mb(cls, model: DiscoveredModel) -> int:
+        """Retrieve the configured CPU runtime allowance in MiB for the given model tier."""
+        if hasattr(settings, "get_cpu_runtime_allowance_mb"):
+            return settings.get_cpu_runtime_allowance_mb(model.tier)
+        tier_val = getattr(model.tier, "value", str(model.tier))
+        tier_str = str(tier_val).lower()
+        if tier_str == "small":
+            return getattr(settings, "ROUTING_CPU_ALLOWANCE_SMALL_MB", 64)
+        elif tier_str == "medium":
+            return getattr(settings, "ROUTING_CPU_ALLOWANCE_MEDIUM_MB", 128)
+        elif tier_str == "large":
+            return getattr(settings, "ROUTING_CPU_ALLOWANCE_LARGE_MB", 256)
+        return getattr(settings, "ROUTING_CPU_ALLOWANCE_DEFAULT_MB", 128)
+
+    @classmethod
     def evaluate_resources(
         cls,
         candidate_model: Optional[DiscoveredModel],
@@ -326,7 +341,7 @@ class ModelRouter:
             allow_cpu = getattr(settings, "ROUTING_ALLOW_CPU_EXECUTION", True)
             weight_mb = round(candidate_model.weight_size_mb)
             kv_mb, kv_method = candidate_model.estimate_kv_cache_mb(context_tier=context_tier)
-            cpu_allowance_mb = 64 if candidate_model.tier == ModelTier.SMALL else (128 if candidate_model.tier == ModelTier.MEDIUM else 256)
+            cpu_allowance_mb = cls.get_cpu_runtime_allowance_mb(candidate_model)
             total_estimated_cpu_req_mb = weight_mb + kv_mb + cpu_allowance_mb
 
             if not allow_cpu:
@@ -382,7 +397,7 @@ class ModelRouter:
             # Total CPU memory admission requirement includes:
             # - Model weights footprint (unloaded)
             # - Estimated KV-cache at target context and configured cache dtype
-            # - Explicit CPU runtime scratchpad and activation allowance (64-256 MiB)
+            # - Explicit CPU runtime scratchpad and activation allowance (configurable per tier via ROUTING_CPU_ALLOWANCE_*_MB)
             # - Host system safety margin (512-1024 MiB) to prevent OS paging/swap churn
             ram_margin = getattr(settings, "ROUTING_RAM_SAFETY_MARGIN_MB", 1024)
             if candidate_model.tier == ModelTier.SMALL:
@@ -393,12 +408,21 @@ class ModelRouter:
             is_cpu_sufficient = ram_free >= required_ram
             cpu_pressure_reason: Optional[str] = None
             if not is_cpu_sufficient:
-                cpu_pressure_reason = (
-                    f"Insufficient host RAM for CPU-only execution of '{candidate_model.name}' "
-                    f"({ram_free:.0f} MiB free < {required_ram} MiB required "
-                    f"[estimated requirement: {weight_mb} MiB weights + {kv_mb} MiB KV cache ({kv_method}) + "
-                    f"{cpu_allowance_mb} MiB runtime allowance + {ram_margin} MiB safety margin])"
-                )
+                if is_loaded:
+                    cpu_pressure_reason = (
+                        f"Insufficient host RAM for CPU-only execution of loaded model '{candidate_model.name}' "
+                        f"({ram_free:.0f} MiB free < {required_ram} MiB required "
+                        f"[estimated runtime headroom requirement: {kv_mb} MiB KV cache ({kv_method}) + "
+                        f"{cpu_allowance_mb} MiB runtime allowance + {ram_margin} MiB safety margin; "
+                        f"model weights ({weight_mb} MiB) are already loaded in RAM])"
+                    )
+                else:
+                    cpu_pressure_reason = (
+                        f"Insufficient host RAM for CPU-only execution of '{candidate_model.name}' "
+                        f"({ram_free:.0f} MiB free < {required_ram} MiB required "
+                        f"[estimated unloaded requirement: {weight_mb} MiB weights + {kv_mb} MiB KV cache ({kv_method}) + "
+                        f"{cpu_allowance_mb} MiB runtime allowance + {ram_margin} MiB safety margin])"
+                    )
 
             # Check unknown tier constraints
             allow_unknown = getattr(settings, "ROUTING_ALLOW_UNKNOWN_TIER", False)
