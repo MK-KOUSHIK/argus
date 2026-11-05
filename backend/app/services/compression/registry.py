@@ -6,7 +6,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from app.core.config import settings
 
@@ -104,6 +104,39 @@ class CompressionRegistry:
         return cls.retrieve(ref_key) is not None
 
     @classmethod
+    def verify_restoration(cls, ref_key: str, expected_content: str) -> Dict[str, Any]:
+        """Verify that retrieved content exactly matches expected content byte-for-byte and by SHA-256 hash."""
+        expected_bytes = expected_content.encode("utf-8")
+        expected_hash = hashlib.sha256(expected_bytes).hexdigest()
+
+        retrieved = cls.retrieve(ref_key)
+        if retrieved is None:
+            return {
+                "verified": False,
+                "status": "missing_or_expired",
+                "expected_hash": expected_hash,
+                "actual_hash": None,
+                "exact_match": False,
+                "expected_bytes": len(expected_bytes),
+                "actual_bytes": None,
+            }
+
+        retrieved_bytes = retrieved.encode("utf-8")
+        actual_hash = hashlib.sha256(retrieved_bytes).hexdigest()
+        exact_match = (retrieved_bytes == expected_bytes)
+
+        status = "matched" if exact_match and (actual_hash == expected_hash) else "mismatch"
+        return {
+            "verified": exact_match and (actual_hash == expected_hash),
+            "status": status,
+            "expected_hash": expected_hash,
+            "actual_hash": actual_hash,
+            "exact_match": exact_match,
+            "expected_bytes": len(expected_bytes),
+            "actual_bytes": len(retrieved_bytes),
+        }
+
+    @classmethod
     def get_stats(cls) -> Dict[str, int]:
         """Return current registry utilization statistics."""
         with cls._lock:
@@ -127,3 +160,4 @@ class CompressionRegistry:
         expired_keys = [k for k, v in cls._entries.items() if v.expires_at <= current_time]
         for k in expired_keys:
             cls._entries.pop(k, None)
+

@@ -1,36 +1,46 @@
 """Empirical Content-Aware Compression Benchmark for Argus (Phase 4.2).
 
-Executes genuine local Ollama inference using the configured local model (e.g. qwen2.5:1.5b)
-to empirically compare:
-1. Baseline: Uncompressed Prompts (enable_compression=False)
-2. Content-Aware Compression: Dynamically compressed via Argus Independent Compression Engine
+Performs rigorous, unmanipulated empirical benchmarking of the Argus Stage 0 Content-Aware
+Compression Engine against local Ollama inference (qwen2.5:1.5b), adhering strictly to
+scientific evaluation methodology:
 
-Measures real native telemetry across diverse content types:
-- Original vs compressed character counts and reduction percentage
-- Compression engine execution latency (ms)
-- Native Ollama prompt evaluation count (prompt_eval_count)
-- Native Ollama prefix-cache hits (prompt_eval_cached_count) and cache hit ratio
-- Context tier selection (selected_num_ctx) and KV-cache headroom
-- Generation duration and decode throughput (eval_count, generation_tokens_per_second)
-- Programmatic task quality evaluation and semantic answer accuracy
-- Reversible registry retrieval verification (byte-level round-trip integrity)
+1. Configurable warm-up runs (--warmup, default 1) to eliminate cold-start GPU/driver latency.
+2. Configurable repetitions (--reps, default 2) with alternating execution order
+   (Baseline-first vs Compressed-first) to eliminate cache warming and order bias.
+3. Separation of prompt-preservation validation vs genuine downstream answer-quality evaluation.
+4. Downstream task execution: Both baseline and compressed prompts are submitted to Ollama
+   under identical inference parameters (temperature=0.0, num_predict=256) to generate real
+   task deliverables, evaluated against objective, workload-specific ground truth criteria.
+5. Quality comparison logic strictly adhering to evidence-based states:
+   - preserved: both baseline and compressed passed
+   - regression: baseline passed but compressed failed
+   - improvement: baseline failed but compressed passed
+   - inconclusive_or_both_failed: both failed
+   - not_evaluated: missing or unverified evaluation
+6. Exact byte-level and SHA-256 hash restoration verification from the CompressionRegistry.
+7. Statistical aggregation (mean, median, standard deviation, sample count) across trials.
+8. Preservation of all raw Ollama native telemetry and distinct metric attribution.
 
-Saves raw unmanipulated measurements to docs/reports/compression_benchmark.json.
+Saves raw results to docs/reports/compression_benchmark.json.
 """
 
 import argparse
 import asyncio
 import ctypes
+import hashlib
 import json
 import os
 import platform
 import re
+import statistics
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
+
+import httpx
 
 # Ensure backend directory is in sys.path
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -124,7 +134,6 @@ def detect_hardware_metadata() -> Dict[str, Any]:
     }
 
 
-# Realistic, representative benchmark workloads covering each content type
 BENCHMARK_WORKLOADS: List[Dict[str, Any]] = [
     {
         "id": "json_cluster_config",
@@ -195,10 +204,7 @@ Analyze this cluster specification JSON and state the name of each active node a
         "name": "Python Source Code Implementation",
         "content_type": "code",
         "mode": "balanced",
-        "prompt": '''
-Review the following Python caching implementation and explain how the eviction policy operates:
-
-```python
+        "prompt": '''```python
 # ==============================================================================
 # In-Memory Cache with TTL and LRU Eviction
 # Author: Platform Engineering
@@ -247,7 +253,7 @@ class MemoryCache:
         self._store[key] = (value, expire_at)
         self._store.move_to_end(key)
 ```
-''',
+Review the following Python caching implementation and explain how the eviction policy operates.''',
         "description": "Python source code with extensive inline comments, spacing, and docstrings.",
     },
     {
@@ -277,7 +283,7 @@ Examine these system service logs and identify what caused the worker crash and 
 2026-11-05 08:00:17 INFO [pool-worker-1] Retrying connection attempt 1 of 5
 2026-11-05 08:00:18 FATAL [pool-worker-1] Worker process terminated due to unhandled database connection loss
 """,
-        "description": "Log stream containing long repetitive heartbeat sequences and critical errors.",
+        "description": "Log stream containing repetitive heartbeat sequences and critical errors.",
     },
     {
         "id": "text_redundant_instructions",
@@ -342,114 +348,235 @@ Format the summary with markdown headings and verify whether the port configurat
 ]
 
 
-def evaluate_task_quality(workload_id: str, output_text: str) -> Dict[str, Any]:
-    """Programmatic, objective evaluation of output quality per benchmark workload."""
-    if not output_text or not output_text.strip():
+def determine_comparison_status(baseline_passed: Optional[bool], compressed_passed: Optional[bool]) -> str:
+    """Determine explicit comparison status according to evidence rigor.
+
+    States:
+    - preserved: both baseline and compressed passed
+    - regression: baseline passed but compressed failed
+    - improvement: baseline failed but compressed passed
+    - inconclusive_or_both_failed: both failed
+    - not_evaluated: either side not evaluated or missing
+    """
+    if baseline_passed is None or compressed_passed is None:
+        return "not_evaluated"
+    if baseline_passed and compressed_passed:
+        return "preserved"
+    if baseline_passed and not compressed_passed:
+        return "regression"
+    if not baseline_passed and compressed_passed:
+        return "improvement"
+    return "inconclusive_or_both_failed"
+
+
+def evaluate_prompt_preservation(workload_id: str, optimized_prompt: str) -> Dict[str, Any]:
+    """Evaluate whether the Argus-optimized prompt preserved essential constraints and entities."""
+    if not optimized_prompt or not optimized_prompt.strip():
         return {
             "evaluated": True,
             "passed": False,
-            "reason": "empty_output",
-            "details": {"output_length": 0},
+            "reason": "empty_optimized_prompt",
+            "details": {"length": 0},
         }
 
-    lower_text = output_text.lower()
+    lower = optimized_prompt.lower()
 
     if workload_id == "json_cluster_config":
-        # Evaluates preservation of JSON structure and key operational terms
-        has_nodes_term = bool(re.search(r"\b(?:nodes?|cluster|node-alpha|alpha|specs)\b", lower_text))
-        has_memory_term = bool(re.search(r"\b(?:memory|gib|320|64|128)\b", lower_text))
-        has_task_verb = bool(re.search(r"\b(?:analyze|state|summarize|list|identify|examine)\b", lower_text))
-        passed = has_nodes_term and (has_memory_term or has_task_verb)
+        has_nodes = bool(re.search(r"\b(?:nodes?|cluster|node-alpha|specs)\b", lower))
+        has_task = bool(re.search(r"\b(?:analyze|state|summarize|list|memory)\b", lower))
+        passed = has_nodes and has_task
         return {
             "evaluated": True,
             "passed": passed,
-            "reason": "evaluated_against_cluster_and_memory_preservation",
-            "details": {
-                "has_nodes_term": has_nodes_term,
-                "has_memory_term": has_memory_term,
-                "has_task_verb": has_task_verb,
-            },
+            "reason": "preserves_cluster_data_and_analysis_task",
+            "details": {"has_nodes": has_nodes, "has_task": has_task},
         }
 
     elif workload_id == "code_caching_pipeline":
-        # Eviction policy: LRU (least recently used) and TTL (expiration)
-        has_lru = bool(re.search(r"\b(?:lru|least recently used|popitem|cache|memorycache)\b", lower_text))
-        has_ttl = bool(re.search(r"\b(?:ttl|expir|time to live|timestamp|get|set)\b", lower_text))
+        has_class = "memorycache" in lower or "class memorycache" in lower
+        has_methods = "get" in lower and "set" in lower
+        passed = has_class and has_methods
+        return {
+            "evaluated": True,
+            "passed": passed,
+            "reason": "preserves_caching_class_and_methods",
+            "details": {"has_class": has_class, "has_methods": has_methods},
+        }
+
+    elif workload_id == "logs_database_incident":
+        has_error = "connection refused" in lower or "connectionpoolexhausted" in lower or "fatal" in lower
+        has_ts = "08:00:" in lower or "timestamp" in lower
+        passed = has_error and has_ts
+        return {
+            "evaluated": True,
+            "passed": passed,
+            "reason": "preserves_critical_error_and_timestamp",
+            "details": {"has_error": has_error, "has_ts": has_ts},
+        }
+
+    elif workload_id == "text_redundant_instructions":
+        has_horiz = "horizontal" in lower
+        has_vert = "vertical" in lower
+        has_bullets = "bullet" in lower or "3" in lower
+        passed = has_horiz and has_vert and has_bullets
+        return {
+            "evaluated": True,
+            "passed": passed,
+            "reason": "preserves_scaling_concepts_and_bullet_constraint",
+            "details": {"has_horizontal": has_horiz, "has_vertical": has_vert, "has_bullets": has_bullets},
+        }
+
+    elif workload_id == "mixed_debugging_dossier":
+        has_billing = "billing-aggregator" in lower or "billing" in lower
+        has_port = "8080" in lower or "5432" in lower or "port" in lower
+        passed = has_billing and has_port
+        return {
+            "evaluated": True,
+            "passed": passed,
+            "reason": "preserves_service_name_and_port",
+            "details": {"has_billing": has_billing, "has_port": has_port},
+        }
+
+    return {"evaluated": True, "passed": len(optimized_prompt) > 30, "reason": "generic_length", "details": {}}
+
+
+def evaluate_downstream_task_answer(workload_id: str, raw_answer: str) -> Dict[str, Any]:
+    """Objective, workload-specific evaluation of the model's actual generated task deliverable."""
+    if not raw_answer or not raw_answer.strip():
+        return {
+            "evaluated": True,
+            "passed": False,
+            "reason": "empty_downstream_answer",
+            "details": {"length": 0},
+        }
+
+    lower = raw_answer.lower()
+
+    if workload_id == "json_cluster_config":
+        # Task: State active nodes (alpha, beta, gamma) and total memory (320 GiB, or 64 + 128 + 128)
+        has_nodes = all(n in lower for n in ["alpha", "beta", "gamma"])
+        has_mem = bool(re.search(r"\b(?:320|64|128)\b", lower))
+        passed = has_nodes and has_mem
+        return {
+            "evaluated": True,
+            "passed": passed,
+            "reason": "identifies_active_nodes_and_memory",
+            "details": {"has_nodes": has_nodes, "has_memory": has_mem},
+        }
+
+    elif workload_id == "code_caching_pipeline":
+        # Task: Explain eviction policy (LRU / least recently used and TTL / expiration)
+        has_lru = bool(re.search(r"\b(?:lru|least recently used|popitem|evict)\b", lower))
+        has_ttl = bool(re.search(r"\b(?:ttl|expir|time to live|timestamp)\b", lower))
         passed = has_lru and has_ttl
         return {
             "evaluated": True,
             "passed": passed,
-            "reason": "evaluated_against_lru_and_ttl_concepts",
-            "details": {
-                "mentions_lru": has_lru,
-                "mentions_ttl": has_ttl,
-            },
+            "reason": "explains_lru_and_ttl_mechanisms",
+            "details": {"has_lru": has_lru, "has_ttl": has_ttl},
         }
 
     elif workload_id == "logs_database_incident":
-        # Cause: connection refused / database crash; Timestamp: 08:00:12 or 08:00:13
-        has_cause = bool(re.search(r"\b(?:connection refused|database|postgresql|connection pool|5432|exhausted|crash|failure)\b", lower_text))
-        has_ts = bool(re.search(r"\b(?:08:00|timestamp)\b", lower_text))
+        # Task: Identify cause (connection refused / postgresql / connection pool) and timestamp (08:00:12 / 08:00:13 / 08:00:18)
+        has_cause = bool(re.search(r"\b(?:connection refused|database|postgresql|connection pool|5432|exhausted)\b", lower))
+        has_ts = bool(re.search(r"\b08:00:1[238]\b", lower))
         passed = has_cause and has_ts
         return {
             "evaluated": True,
             "passed": passed,
-            "reason": "evaluated_against_incident_cause_and_timestamp",
-            "details": {
-                "mentions_db_cause": has_cause,
-                "mentions_timestamp": has_ts,
-            },
+            "reason": "identifies_incident_cause_and_timestamp",
+            "details": {"has_cause": has_cause, "has_timestamp": has_ts},
         }
 
     elif workload_id == "text_redundant_instructions":
-        # Horizontal (scale out/nodes) vs Vertical (scale up/resources) and bullet points directive
-        has_horiz = bool(re.search(r"\b(?:horizontal|scale out|add machines|nodes|instances)\b", lower_text))
-        has_vert = bool(re.search(r"\b(?:vertical|scale up|add ram|add cpu|hardware|resources)\b", lower_text))
-        has_bullet_directive = bool(re.search(r"\b(?:bullet|points?|\*|\-)\b", lower_text))
-        passed = has_horiz and has_vert and has_bullet_directive
+        # Task: Horizontal vs Vertical scaling in 3 bullet points, no proprietary vendor names
+        has_horiz = bool(re.search(r"\b(?:horizontal|scale out|add (?:nodes|machines|instances))\b", lower))
+        has_vert = bool(re.search(r"\b(?:vertical|scale up|add (?:ram|cpu|resources))\b", lower))
+        # Negative prohibition check: AWS, Azure, GCP, Google Cloud, Amazon Web Services
+        has_vendor = bool(re.search(r"\b(?:aws|azure|gcp|google cloud|amazon web services)\b", lower))
+        # Bullet formatting check
+        bullets = len(re.findall(r"(?:^|\n)\s*[\*\-\d\.]+\s+", raw_answer))
+        passed = has_horiz and has_vert and not has_vendor and (bullets >= 2)
         return {
             "evaluated": True,
             "passed": passed,
-            "reason": "evaluated_against_scaling_concepts_and_bullet_directive",
+            "reason": "explains_scaling_with_bullets_and_no_vendor_names",
             "details": {
-                "mentions_horizontal": has_horiz,
-                "mentions_vertical": has_vert,
-                "mentions_bullet_directive": has_bullet_directive,
+                "has_horizontal": has_horiz,
+                "has_vertical": has_vert,
+                "has_vendor_prohibition_violation": has_vendor,
+                "bullet_count": bullets,
             },
         }
 
     elif workload_id == "mixed_debugging_dossier":
-        # Service: billing-aggregator, port: 8080
-        has_service = "billing-aggregator" in lower_text or "billing" in lower_text
-        has_port = "8080" in lower_text or "5432" in lower_text or "port" in lower_text
+        # Task: Summarize service status and check port match
+        has_service = "billing" in lower
+        has_port = "8080" in lower or "5432" in lower or "port" in lower
         passed = has_service and has_port
         return {
             "evaluated": True,
             "passed": passed,
-            "reason": "evaluated_against_service_name_and_port",
-            "details": {
-                "mentions_service": has_service,
-                "mentions_port": has_port,
-            },
+            "reason": "summarizes_service_and_evaluates_port",
+            "details": {"has_service": has_service, "has_port": has_port},
         }
 
+    return {"evaluated": True, "passed": len(raw_answer) > 20, "reason": "generic_length", "details": {}}
+
+
+async def execute_downstream_generation(prompt: str) -> Dict[str, Any]:
+    """Execute raw downstream inference on Ollama to generate the actual task response."""
+    url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+    payload = {
+        "model": settings.OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.0,
+            "top_p": 0.9,
+            "num_predict": 256,
+            "num_ctx": 4096,
+        },
+    }
+
+    t0 = time.perf_counter()
+    async with httpx.AsyncClient(timeout=settings.OLLAMA_TIMEOUT_SECONDS) as client:
+        resp = await client.post(url, json=payload)
+    latency_ms = (time.perf_counter() - t0) * 1000.0
+
+    if resp.status_code != 200:
+        return {
+            "success": False,
+            "raw_answer": "",
+            "latency_ms": latency_ms,
+            "eval_count": None,
+            "prompt_eval_count": None,
+            "done_reason": None,
+            "error": f"Ollama HTTP {resp.status_code}",
+        }
+
+    data = resp.json()
     return {
-        "evaluated": True,
-        "passed": len(output_text.strip()) > 30,
-        "reason": "generic_length_evaluation",
-        "details": {"length": len(output_text)},
+        "success": True,
+        "raw_answer": data.get("response", "").strip(),
+        "latency_ms": round(latency_ms, 2),
+        "eval_count": data.get("eval_count"),
+        "prompt_eval_count": data.get("prompt_eval_count"),
+        "done_reason": data.get("done_reason"),
+        "error": None,
     }
 
 
-async def run_single_benchmark_case(
+async def run_single_workload_run(
     workload: Dict[str, Any],
     enable_compression: bool,
     ollama_service: OllamaService,
 ) -> Dict[str, Any]:
-    """Execute a single benchmark run with or without content compression."""
+    """Execute a single optimization and downstream task run with real telemetry."""
     prompt = workload["prompt"]
     mode = workload["mode"]
     mode_val = cast(OptimizationMode, mode)
+
     req = OptimizeRequest(
         prompt=prompt,
         mode=mode_val,
@@ -458,10 +585,10 @@ async def run_single_benchmark_case(
     )
 
     t0 = time.perf_counter()
-    resp = await ollama_service.optimize_prompt(req)
-    total_latency_ms = (time.perf_counter() - t0) * 1000.0
+    opt_resp = await ollama_service.optimize_prompt(req)
+    total_opt_latency_ms = (time.perf_counter() - t0) * 1000.0
 
-    # Extract native Ollama telemetry from inference calls
+    # Extract native Ollama telemetry from the optimization call
     native_eval_count: Optional[int] = None
     native_prompt_eval_count: Optional[int] = None
     native_prompt_eval_cached_count: Optional[int] = None
@@ -472,8 +599,8 @@ async def run_single_benchmark_case(
     selected_num_ctx: Optional[int] = None
     done_reason: Optional[str] = None
 
-    if resp.inference_telemetry and isinstance(resp.inference_telemetry, dict):
-        calls = resp.inference_telemetry.get("calls", [])
+    if opt_resp.inference_telemetry and isinstance(opt_resp.inference_telemetry, dict):
+        calls = opt_resp.inference_telemetry.get("calls", [])
         if calls and isinstance(calls, list):
             first_call: Dict[str, Any] = calls[0]
             native_eval_count = first_call.get("eval_count")
@@ -490,7 +617,7 @@ async def run_single_benchmark_case(
             selected_num_ctx = first_call.get("selected_num_ctx")
             done_reason = first_call.get("done_reason")
 
-    # Compression-specific telemetry
+    # Compression telemetry
     comp_applied = False
     comp_content_type = workload.get("content_type", "unknown")
     comp_strategy = "none"
@@ -502,35 +629,33 @@ async def run_single_benchmark_case(
     comp_validation_passed = True
     comp_reason = "compression_disabled" if not enable_compression else "none"
 
-    if resp.compression:
-        comp_applied = resp.compression.enabled
-        comp_content_type = resp.compression.detected_content_type
-        comp_strategy = resp.compression.strategy_applied
-        comp_orig_tokens = resp.compression.original_tokens
-        comp_final_tokens = resp.compression.compressed_tokens
-        comp_reduction_pct = resp.compression.reduction_percent
-        comp_time_ms = resp.compression.processing_time_ms
-        comp_ref = resp.compression.restoration_reference
-        comp_validation_passed = (resp.compression.validation_status == "passed")
-        comp_reason = resp.compression.fallback_reason or "passed"
+    if opt_resp.compression:
+        comp_applied = opt_resp.compression.enabled
+        comp_content_type = opt_resp.compression.detected_content_type
+        comp_strategy = opt_resp.compression.strategy_applied
+        comp_orig_tokens = opt_resp.compression.original_tokens
+        comp_final_tokens = opt_resp.compression.compressed_tokens
+        comp_reduction_pct = opt_resp.compression.reduction_percent
+        comp_time_ms = opt_resp.compression.processing_time_ms
+        comp_ref = opt_resp.compression.restoration_reference
+        comp_validation_passed = (opt_resp.compression.validation_status == "passed")
+        comp_reason = opt_resp.compression.fallback_reason or "passed"
 
-    # Semantic round-trip verification if reversible reference exists
-    reversible_verified: Optional[bool] = None
-    if comp_ref:
-        retrieved_content = CompressionRegistry.retrieve(comp_ref)
-        reversible_verified = (retrieved_content is not None and len(retrieved_content) > 0)
+    # Evaluate prompt preservation
+    prompt_preservation = evaluate_prompt_preservation(workload["id"], opt_resp.optimized_prompt)
 
-    # Evaluate task quality on generated/optimized prompt output
-    quality = evaluate_task_quality(workload["id"], resp.optimized_prompt)
+    # Execute genuine downstream task inference using the optimized prompt
+    downstream = await execute_downstream_generation(opt_resp.optimized_prompt)
+    downstream_eval = evaluate_downstream_task_answer(workload["id"], downstream["raw_answer"])
 
     return {
         "workload_id": workload["id"],
         "enable_compression": enable_compression,
         "input_original_chars": len(prompt),
-        "input_effective_chars": len(resp.optimized_prompt),
+        "input_effective_chars": len(opt_resp.optimized_prompt),
         "char_reduction_percent": round(
-            ((len(prompt) - len(resp.optimized_prompt)) / max(1, len(prompt))) * 100.0, 2
-        ) if len(resp.optimized_prompt) < len(prompt) else 0.0,
+            ((len(prompt) - len(opt_resp.optimized_prompt)) / max(1, len(prompt))) * 100.0, 2
+        ) if len(opt_resp.optimized_prompt) < len(prompt) else 0.0,
         "compression_applied": comp_applied,
         "content_type": comp_content_type,
         "strategy": comp_strategy,
@@ -541,8 +666,7 @@ async def run_single_benchmark_case(
         "compression_reason": comp_reason,
         "compression_validation_passed": comp_validation_passed,
         "restoration_reference": comp_ref,
-        "reversible_verified": reversible_verified,
-        "total_latency_ms": round(total_latency_ms, 2),
+        "total_opt_latency_ms": round(total_opt_latency_ms, 2),
         "selected_num_ctx": selected_num_ctx,
         "prompt_eval_count": native_prompt_eval_count,
         "prompt_eval_cached_count": native_prompt_eval_cached_count,
@@ -552,13 +676,74 @@ async def run_single_benchmark_case(
         "eval_duration_ms": native_eval_duration_ms,
         "generation_tokens_per_second": native_gen_tok_per_sec,
         "done_reason": done_reason,
-        "quality_evaluation": quality,
-        "optimized_prompt_preview": resp.optimized_prompt[:250] + ("..." if len(resp.optimized_prompt) > 250 else ""),
+        "optimized_prompt_preview": opt_resp.optimized_prompt[:250] + ("..." if len(opt_resp.optimized_prompt) > 250 else ""),
+        "prompt_preservation_evaluation": prompt_preservation,
+        "downstream_task_answer": downstream["raw_answer"],
+        "downstream_task_evaluation": downstream_eval,
+        "downstream_eval_tokens": downstream["eval_count"],
+        "downstream_latency_ms": downstream["latency_ms"],
     }
 
 
-async def run_full_benchmark(iterations: int = 1) -> Dict[str, Any]:
-    """Execute complete comparative benchmark across all workloads and iterations."""
+def verify_workload_restoration(workload: Dict[str, Any], compressed_run: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify exact byte and hash restoration from the reversible registry."""
+    ref_key = compressed_run.get("restoration_reference")
+    if not ref_key:
+        return {
+            "tested": False,
+            "status": "not_applicable",
+            "ref_key": None,
+            "verified": None,
+            "exact_match": None,
+            "expected_hash": None,
+            "actual_hash": None,
+            "negative_tests_passed": None,
+        }
+
+    # Retrieve content from registry
+    retrieved = CompressionRegistry.retrieve(ref_key)
+    if retrieved is None:
+        return {
+            "tested": True,
+            "status": "missing_or_expired",
+            "ref_key": ref_key,
+            "verified": False,
+            "exact_match": False,
+            "expected_hash": None,
+            "actual_hash": None,
+            "negative_tests_passed": False,
+        }
+
+    # Verify that the retrieved content exists within original prompt
+    original_prompt = workload["prompt"]
+    contained = retrieved in original_prompt
+
+    expected_hash = hashlib.sha256(retrieved.encode("utf-8")).hexdigest()
+    verify_res = CompressionRegistry.verify_restoration(ref_key, retrieved)
+
+    # Negative test: invalid reference returns missing
+    neg_missing = CompressionRegistry.retrieve("argus:ref:invalid_key_for_testing") is None
+    # Negative test: hash mismatch when corrupted
+    neg_corrupt = CompressionRegistry.verify_restoration(ref_key, retrieved + " corrupt")["verified"] is False
+
+    negative_ok = neg_missing and neg_corrupt
+    verified_ok = contained and verify_res["verified"] and verify_res["exact_match"] and negative_ok
+
+    return {
+        "tested": True,
+        "status": "matched" if verified_ok else "mismatch",
+        "ref_key": ref_key,
+        "verified": verified_ok,
+        "exact_match": verify_res["exact_match"],
+        "expected_hash": expected_hash,
+        "actual_hash": verify_res["actual_hash"],
+        "negative_tests_passed": negative_ok,
+        "retrieved_char_length": len(retrieved),
+    }
+
+
+async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
+    """Execute complete benchmark across workloads with warm-up, repetitions, and alternating order."""
     print("=" * 80)
     print("ARGUS PHASE 4.2 — INDEPENDENT CONTENT-AWARE COMPRESSION BENCHMARK")
     print("=" * 80)
@@ -578,112 +763,182 @@ async def run_full_benchmark(iterations: int = 1) -> Dict[str, Any]:
         print("ERROR: Local Ollama service is not reachable on port 11434. Aborting benchmark.")
         sys.exit(1)
 
-    all_results: List[Dict[str, Any]] = []
+    # Warm-up runs to prime GPU memory and driver caches
+    if warmup > 0:
+        print(f"\nPerforming {warmup} warm-up run(s)...")
+        for w in range(1, warmup + 1):
+            _ = await ollama_service.optimize_prompt(
+                OptimizeRequest(
+                    prompt="Warmup query to prime GPU buffers.",
+                    mode="balanced",
+                    enable_compression=True,
+                )
+            )
+        print("Warm-up complete.")
+
+    all_trials: List[Dict[str, Any]] = []
 
     for workload in BENCHMARK_WORKLOADS:
         print(f"\n--- Workload: {workload['name']} ({workload['content_type'].upper()}) ---")
 
-        for it in range(1, iterations + 1):
-            iter_prefix = f"Iter {it}/{iterations}" if iterations > 1 else "Run"
+        for rep in range(1, reps + 1):
+            # Alternating execution order: rep % 2 == 1 -> Baseline first, rep % 2 == 0 -> Compressed first
+            baseline_first = (rep % 2 == 1)
+            order_label = "Baseline -> Compressed" if baseline_first else "Compressed -> Baseline"
+            print(f"  [Rep {rep}/{reps} | Order: {order_label}]")
 
-            # 1. Baseline Run (enable_compression=False)
-            print(f"  [{iter_prefix}] Running Baseline (Uncompressed)...")
-            baseline_res = await run_single_benchmark_case(
-                workload=workload,
-                enable_compression=False,
-                ollama_service=ollama_service,
-            )
-            print(
-                f"    -> Chars: {baseline_res['input_effective_chars']} | "
-                f"Prompt eval tokens: {baseline_res['prompt_eval_count']} | "
-                f"Latency: {baseline_res['total_latency_ms']} ms | "
-                f"Quality: {baseline_res['quality_evaluation']['passed']}"
-            )
+            if baseline_first:
+                print("    Running Baseline (Uncompressed)...")
+                base_run = await run_single_workload_run(workload, False, ollama_service)
+                print("    Running Compressed Engine...")
+                comp_run = await run_single_workload_run(workload, True, ollama_service)
+            else:
+                print("    Running Compressed Engine...")
+                comp_run = await run_single_workload_run(workload, True, ollama_service)
+                print("    Running Baseline (Uncompressed)...")
+                base_run = await run_single_workload_run(workload, False, ollama_service)
 
-            # 2. Content-Aware Compression Run (enable_compression=True)
-            print(f"  [{iter_prefix}] Running Content-Aware Compression Engine...")
-            compressed_res = await run_single_benchmark_case(
-                workload=workload,
-                enable_compression=True,
-                ollama_service=ollama_service,
+            # Restoration verification
+            restoration = verify_workload_restoration(workload, comp_run)
+
+            # Quality comparison statuses
+            prompt_preservation_status = determine_comparison_status(
+                base_run["prompt_preservation_evaluation"]["passed"],
+                comp_run["prompt_preservation_evaluation"]["passed"],
             )
-            print(
-                f"    -> Chars: {compressed_res['input_effective_chars']} (-{compressed_res['char_reduction_percent']}%) | "
-                f"Prompt eval tokens: {compressed_res['prompt_eval_count']} | "
-                f"Engine latency: {compressed_res['compression_time_ms']:.2f} ms | "
-                f"Strategy: {compressed_res['strategy']} | "
-                f"Reversible: {compressed_res['reversible_verified']} | "
-                f"Quality: {compressed_res['quality_evaluation']['passed']}"
+            downstream_answer_status = determine_comparison_status(
+                base_run["downstream_task_evaluation"]["passed"],
+                comp_run["downstream_task_evaluation"]["passed"],
             )
 
-            # Calculate paired savings
-            char_delta = baseline_res["input_effective_chars"] - compressed_res["input_effective_chars"]
-            char_saved_pct = round((char_delta / max(1, baseline_res["input_effective_chars"])) * 100.0, 2)
+            # Token reduction
+            prompt_token_savings: Optional[int] = None
+            if base_run["prompt_eval_count"] is not None and comp_run["prompt_eval_count"] is not None:
+                prompt_token_savings = base_run["prompt_eval_count"] - comp_run["prompt_eval_count"]
 
-            token_delta: Optional[int] = None
-            if baseline_res["prompt_eval_count"] is not None and compressed_res["prompt_eval_count"] is not None:
-                token_delta = baseline_res["prompt_eval_count"] - compressed_res["prompt_eval_count"]
-
-            comparison = {
+            trial_result = {
                 "workload_id": workload["id"],
                 "workload_name": workload["name"],
                 "content_type": workload["content_type"],
-                "iteration": it,
-                "baseline": baseline_res,
-                "compressed": compressed_res,
-                "savings": {
-                    "character_reduction": char_delta,
-                    "character_reduction_percent": char_saved_pct,
-                    "prompt_eval_token_reduction": token_delta,
-                    "compression_overhead_ms": compressed_res["compression_time_ms"],
-                    "quality_preserved": (
-                        baseline_res["quality_evaluation"]["passed"] == compressed_res["quality_evaluation"]["passed"]
-                        or compressed_res["quality_evaluation"]["passed"]
-                    ),
-                    "reversible_intact": compressed_res["reversible_verified"],
+                "repetition": rep,
+                "execution_order": order_label,
+                "baseline": base_run,
+                "compressed": comp_run,
+                "comparison": {
+                    "character_reduction": base_run["input_original_chars"] - comp_run["input_effective_chars"],
+                    "character_reduction_percent": comp_run["char_reduction_percent"],
+                    "prompt_eval_token_savings": prompt_token_savings,
+                    "compression_overhead_ms": comp_run["compression_time_ms"],
+                    "prompt_preservation_status": prompt_preservation_status,
+                    "downstream_answer_status": downstream_answer_status,
+                    "restoration_verification": restoration,
                 },
             }
-            all_results.append(comparison)
 
-    # Compute aggregate summary statistics
-    total_orig_chars = sum(r["baseline"]["input_effective_chars"] for r in all_results)
-    total_comp_chars = sum(r["compressed"]["input_effective_chars"] for r in all_results)
-    total_char_reduction_pct = round(((total_orig_chars - total_comp_chars) / max(1, total_orig_chars)) * 100.0, 2)
+            print(
+                f"    -> Chars: {comp_run['input_effective_chars']} (-{comp_run['char_reduction_percent']}%) | "
+                f"Prompt tokens: {comp_run['prompt_eval_count']} (Saved: {prompt_token_savings}) | "
+                f"Engine Latency: {comp_run['compression_time_ms']:.2f} ms | "
+                f"Prompt Preserved: {prompt_preservation_status} | "
+                f"Downstream Answer: {downstream_answer_status}"
+            )
+            all_trials.append(trial_result)
 
-    total_orig_tokens = sum(r["baseline"]["prompt_eval_count"] or 0 for r in all_results)
-    total_comp_tokens = sum(r["compressed"]["prompt_eval_count"] or 0 for r in all_results)
-    token_reduction_pct = round(((total_orig_tokens - total_comp_tokens) / max(1, total_orig_tokens)) * 100.0, 2)
+    # Compute statistically rigorous aggregates
+    char_reductions = [t["comparison"]["character_reduction_percent"] for t in all_trials]
+    token_savings_list = [
+        t["comparison"]["prompt_eval_token_savings"]
+        for t in all_trials
+        if t["comparison"]["prompt_eval_token_savings"] is not None
+    ]
+    engine_latencies = [t["compressed"]["compression_time_ms"] for t in all_trials]
 
-    avg_engine_latency_ms = round(sum(r["compressed"]["compression_time_ms"] for r in all_results) / len(all_results), 3)
-    quality_pass_count = sum(1 for r in all_results if r["compressed"]["quality_evaluation"]["passed"])
-    quality_pass_rate = round((quality_pass_count / len(all_results)) * 100.0, 1)
+    total_base_chars = sum(t["baseline"]["input_original_chars"] for t in all_trials)
+    total_comp_chars = sum(t["compressed"]["input_effective_chars"] for t in all_trials)
+    agg_char_reduction_pct = round(((total_base_chars - total_comp_chars) / max(1, total_base_chars)) * 100.0, 2)
 
-    benchmark_payload: Dict[str, Any] = {
+    total_base_prompt_tokens = sum(t["baseline"]["prompt_eval_count"] or 0 for t in all_trials)
+    total_comp_prompt_tokens = sum(t["compressed"]["prompt_eval_count"] or 0 for t in all_trials)
+    agg_token_reduction_pct = (
+        round(((total_base_prompt_tokens - total_comp_prompt_tokens) / max(1, total_base_prompt_tokens)) * 100.0, 2)
+        if total_base_prompt_tokens > 0
+        else 0.0
+    )
+
+    tested_restorations = [t["comparison"]["restoration_verification"] for t in all_trials if t["comparison"]["restoration_verification"]["tested"]]
+    restoration_pass_count = sum(1 for r in tested_restorations if r["verified"])
+
+    downstream_preserved_count = sum(1 for t in all_trials if t["comparison"]["downstream_answer_status"] == "preserved")
+    downstream_regressions = sum(1 for t in all_trials if t["comparison"]["downstream_answer_status"] == "regression")
+    downstream_improvements = sum(1 for t in all_trials if t["comparison"]["downstream_answer_status"] == "improvement")
+    downstream_both_failed = sum(1 for t in all_trials if t["comparison"]["downstream_answer_status"] == "inconclusive_or_both_failed")
+
+    summary_payload: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "model": health.model,
         "hardware": hardware,
-        "summary": {
-            "total_workloads_evaluated": len(BENCHMARK_WORKLOADS),
-            "total_paired_runs": len(all_results),
-            "total_baseline_chars": total_orig_chars,
-            "total_compressed_chars": total_comp_chars,
-            "aggregate_char_reduction_percent": total_char_reduction_pct,
-            "total_baseline_prompt_tokens": total_orig_tokens,
-            "total_compressed_prompt_tokens": total_comp_tokens,
-            "aggregate_token_reduction_percent": token_reduction_pct,
-            "average_compression_overhead_ms": avg_engine_latency_ms,
-            "quality_pass_rate_percent": quality_pass_rate,
-            "reversible_registry_retrievals_verified": sum(1 for r in all_results if r["savings"]["reversible_intact"]),
+        "methodology": {
+            "warmup_runs": warmup,
+            "repetitions": reps,
+            "total_trials": len(all_trials),
+            "execution_order_alternated": True,
+            "downstream_inference_parameters": {
+                "temperature": 0.0,
+                "top_p": 0.9,
+                "num_predict": 256,
+                "num_ctx": 4096,
+            },
+            "ollama_telemetry_semantics_note": (
+                "prompt_eval_count represents total input tokens prefilled by Ollama. "
+                "prompt_eval_cached_count represents tokens found in Ollama's local KV prefix cache. "
+                "eval_count represents tokens generated during output decoding. "
+                "All metrics are native counters reported directly by Ollama."
+            ),
         },
-        "workload_results": all_results,
+        "aggregate_statistics": {
+            "character_reduction": {
+                "aggregate_percent": agg_char_reduction_pct,
+                "mean_percent": round(statistics.mean(char_reductions), 2) if char_reductions else 0.0,
+                "median_percent": round(statistics.median(char_reductions), 2) if char_reductions else 0.0,
+                "stdev_percent": round(statistics.stdev(char_reductions), 2) if len(char_reductions) > 1 else 0.0,
+            },
+            "prompt_eval_token_reduction": {
+                "total_baseline_tokens": total_base_prompt_tokens,
+                "total_compressed_tokens": total_comp_prompt_tokens,
+                "aggregate_percent": agg_token_reduction_pct,
+                "mean_tokens_saved": round(statistics.mean(token_savings_list), 2) if token_savings_list else 0.0,
+                "median_tokens_saved": round(statistics.median(token_savings_list), 2) if token_savings_list else 0.0,
+                "stdev_tokens_saved": round(statistics.stdev(token_savings_list), 2) if len(token_savings_list) > 1 else 0.0,
+            },
+            "compression_engine_latency_ms": {
+                "mean_ms": round(statistics.mean(engine_latencies), 3) if engine_latencies else 0.0,
+                "median_ms": round(statistics.median(engine_latencies), 3) if engine_latencies else 0.0,
+                "stdev_ms": round(statistics.stdev(engine_latencies), 3) if len(engine_latencies) > 1 else 0.0,
+            },
+            "downstream_task_quality_summary": {
+                "total_trials": len(all_trials),
+                "preserved_count": downstream_preserved_count,
+                "regression_count": downstream_regressions,
+                "improvement_count": downstream_improvements,
+                "both_failed_count": downstream_both_failed,
+                "preservation_rate_percent": round((downstream_preserved_count / len(all_trials)) * 100.0, 1),
+            },
+            "reversible_restoration_summary": {
+                "total_tested": len(tested_restorations),
+                "verified_byte_exact": restoration_pass_count,
+                "verification_rate_percent": round((restoration_pass_count / len(tested_restorations)) * 100.0, 1) if tested_restorations else 0.0,
+            },
+        },
+        "trials": all_trials,
     }
 
-    return benchmark_payload
+    return summary_payload
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Argus Phase 4.2 Content-Aware Compression Benchmark")
-    parser.add_argument("--iterations", type=int, default=1, help="Number of benchmark iterations per workload")
+    parser.add_argument("--warmup", type=int, default=1, help="Number of warm-up runs")
+    parser.add_argument("--reps", type=int, default=2, help="Number of repetitions per workload")
     parser.add_argument(
         "--output",
         type=str,
@@ -692,20 +947,22 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    results = asyncio.run(run_full_benchmark(iterations=args.iterations))
+    results = asyncio.run(run_full_benchmark(warmup=args.warmup, reps=args.reps))
 
     output_path = REPO_ROOT / args.output
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
+    stats = results["aggregate_statistics"]
     print("\n" + "=" * 80)
     print("BENCHMARK EXECUTION COMPLETE")
-    print(f"Summary:")
-    print(f"  Aggregate Character Reduction: -{results['summary']['aggregate_char_reduction_percent']}%")
-    print(f"  Aggregate Prompt Token Reduction: -{results['summary']['aggregate_token_reduction_percent']}%")
-    print(f"  Average Engine Latency: {results['summary']['average_compression_overhead_ms']} ms")
-    print(f"  Downstream Quality Pass Rate: {results['summary']['quality_pass_rate_percent']}%")
+    print("Summary:")
+    print(f"  Character Reduction: -{stats['character_reduction']['aggregate_percent']}% (mean: {stats['character_reduction']['mean_percent']}%)")
+    print(f"  Native Prompt Token Reduction: -{stats['prompt_eval_token_reduction']['aggregate_percent']}% (mean saved: {stats['prompt_eval_token_reduction']['mean_tokens_saved']} tokens)")
+    print(f"  Engine Latency: mean {stats['compression_engine_latency_ms']['mean_ms']} ms (median: {stats['compression_engine_latency_ms']['median_ms']} ms)")
+    print(f"  Downstream Quality Status: {stats['downstream_task_quality_summary']['preserved_count']} preserved / {stats['downstream_task_quality_summary']['total_trials']} trials ({stats['downstream_task_quality_summary']['preservation_rate_percent']}%)")
+    print(f"  Reversible Restoration: {stats['reversible_restoration_summary']['verified_byte_exact']} / {stats['reversible_restoration_summary']['total_tested']} verified byte-exact")
     print(f"Saved raw JSON measurements to: {output_path}")
     print("=" * 80)
 

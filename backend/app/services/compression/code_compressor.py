@@ -155,3 +155,4 @@ class CodeCompressor:
             return code, True, "JS/TS already compact"
 
         return compressed, True, "JS/TS comment stripping passed"
+

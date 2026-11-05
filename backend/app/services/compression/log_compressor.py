@@ -25,8 +25,8 @@ class LogCompressor:
         if len(raw_lines) < 3:
             return text, True, "Log volume below compression threshold", None
 
-        # Track unique critical errors to ensure 100% preservation
-        original_errors = cls._extract_critical_errors(raw_lines)
+        # Track unique critical errors and traces to ensure 100% exact verbatim preservation
+        original_critical = cls._extract_critical_errors(raw_lines)
 
         compressed_lines: List[str] = []
         omitted_chunks: List[str] = []
@@ -37,12 +37,19 @@ class LogCompressor:
 
         while i < n:
             current_line = raw_lines[i]
-            current_sig = cls._normalize_log_line(current_line)
-            is_critical = bool(cls.SEVERITY_REGEX.search(current_line)) or current_line.strip().startswith(("File ", "Traceback", "Exception"))
+            is_critical = cls._is_critical_line(current_line)
 
-            # Look ahead for consecutive identical signatures
+            if is_critical:
+                # Critical events are always preserved verbatim and never folded
+                compressed_lines.append(current_line)
+                i += 1
+                continue
+
+            current_sig = cls._normalize_log_line(current_line)
+
+            # Look ahead for consecutive identical non-critical signatures
             j = i + 1
-            while j < n and cls._normalize_log_line(raw_lines[j]) == current_sig and not is_critical:
+            while j < n and not cls._is_critical_line(raw_lines[j]) and cls._normalize_log_line(raw_lines[j]) == current_sig:
                 j += 1
 
             repeat_count = j - i
@@ -78,11 +85,10 @@ class LogCompressor:
 
         compressed_text = "\n".join(compressed_lines)
 
-        # Validate that all critical errors, severities, and stack traces are preserved
-        compressed_errors = cls._extract_critical_errors(compressed_lines)
-        missing_errors = original_errors - compressed_errors
-        if missing_errors:
-            return text, False, f"Log compression omitted critical errors: {list(missing_errors)[:3]}", None
+        # Validate that all critical errors, severities, and stack traces are preserved verbatim
+        for crit in original_critical:
+            if crit not in compressed_text:
+                return text, False, f"Log compression omitted critical error verbatim: {crit[:80]}", None
 
         if len(compressed_text) >= len(text):
             return text, True, "Logs already compact with no repeated runs", None
@@ -108,10 +114,25 @@ class LogCompressor:
         return match.group(0) if match else None
 
     @classmethod
-    def _extract_critical_errors(cls, lines: List[str]) -> Set[str]:
-        """Extract all error markers, exception names, and fatal log entries."""
-        critical = set()
+    def _is_critical_line(cls, line: str) -> bool:
+        """Determine if a log line represents an error, exception, trace, or critical event."""
+        s = line.strip()
+        if not s:
+            return False
+        if bool(cls.SEVERITY_REGEX.search(s)):
+            return True
+        if s.startswith(("File ", "Traceback", "Exception", "Error:", "Caused by:")):
+            return True
+        lower = s.lower()
+        if "traceback (most recent call last)" in lower or "exception:" in lower:
+            return True
+        return False
+
+    @classmethod
+    def _extract_critical_errors(cls, lines: List[str]) -> List[str]:
+        """Extract all critical error and trace lines verbatim."""
+        critical = []
         for line in lines:
-            if cls.SEVERITY_REGEX.search(line) or "exception" in line.lower() or "traceback" in line.lower():
-                critical.add(cls._normalize_log_line(line))
+            if cls._is_critical_line(line):
+                critical.append(line.strip())
         return critical

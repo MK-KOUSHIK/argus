@@ -118,7 +118,7 @@ Argus/
 │   │   │   └── task_analyzer.py       # Deterministic intent & constraint extraction
 │   │   └── main.py                    # FastAPI application factory
 │   ├── data/                          # Runtime process logs and metadata manifests
-│   └── tests/                         # Pytest automated test suite (79 tests)
+│   └── tests/                         # Pytest automated test suite (118 tests)
 ├── frontend/
 │   ├── src/
 │   │   ├── components/                # Modular React presentation components
@@ -305,7 +305,7 @@ Argus implements a modular 4-stage optimization pipeline:
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 ```
-- **87 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, dynamic context tier derivation, 413 overflow safeguards, hardware telemetry, independent process verification, dynamic concurrency capacity enforcement, and **Output Budget Control** (task baselines, explicit word/sentence directives, policy semantics, bounds enforcement, centralized headroom clamping, and native telemetry extraction).
+- **118 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, dynamic context tier derivation, 413 overflow safeguards, hardware telemetry, independent process verification, dynamic concurrency capacity enforcement, **Output Budget Control**, and **Stage 0 Content-Aware Compression Engine** (specialized compressors, AST node parity, reversible registry lifecycle, prefix preservation, and 12 adversarial semantic-preservation tests).
 
 ### 2. Frontend Tests (Vitest)
 ```bash
@@ -361,7 +361,7 @@ Argus includes a production-grade KV-cache runtime optimization and telemetry en
    - **Structural Minification & AST Parsing**: Strips formatting from JSON (verified by `json.loads` deep equality) and comments from Python code (verified by AST node parity), preserving functional docstrings and type annotations.
    - **Repetitive Event Folding**: Detects and folds repetitive log event runs ($\ge 3$), retaining initial/terminal timestamps while guaranteeing 100% preservation of critical errors and stack traces.
    - **Reversible Registry**: Stores omitted original content in a thread-safe in-memory LRU/TTL store (`argus:ref:...`), retrievable via `GET /api/compression/registry/{ref_key}`.
-   - **Empirical Token Savings**: Yielded a **15.26% reduction in native prompt evaluation tokens** (-21.2% character footprint) with sub-2ms processing latency (1.99 ms) and 100% quality retention.
+   - **Empirical Token Savings**: Yielded a **15.26% reduction in native prompt evaluation tokens** (-31.59% character footprint) with sub-1.5ms processing latency (mean 1.27 ms), 100% byte-exact reversible restoration, and verified downstream task evaluation.
 
 See the [Compression Validation Report](docs/reports/compression-validation-report.md), [Output Budget Validation Report](docs/reports/output-budget-validation-report.md), and [KV Cache Optimization Audit](docs/kv-cache-optimization-audit.md) for complete empirical data.
 

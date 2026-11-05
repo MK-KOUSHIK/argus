@@ -61,3 +61,4 @@ class CompressionResult:
     restoration_reference: Optional[str] = None
     fallback_reason: Optional[str] = None
     segments: List[ContentSegment] = field(default_factory=list)
+

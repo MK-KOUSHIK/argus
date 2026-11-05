@@ -78,3 +78,4 @@ class PrefixPreserver:
             "cached_tokens": 0 if cached_count is not None else None,
             "reason": "zero_or_null_cached_tokens_reported",
         }
+

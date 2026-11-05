@@ -433,3 +433,262 @@ async def test_registry_retrieval_endpoint(async_client: AsyncClient):
     # 2. Non-existent reference returns 404
     res_404 = await async_client.get("/api/compression/registry/argus:ref:nonexistent_ref")
     assert res_404.status_code == 404
+
+
+# ==============================================================================
+# 9. Adversarial Semantic-Preservation & Verification Tests (Audit Corrections)
+# ==============================================================================
+
+
+def test_adversarial_negations_and_prohibitions_preserved():
+    """Verify that negations, exclusions, and prohibitions are 100% preserved."""
+    prompt = """
+    Please configure the database connection pool.
+    Do NOT use external authentication plugins under any circumstances.
+    Never expose the master password or credentials in plain text.
+    You must not exceed 20 concurrent worker threads.
+    Ensure no unsecured HTTP endpoints are accepted.
+    Please configure the database connection pool.
+    """
+    compressed, ok, reason = TextRedundancyCompressor.compress(prompt)
+    assert ok is True
+    # All explicit prohibitions must remain present in compressed output
+    assert "not" in compressed.lower()
+    assert "never" in compressed.lower()
+    assert "must not" in compressed.lower() or "not" in compressed.lower()
+    assert "no unsecured" in compressed.lower() or "unsecured" in compressed.lower()
+    assert "plain text" in compressed.lower()
+
+
+def test_adversarial_numeric_values_and_units_preserved():
+    """Verify numeric values with diverse units, currencies, and commas are retained."""
+    prompt = """
+    The payment transaction threshold is $50,000.50 with a maximum timeout of 500ms.
+    Allocated server memory is 42.5 GiB and max throughput is 10,000 requests per second.
+    Target database listener port is 5432 and replication lag must stay below 2s.
+    The payment transaction threshold is $50,000.50 with a maximum timeout of 500ms.
+    """
+    compressed, ok, reason = TextRedundancyCompressor.compress(prompt)
+    assert ok is True
+    assert "$50,000.50" in compressed or "50,000.50" in compressed
+    assert "500ms" in compressed
+    assert "42.5" in compressed
+    assert "10,000" in compressed or "10000" in compressed
+    assert "5432" in compressed
+
+
+def test_adversarial_dates_and_timestamps_preserved():
+    """Verify ISO dates and timestamps remain intact."""
+    prompt = """
+    Incident occurred on 2026-11-05 between 08:00:00 and 08:30:00.
+    System audit began at 2026-11-05T08:15:30.
+    Incident occurred on 2026-11-05 between 08:00:00 and 08:30:00.
+    """
+    compressed, ok, reason = TextRedundancyCompressor.compress(prompt)
+    assert ok is True
+    assert "2026-11-05" in compressed
+    assert "08:00:00" in compressed or "08:15:30" in compressed
+
+
+def test_adversarial_identifiers_and_case_sensitivity():
+    """Verify camelCase, UPPERCASE, and dotted identifiers preserve case sensitivity."""
+    prompt = """
+    Review module app.services.MemoryCache and check parameter userId.
+    Ensure global constant DATABASE_URL is configured properly.
+    Check variable maxRetryCount and method executeQuery.
+    Review module app.services.MemoryCache and check parameter userId.
+    """
+    compressed, ok, reason = TextRedundancyCompressor.compress(prompt)
+    assert ok is True
+    assert "MemoryCache" in compressed
+    assert "userId" in compressed
+    assert "DATABASE_URL" in compressed
+    assert "maxRetryCount" in compressed
+
+
+def test_adversarial_json_key_value_preservation():
+    """Verify complex JSON with booleans, nulls, floats, unicode, and nested empty structures."""
+    original = """
+    {
+        "@context": "https://schema.org",
+        "unicode_name": "Argus \u00e9tude \u4e2d\u6587",
+        "precision_float": 3.1415926535,
+        "is_active": true,
+        "is_paused": false,
+        "deprecated": null,
+        "empty_list": [],
+        "empty_dict": {},
+        "nested": {
+            "ports": [8080, 8443],
+            "config.id": "cfg-001"
+        }
+    }
+    """
+    compressed, ok, reason = JSONCompressor.compress(original)
+    assert ok is True
+    orig_obj = json.loads(original)
+    comp_obj = json.loads(compressed)
+    assert orig_obj == comp_obj
+    assert comp_obj["is_active"] is True
+    assert comp_obj["is_paused"] is False
+    assert comp_obj["deprecated"] is None
+    assert comp_obj["empty_list"] == []
+    assert comp_obj["empty_dict"] == {}
+    assert comp_obj["precision_float"] == 3.1415926535
+
+
+def test_adversarial_code_strings_containing_comment_like_text():
+    """Verify Python code with # inside string literals is not stripped or corrupted."""
+    code = '''
+# Actual top-level comment to remove
+def format_header(title: str) -> str:
+    """Format title with hash prefix."""
+    prefix = "# [HEADER]"  # inline comment to remove
+    url_fragment = "https://example.com/api#section-2"
+    pattern = r"#[0-9a-fA-F]{6}"
+    return f"{prefix} {title} ({url_fragment})"
+'''
+    compressed, ok, reason = CodeCompressor.compress(code, language="python")
+    assert ok is True
+    assert "Actual top-level comment" not in compressed
+    assert "inline comment to remove" not in compressed
+    assert "# [HEADER]" in compressed
+    assert "https://example.com/api#section-2" in compressed
+    assert "#[0-9a-fA-F]{6}" in compressed
+
+
+def test_adversarial_code_multiline_strings_and_indentation():
+    """Verify Python code with multiline triple-quoted strings and indentation is preserved."""
+    code = '''
+class QueryBuilder:
+    """Class docstring."""
+
+    SQL_TEMPLATE = """
+    SELECT id, name, email
+    FROM users
+    WHERE active = 1
+    ORDER BY created_at DESC
+    """
+
+    def get_query(self) -> str:
+        # Return formatted SQL
+        return self.SQL_TEMPLATE.strip()
+'''
+    compressed, ok, reason = CodeCompressor.compress(code, language="python")
+    assert ok is True
+    assert "SELECT id, name, email" in compressed
+    assert "Class docstring." in compressed
+    assert "# Return formatted SQL" not in compressed
+
+
+def test_adversarial_repeated_logs_with_different_timestamps():
+    """Verify folding repeated logs captures the first and last timestamps accurately."""
+    logs = """
+2026-11-05 08:00:01 INFO [worker-1] Heartbeat probe alive status=200 ok
+2026-11-05 08:00:02 INFO [worker-1] Heartbeat probe alive status=200 ok
+2026-11-05 08:00:03 INFO [worker-1] Heartbeat probe alive status=200 ok
+2026-11-05 08:00:04 INFO [worker-1] Heartbeat probe alive status=200 ok
+2026-11-05 08:00:05 INFO [worker-1] Heartbeat probe alive status=200 ok
+2026-11-05 08:00:06 INFO [worker-1] Heartbeat probe alive status=200 ok
+"""
+    compressed, ok, reason, ref = LogCompressor.compress(logs, reversible=True)
+    assert ok is True
+    assert "2026-11-05 08:00:01" in compressed
+    assert "2026-11-05 08:00:06" in compressed
+    assert "Repeated 4x" in compressed
+
+
+def test_adversarial_critical_errors_between_repetitive_events():
+    """Critical errors, exceptions, and stack traces must NEVER be folded even when flanked by repeated events."""
+    logs = """
+2026-11-05 08:00:01 INFO [worker-1] Worker probe alive ok
+2026-11-05 08:00:02 INFO [worker-1] Worker probe alive ok
+2026-11-05 08:00:03 INFO [worker-1] Worker probe alive ok
+2026-11-05 08:00:04 INFO [worker-1] Worker probe alive ok
+2026-11-05 08:00:05 CRITICAL [worker-1] OutOfMemoryError: VRAM threshold 95% breached!
+Traceback (most recent call last):
+  File "engine.py", line 42, in allocate_vram
+    raise MemoryError("Unable to allocate 4096 MiB buffer")
+2026-11-05 08:00:06 INFO [worker-1] Worker probe alive ok
+2026-11-05 08:00:07 INFO [worker-1] Worker probe alive ok
+2026-11-05 08:00:08 INFO [worker-1] Worker probe alive ok
+2026-11-05 08:00:09 INFO [worker-1] Worker probe alive ok
+"""
+    compressed, ok, reason, ref = LogCompressor.compress(logs, reversible=True)
+    assert ok is True
+    assert "CRITICAL [worker-1] OutOfMemoryError: VRAM threshold 95% breached!" in compressed
+    assert 'File "engine.py", line 42, in allocate_vram' in compressed
+    assert 'raise MemoryError("Unable to allocate 4096 MiB buffer")' in compressed
+
+
+def test_adversarial_mixed_markdown_and_fenced_code():
+    """Verify mixed document with multiple fences preserves fences, languages, and compresses each block."""
+    mixed = """# Technical Spec Report
+
+Please analyze the following API configuration:
+```json
+{
+  "api_version": "v1",
+  "port": 8080,
+  "rate_limit": 100
+}
+```
+
+And optimize this handler:
+```python
+# Dispatches incoming requests
+def handle_request(req_id: str) -> bool:
+    # Validate request
+    return len(req_id) > 0
+```
+
+Task: Ensure the port and rate_limit are consistent.
+"""
+    res = CompressionOrchestrator.compress(mixed, enabled=True)
+    assert res.validation_passed is True
+    assert res.content_type == ContentType.MIXED
+    # Fences and languages must be preserved
+    assert "```json\n" in res.compressed_text
+    assert "```python\n" in res.compressed_text
+    # Comments removed from Python block
+    assert "Dispatches incoming requests" not in res.compressed_text
+    # Structural keys preserved
+    assert '"api_version":"v1"' in res.compressed_text or '"api_version": "v1"' in res.compressed_text
+
+
+def test_adversarial_ambiguous_natural_language_fallback():
+    """Ambiguous or aggressive reduction dropping >60% of natural text safely triggers conservative fallback."""
+    # 5 identical short sentences with no code/structure
+    repeated = "Please check the database status. " * 8
+    res = CompressionOrchestrator.compress(repeated, enabled=True)
+    # Orchestrator handles text safely without crashing
+    assert res.compressed_text is not None
+    assert len(res.compressed_text) > 0
+
+
+def test_exact_reversible_restoration_verification():
+    """Verify byte-level and hash equality verification in CompressionRegistry."""
+    content = "Original verbatim omitted text chunk containing critical 2026-11-05 data."
+    ref_key = CompressionRegistry.register(content)
+
+    # 1. Exact match verification
+    res_valid = CompressionRegistry.verify_restoration(ref_key, content)
+    assert res_valid["verified"] is True
+    assert res_valid["status"] == "matched"
+    assert res_valid["exact_match"] is True
+    assert res_valid["expected_hash"] == res_valid["actual_hash"]
+    assert res_valid["expected_bytes"] == len(content.encode("utf-8"))
+
+    # 2. Hash mismatch verification
+    res_mismatch = CompressionRegistry.verify_restoration(ref_key, content + " corrupted")
+    assert res_mismatch["verified"] is False
+    assert res_mismatch["status"] == "mismatch"
+    assert res_mismatch["exact_match"] is False
+    assert res_mismatch["expected_hash"] != res_mismatch["actual_hash"]
+
+    # 3. Missing or expired reference verification
+    res_missing = CompressionRegistry.verify_restoration("argus:ref:nonexistent", content)
+    assert res_missing["verified"] is False
+    assert res_missing["status"] == "missing_or_expired"
+    assert res_missing["actual_hash"] is None
+

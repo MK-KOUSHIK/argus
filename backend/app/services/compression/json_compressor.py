@@ -64,3 +64,4 @@ class JSONCompressor:
             return all(cls._deep_equals(x, y) for x, y in zip(a, b))
 
         return a == b
+

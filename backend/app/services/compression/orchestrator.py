@@ -83,6 +83,8 @@ class CompressionOrchestrator:
                     validation_passed = ok
                     if ok:
                         compressed_text = comp
+                        if is_reversible and len(comp) < len(text):
+                            primary_ref = CompressionRegistry.register(text)
                     else:
                         fallback_reason = reason
                 else:
@@ -96,6 +98,8 @@ class CompressionOrchestrator:
                     validation_passed = ok
                     if ok:
                         compressed_text = comp
+                        if is_reversible and len(comp) < len(text):
+                            primary_ref = CompressionRegistry.register(text)
                     else:
                         fallback_reason = reason
                 else:
@@ -186,6 +190,8 @@ class CompressionOrchestrator:
                 c, ok, r = JSONCompressor.compress(seg_text)
                 if ok:
                     compressed_seg = c
+                    if reversible and len(c) < len(seg_text) and not primary_ref:
+                        primary_ref = CompressionRegistry.register(seg_text)
                 else:
                     any_failed = True
                     fallback_reasons.append(f"JSON: {r}")
@@ -194,6 +200,8 @@ class CompressionOrchestrator:
                 c, ok, r = CodeCompressor.compress(seg_text, language=seg.language)
                 if ok:
                     compressed_seg = c
+                    if reversible and len(c) < len(seg_text) and not primary_ref:
+                        primary_ref = CompressionRegistry.register(seg_text)
                 else:
                     any_failed = True
                     fallback_reasons.append(f"Code: {r}")
@@ -229,3 +237,4 @@ class CompressionOrchestrator:
         reason_summary = "; ".join(fallback_reasons) if fallback_reasons else None
 
         return combined_text, strategy, not any_failed, reason_summary, primary_ref
+

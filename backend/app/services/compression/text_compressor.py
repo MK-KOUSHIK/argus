@@ -11,8 +11,13 @@ class TextRedundancyCompressor:
         r"\b(?:not|never|no|without|do not|don't|prohibit|prohibited|exclude|excluding|cannot|can't|must not|should not)\b",
         re.IGNORECASE,
     )
-    NUMERIC_PATTERN = re.compile(r"\b(?:\$\d+(?:\.\d+)?|\d+(?:\.\d+)?%?|\d{4}-\d{2}-\d{2})\b")
-    IDENTIFIER_PATTERN = re.compile(r"\b[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\b")
+    NUMERIC_PATTERN = re.compile(
+        r"\b(?:\$\d+(?:,\d+)*(?:\.\d+)?|\d+(?:,\d+)*(?:\.\d+)?(?:%|ms|s|m|h|gib|gb|mib|mb|kib|kb)?|\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2})?)\b",
+        re.IGNORECASE,
+    )
+    IDENTIFIER_PATTERN = re.compile(
+        r"\b(?:[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z0-9_]+|[A-Z_]{3,}|[a-z]+[A-Z][a-zA-Z0-9]*)\b"
+    )
     CONVERSATIONAL_FILLER = [
         re.compile(r"^(?:as (?:mentioned|stated|discussed) (?:above|earlier|before),\s*)", re.IGNORECASE),
         re.compile(r"^(?:please (?:note|remember|keep in mind) that\s*)", re.IGNORECASE),

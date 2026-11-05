@@ -131,3 +131,4 @@ This data flows to:
 1. `AdaptiveContextManager`: Reduced token count allows snapping to smaller context tiers (e.g. 2048 instead of 4096), directly saving GPU VRAM.
 2. `OutputBudgetController`: Output generation budget remains calculated based on task deliverable needs, unconstrained by bloated input.
 3. `MetricsPanel.tsx`: Visualized in the React frontend with content badge, reduction stats, and restoration link.
+
