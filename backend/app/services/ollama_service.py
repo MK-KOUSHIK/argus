@@ -466,6 +466,7 @@ class OllamaService:
                 task_analysis=analysis,
                 requested_model=settings.OLLAMA_MODEL,
                 requested_output_budget=request.requested_output_budget,
+                allow_override_fallback=request.allow_override_fallback,
             )
         else:
             routing_decision = await ModelRouter.route(
@@ -474,6 +475,7 @@ class OllamaService:
                 task_analysis=analysis,
                 requested_model=request.requested_model,
                 requested_output_budget=request.requested_output_budget,
+                allow_override_fallback=request.allow_override_fallback,
             )
         effective_model = routing_decision.selected_model
 
@@ -690,6 +692,7 @@ class OllamaService:
             policy_applied=routing_decision.policy_applied,
             reason=routing_decision.reason,
             decision_confidence=routing_decision.decision_confidence,
+            heuristic_margin=routing_decision.heuristic_margin,
             complexity=ComplexityTelemetry(
                 heuristic_score=routing_decision.complexity_assessment.heuristic_score,
                 task_category=routing_decision.complexity_assessment.task_category,

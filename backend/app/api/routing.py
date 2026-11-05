@@ -42,6 +42,7 @@ async def route_prompt(request: RouteRequest) -> RoutingDecisionTelemetry:
             mode=request.mode,
             requested_model=request.requested_model,
             requested_output_budget=request.requested_output_budget,
+            allow_override_fallback=request.allow_override_fallback,
         )
     except ModelNotInstalledError as exc:
         raise HTTPException(
@@ -66,6 +67,7 @@ async def route_prompt(request: RouteRequest) -> RoutingDecisionTelemetry:
         policy_applied=decision.policy_applied,
         reason=decision.reason,
         decision_confidence=decision.decision_confidence,
+        heuristic_margin=decision.heuristic_margin,
         complexity=ComplexityTelemetry(
             heuristic_score=decision.complexity_assessment.heuristic_score,
             task_category=decision.complexity_assessment.task_category,

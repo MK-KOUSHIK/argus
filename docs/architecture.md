@@ -178,16 +178,36 @@ The Phase 5 routing engine automatically selects the optimal local Ollama model 
 > Phase 5 implements **Optimizer Model Routing** (selecting the local Ollama model that optimizes the prompt). Downstream task execution routing (selecting external or local models for executing the optimized prompt against real end-user workloads) is **explicitly deferred** to subsequent phases.
 
 ### Routing Decision Algorithm
-1. **Complexity Assessment**:
-   $$\text{Score} = w_{\text{category}} + 0.08 \cdot N_{\text{constraints}} + 0.06 \cdot N_{\text{ops}} + 0.05 \cdot \mathbf{1}_{\text{prohibitions}} + 0.08 \cdot \mathbf{1}_{\text{code/data}} + w_{\text{tokens}}$$
-   - Clamped to $[0.0, 1.0]$.
-   - Tasks with $\text{Score} \ge \text{threshold}$ (default `0.60`) target `ModelTier.MEDIUM` (`qwen2.5:7b`).
-   - Tasks with $\text{Score} < \text{threshold}$ target `ModelTier.SMALL` (`qwen2.5:1.5b`).
-2. **Hardware Feasibility Gate**:
-   - Computes effective available VRAM: $\text{VRAM}_{\text{available}} = \text{VRAM}_{\text{free}} + \text{VRAM}_{\text{evictable\_idle}}$.
-   - Requires $\text{VRAM}_{\text{available}} \ge \text{Model Size} + \text{Margin}$ (default 512 MiB).
-   - Requires host RAM free $\ge 1024$ MiB.
-   - If resources are insufficient, the engine triggers a graceful fallback to `qwen2.5:1.5b` with full diagnostic rationale.
-3. **Execution & Retry Consistency**:
-   - The selected model is injected into the execution pipeline and Ollama `/api/generate`.
-   - Any subsequent validation retry runs on the identical model to maintain deterministic evaluation.
+1. **Explainable Heuristic Complexity Assessment**:
+   $$\text{Score} = w_{\text{category}} + \min(0.30, 0.075 \cdot N_{\text{constraints}}) + \min(0.25, 0.06 \cdot N_{\text{ops}}) + 0.10 \cdot \mathbf{1}_{\text{prohibitions}} + 0.10 \cdot \mathbf{1}_{\text{code/data}} + w_{\text{tokens}} + w_{\text{mode}}$$
+   - Score is clamped to $[0.0, 1.0]$.
+   - Tasks with $\text{Score} \ge \text{threshold}$ (default `0.55`) target `ModelTier.MEDIUM` (`qwen2.5:7b` or discovered high-capacity candidate).
+   - Tasks with $\text{Score} < \text{threshold}$ target `ModelTier.SMALL` (`qwen2.5:1.5b` or discovered lightweight candidate).
+
+2. **Heuristic Margin Terminology**:
+   - $\text{heuristic\_margin} = |\text{Score} - \text{threshold}|$.
+   - **Important Terminology Standard**: Argus explicitly defines `heuristic_margin` as an *uncalibrated heuristic distance* between prompt complexity and the tier boundary. It is **not** a calibrated probability, bayesian confidence, or model certainty metric.
+
+3. **Hardware Feasibility Gate & Dynamic Headroom**:
+   - **Resident Headroom**: If candidate model is already resident in GPU VRAM, checks runtime headroom ($\text{VRAM}_{\text{free}} \ge \text{ROUTING\_LOADED\_HEADROOM\_MARGIN\_MB}$, default 250 MiB).
+   - **Load Headroom**: If candidate model is not currently resident, evaluates load headroom against physical weights footprint plus safety margin ($\text{VRAM}_{\text{available}} \ge \text{Model Size} + \text{ROUTING\_VRAM\_SAFETY\_MARGIN\_MB}$, default 512 MiB).
+   - **Host RAM Protection**: Requires $\text{RAM}_{\text{free}} \ge \text{ROUTING\_RAM\_SAFETY\_MARGIN\_MB}$ (default 1024 MiB).
+
+4. **Model Registry Classification & Zero-Guessing Policy**:
+   - `LocalModelRegistry` queries `/api/tags`, `/api/ps`, and deep `/api/show` metadata.
+   - **Zero Name Guessing**: Substring matching on model names is forbidden. Tiers are assigned strictly from verified parameter metadata (`parameter_count` or `/api/show` `details.parameter_size`).
+   - Models without verifiable parameter counts are classified as `ModelTier.UNKNOWN`.
+   - Unknown-tier models are never assumed small or safe. Admission is strictly guarded by `ROUTING_ALLOW_UNKNOWN_TIER` (default: `False`).
+
+5. **Manual Override Safety & Rejection Standards**:
+   - Manual overrides never silently bypass memory or resource checks.
+   - If a requested override model cannot fit safely in memory, Argus rejects the request with a structured `ModelResourceConstraintError` (HTTP 400).
+   - Override fallback is only permitted if explicitly authorized by the caller via `allow_override_fallback=True` (or `ROUTING_ALLOW_OVERRIDE_FALLBACK=True`).
+
+6. **Verified Fallback Standards**:
+   - Fallback models must be verified as installed in the local Ollama catalog and verified to have sufficient memory.
+   - Configured defaults are never assumed installed.
+   - If no verified safe installed fallback exists, `NoSafeFallbackError` is raised with a clear error payload.
+
+7. **Validation & Benchmarking Protocol**:
+   - Live validation differentiates between **Policy Simulations** (artificially strict policy thresholds such as high safety margins) and **Natural Hardware Resource Observations** (accurate reporting of physical hardware state without artificial exhaustion or crash risks).

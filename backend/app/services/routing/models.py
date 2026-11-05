@@ -45,15 +45,14 @@ class DiscoveredModel:
 
     @property
     def estimated_vram_mb(self) -> int:
-        """Estimate minimum VRAM required in MiB based on actual size or reported VRAM.
+        """Estimate base VRAM required in MiB based on weight size or reported resident VRAM.
 
-        If model is loaded and reports size_vram from /api/ps, use that exact value.
-        Otherwise, base on disk size (weights in Q4_K_M) plus nominal KV cache margin.
+        If model is loaded and reports size_vram from /api/ps, use that exact resident value.
+        Otherwise, base on disk weight footprint (in Q4_K_M).
         """
         if self.is_loaded and self.size_vram and self.size_vram > 0:
             return round(self.size_vram / (1024 * 1024))
-        base_mb = round(self.size_bytes / (1024 * 1024))
-        return base_mb + 300
+        return round(self.size_bytes / (1024 * 1024))
 
 
 @dataclass
@@ -106,13 +105,14 @@ class RoutingDecision:
     routing_status: RoutingStatus
     policy_applied: str
     reason: str
-    decision_confidence: float  # Heuristic confidence [0.0, 1.0]
+    decision_confidence: float  # Uncalibrated heuristic margin [0.0, 1.0] retained for compatibility
     complexity_assessment: ComplexityAssessment
     resource_assessment: ResourceAssessment
     routing_duration_ms: float
     fallback_model: Optional[str] = None
     is_fallback: bool = False
     warning: Optional[str] = None
+    heuristic_margin: float = 0.0  # Heuristic distance from threshold (|score - threshold|)
 
 
 __all__ = [

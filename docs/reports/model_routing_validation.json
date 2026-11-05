@@ -1,55 +1,101 @@
-[
-  {
-    "scenario": "1_simple_task_small_model",
-    "prompt": "Summarize the key differences between synchronous and asynchronous I/O in three brief sentences.",
-    "selected_model": "qwen2.5:1.5b",
-    "executed_model": "qwen2.5:1.5b",
-    "target_tier": "small",
-    "complexity_score": 0.225,
-    "routing_status": "routed",
-    "prompt_eval_count": 535,
-    "eval_count": 18,
-    "latency_ms": 5500,
-    "done_reason": "stop",
-    "verified": true
+{
+  "timestamp": "2026-11-05T17:03:54Z",
+  "ollama_base_url": "http://127.0.0.1:11434",
+  "hardware": {
+    "gpu_available": true,
+    "vram_total_mb": 6141,
+    "vram_free_mb": 5920,
+    "ram_total_mb": 15556.5,
+    "ram_free_mb": 3111.4
   },
-  {
-    "scenario": "2_complex_task_medium_model",
-    "prompt": "Write an asynchronous Python data ingestion service using httpx and asyncio. Do not use requests or aiohttp. Parse incoming JSON, extract entities matching keys ['user_id', 'transaction_value', 'timestamp'], validate non-negative values, handle transient network retries with exponential backoff, and save aggregated dictionary to metrics.json.",
-    "selected_model": "qwen2.5:7b",
-    "executed_model": "qwen2.5:7b",
-    "target_tier": "medium",
-    "complexity_score": 1.0,
-    "routing_status": "routed",
-    "prompt_eval_count": 637,
-    "eval_count": 67,
-    "latency_ms": 12433,
-    "done_reason": "stop",
-    "verified": true
-  },
-  {
-    "scenario": "3_resource_constrained_fallback",
-    "prompt": "Write an asynchronous Python data ingestion service using httpx and asyncio. Do not use requests or aiohttp. Parse incoming JSON, extract entities matching keys ['user_id', 'transaction_value', 'timestamp'], validate non-negative values, handle transient network retries with exponential backoff, and save aggregated dictionary to metrics.json.",
-    "selected_model": "qwen2.5:1.5b",
-    "executed_model": "qwen2.5:1.5b",
-    "target_tier": "small",
-    "routing_status": "fallback",
-    "is_fallback": true,
-    "prompt_eval_count": 639,
-    "eval_count": 63,
-    "latency_ms": 5837,
-    "verified": true
-  },
-  {
-    "scenario": "4_manual_override_7b",
-    "prompt": "List 3 tips for better sleep.",
-    "selected_model": "qwen2.5:7b",
-    "executed_model": "qwen2.5:7b",
-    "target_tier": "medium",
-    "routing_status": "manual_override",
-    "prompt_eval_count": 505,
-    "eval_count": 10,
-    "latency_ms": 9066,
-    "verified": true
-  }
-]
+  "discovered_models": [
+    {
+      "name": "qwen2.5:1.5b",
+      "tier": "small",
+      "parameter_size": "1.5B",
+      "parameter_count": null,
+      "size_mb": 940.4,
+      "is_loaded": false
+    },
+    {
+      "name": "qwen2.5:7b",
+      "tier": "medium",
+      "parameter_size": "7.6B",
+      "parameter_count": null,
+      "size_mb": 4466.1,
+      "is_loaded": false
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "1_simple_task_lightweight_model",
+      "type": "live_inference",
+      "prompt": "Summarize the key differences between synchronous and asynchronous I/O in three brief sentences.",
+      "selected_model": "qwen2.5:1.5b",
+      "executed_model": "qwen2.5:1.5b",
+      "target_tier": "small",
+      "complexity_score": 0.225,
+      "heuristic_margin": 0.325,
+      "routing_status": "routed",
+      "prompt_eval_count": 535,
+      "eval_count": 18,
+      "latency_ms": 3375,
+      "done_reason": "stop",
+      "status": "VERIFIED"
+    },
+    {
+      "scenario_id": "2_complex_task_high_capacity_model",
+      "type": "live_inference",
+      "prompt": "Write an asynchronous Python data ingestion service using httpx and asyncio. Do not use requests or aiohttp. Parse incoming JSON, extract entities matching keys ['user_id', 'transaction_value', 'timestamp'], validate non-negative values, handle transient network retries with exponential backoff, and save aggregated dictionary to metrics.json.",
+      "selected_model": "qwen2.5:7b",
+      "executed_model": "qwen2.5:7b",
+      "target_tier": "medium",
+      "complexity_score": 1.0,
+      "heuristic_margin": 0.45,
+      "routing_status": "routed",
+      "prompt_eval_count": 637,
+      "eval_count": 68,
+      "latency_ms": 12861,
+      "done_reason": "stop",
+      "status": "VERIFIED"
+    },
+    {
+      "scenario_id": "3a_policy_simulation_restrictive_margin",
+      "type": "policy_simulation",
+      "description": "Simulated strict memory policy via ROUTING_RAM_SAFETY_MARGIN_MB=100000. Not natural hardware pressure.",
+      "prompt": "Write an asynchronous Python data ingestion service using httpx and asyncio. Do not use requests or aiohttp. Parse incoming JSON, extract entities matching keys ['user_id', 'transaction_value', 'timestamp'], validate non-negative values, handle transient network retries with exponential backoff, and save aggregated dictionary to metrics.json.",
+      "selected_model": "qwen2.5:1.5b",
+      "executed_model": "qwen2.5:1.5b",
+      "target_tier": "small",
+      "routing_status": "fallback",
+      "is_fallback": true,
+      "prompt_eval_count": 639,
+      "eval_count": 63,
+      "latency_ms": 5916,
+      "status": "VERIFIED"
+    },
+    {
+      "scenario_id": "3b_natural_hardware_pressure_observation",
+      "type": "natural_resource_observation",
+      "natural_pressure_present": true,
+      "selected_model": "qwen2.5:7b",
+      "executed_model": "qwen2.5:7b",
+      "routing_status": "routed",
+      "is_fallback": false,
+      "status": "VERIFIED"
+    },
+    {
+      "scenario_id": "4_manual_model_override",
+      "type": "live_inference",
+      "requested_model": "qwen2.5:1.5b",
+      "selected_model": "qwen2.5:1.5b",
+      "executed_model": "qwen2.5:1.5b",
+      "target_tier": "small",
+      "routing_status": "manual_override",
+      "prompt_eval_count": 531,
+      "eval_count": 11,
+      "latency_ms": 4343,
+      "status": "VERIFIED"
+    }
+  ]
+}

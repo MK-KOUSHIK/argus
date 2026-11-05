@@ -593,6 +593,11 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ result }) => {
             <div className="text-[11px] font-mono text-slate-400">
               Evaluated in {routing.routing_duration_ms} ms &bull; Tier:{' '}
               <span className="text-cyan-300 uppercase">{routing.target_model_tier}</span>
+              {routing.heuristic_margin != null && (
+                <span className="text-slate-500">
+                  {' '}&bull; Margin: <span className="text-slate-300">±{routing.heuristic_margin.toFixed(2)}</span> (heuristic distance)
+                </span>
+              )}
             </div>
           </div>
 

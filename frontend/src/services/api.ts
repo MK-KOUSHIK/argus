@@ -9,6 +9,7 @@ import {
   OllamaStatus,
   OptimizationResult,
   OptimizeRequestPayload,
+  RouteRequestPayload,
   RoutingDecisionTelemetry,
 } from '@/types';
 
@@ -106,12 +107,7 @@ export class ApiService {
    * Evaluate model routing decision without running inference (Phase 5)
    */
   async routePrompt(
-    payload: {
-      prompt: string;
-      mode?: string;
-      requested_model?: string;
-      requested_output_budget?: number;
-    },
+    payload: RouteRequestPayload,
     signal?: AbortSignal
   ): Promise<RoutingDecisionTelemetry> {
     const response = await fetch(`${this.baseUrl}/route`, {

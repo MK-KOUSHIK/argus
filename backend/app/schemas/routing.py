@@ -64,6 +64,10 @@ class RouteRequest(BaseModel):
     requested_output_budget: Optional[int] = Field(
         default=None, description="Optional output budget override"
     )
+    allow_override_fallback: bool = Field(
+        default=False,
+        description="Whether to permit fallback to a safe installed model if manual override requested model cannot be safely admitted",
+    )
 
 
 class ComplexityTelemetry(BaseModel):
@@ -113,7 +117,13 @@ class RoutingDecisionTelemetry(BaseModel):
     routing_status: str = Field(description="Decision status (routed, manual_override, fallback, disabled)")
     policy_applied: str = Field(description="Active routing policy (auto, prefer_small, prefer_large, manual)")
     reason: str = Field(description="Explainable rationale for the routing decision")
-    decision_confidence: float = Field(description="Confidence in the decision [0.0, 1.0] (heuristic)")
+    decision_confidence: float = Field(
+        description="Uncalibrated heuristic decision margin retained for backward compatibility; not a probability"
+    )
+    heuristic_margin: float = Field(
+        default=0.0,
+        description="Uncalibrated heuristic distance from decision threshold (|score - threshold|); not a probability",
+    )
     complexity: ComplexityTelemetry = Field(description="Prompt complexity signals")
     resources: ResourceTelemetry = Field(description="Resource state snapshot")
     routing_duration_ms: float = Field(description="Time taken to compute the routing decision in milliseconds")

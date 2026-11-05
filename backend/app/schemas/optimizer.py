@@ -163,6 +163,10 @@ class OptimizeRequest(BaseModel):
         default=None,
         description="Optional override to enable/disable automatic model routing",
     )
+    allow_override_fallback: bool = Field(
+        default=False,
+        description="Whether to permit fallback to a safe installed model if manual override requested model cannot be safely admitted",
+    )
 
     @field_validator("prompt")
     @classmethod

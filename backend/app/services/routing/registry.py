@@ -30,8 +30,15 @@ class LocalModelRegistry:
     _lock = asyncio.Lock()
 
     @classmethod
-    def _parse_tier(cls, param_size_str: Optional[str], param_count: Optional[int], name: str) -> ModelTier:
-        """Derive model capacity tier from verified metadata without guessing."""
+    def _parse_tier(cls, param_size_str: Optional[str], param_count: Optional[int], name: str = "") -> ModelTier:
+        """Derive model capacity tier from verified parameter metadata without guessing.
+
+        Strictly enforces zero-guessing:
+        - Evaluates parameter_count if provided by /api/show (model_info.*.parameter_count).
+        - Evaluates parameter_size if provided by /api/tags or /api/show (e.g. '1.5B', '7B').
+        - Never infers model capacity from a model-name substring when metadata is unavailable.
+        - If metadata is absent or unparseable, returns ModelTier.UNKNOWN.
+        """
         if param_count is not None and param_count > 0:
             if param_count <= 3_500_000_000:
                 return ModelTier.SMALL
@@ -51,15 +58,6 @@ class LocalModelRegistry:
                     return ModelTier.LARGE
                 except ValueError:
                     pass
-
-        # Fallback to name inspection
-        lower_name = name.lower()
-        if any(sub in lower_name for sub in ("0.5b", "1.5b", "2b", "3b")):
-            return ModelTier.SMALL
-        if any(sub in lower_name for sub in ("7b", "8b", "9b", "13b", "14b")):
-            return ModelTier.MEDIUM
-        if any(sub in lower_name for sub in ("27b", "32b", "70b", "72b")):
-            return ModelTier.LARGE
 
         return ModelTier.UNKNOWN
 
@@ -96,6 +94,37 @@ class LocalModelRegistry:
         except Exception:
             pass
         return {}
+
+    @classmethod
+    async def unload_model(cls, model_name: str) -> bool:
+        """Explicitly request Ollama to unload a resident model from VRAM/RAM."""
+        url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+        try:
+            async with httpx.AsyncClient(timeout=settings.OLLAMA_STATUS_TIMEOUT_SECONDS) as client:
+                resp = await client.post(url, json={"model": model_name, "keep_alive": 0})
+                return resp.status_code == 200
+        except Exception:
+            return False
+
+    @classmethod
+    async def unload_other_resident_models(cls, keep_model: str) -> List[str]:
+        """Evict idle resident models from VRAM when switching models."""
+        url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/ps"
+        evicted: List[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=settings.OLLAMA_STATUS_TIMEOUT_SECONDS) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = data.get("models", [])
+                    for m in models:
+                        name = m.get("name") or m.get("model", "")
+                        if name and name.lower() != keep_model.lower():
+                            if await cls.unload_model(name):
+                                evicted.append(name)
+        except Exception:
+            pass
+        return evicted
 
     @classmethod
     async def refresh(cls, force: bool = False) -> Tuple[bool, Optional[str]]:
@@ -153,14 +182,14 @@ class LocalModelRegistry:
                         size_vram = ps_info.get("size_vram") if ps_info else None
                         expires_at = ps_info.get("expires_at") if ps_info else None
 
-                        # If context_len is missing from tags, optionally fetch from /api/show
+                        # If context_len or parameter_size is missing from tags, query /api/show
                         param_count = None
-                        if context_len is None:
+                        if context_len is None or param_size is None:
                             show_data = await cls.fetch_model_details(client, name)
                             if show_data:
                                 model_info = show_data.get("model_info", {})
                                 for k, v in model_info.items():
-                                    if k.endswith(".context_length") and isinstance(v, int):
+                                    if k.endswith(".context_length") and isinstance(v, int) and context_len is None:
                                         context_len = v
                                     if k.endswith("general.parameter_count") and isinstance(v, int):
                                         param_count = v

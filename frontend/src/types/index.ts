@@ -182,6 +182,7 @@ export interface RoutingDecisionTelemetry {
   policy_applied: string;
   reason: string;
   decision_confidence: number;
+  heuristic_margin?: number | null;
   complexity: ComplexityTelemetry;
   resources: ResourceTelemetry;
   routing_duration_ms: number;
@@ -199,6 +200,15 @@ export interface OptimizeRequestPayload {
   compression_reversible?: boolean;
   requested_model?: string;
   enable_routing?: boolean;
+  allow_override_fallback?: boolean;
+}
+
+export interface RouteRequestPayload {
+  prompt: string;
+  mode?: OptimizationMode;
+  requested_model?: string;
+  requested_output_budget?: number;
+  allow_override_fallback?: boolean;
 }
 
 export interface OllamaCallTelemetry {

@@ -98,7 +98,10 @@ class Settings(BaseSettings):
     ROUTING_DEFAULT_FALLBACK_MODEL: str = "qwen2.5:1.5b"
     ROUTING_VRAM_SAFETY_MARGIN_MB: int = 512
     ROUTING_RAM_SAFETY_MARGIN_MB: int = 1024
+    ROUTING_LOADED_HEADROOM_MARGIN_MB: int = 250
     ROUTING_REGISTRY_TTL_SECONDS: float = 5.0
+    ROUTING_ALLOW_UNKNOWN_TIER: bool = False
+    ROUTING_ALLOW_OVERRIDE_FALLBACK: bool = False
 
     # Optimization & Token Estimation Heuristics
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0
@@ -293,6 +296,13 @@ class Settings(BaseSettings):
     def validate_ram_margin(cls, v: int) -> int:
         if v < 0:
             raise ValueError(f"ROUTING_RAM_SAFETY_MARGIN_MB must be non-negative; got {v}")
+        return v
+
+    @field_validator("ROUTING_LOADED_HEADROOM_MARGIN_MB")
+    @classmethod
+    def validate_loaded_headroom_margin(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"ROUTING_LOADED_HEADROOM_MARGIN_MB must be non-negative; got {v}")
         return v
 
     @field_validator("ROUTING_REGISTRY_TTL_SECONDS")

@@ -56,6 +56,26 @@ class ModelNotInstalledError(ModelRouterError):
         self.available_models = available_models
 
 
+class ModelResourceConstraintError(ModelRouterError):
+    """Raised when a model cannot be safely admitted due to live hardware resource constraints."""
+
+    def __init__(self, model_name: str, reason: str):
+        msg = f"Model '{model_name}' cannot be safely admitted due to resource constraints: {reason}"
+        super().__init__(msg, status_code=400)
+        self.model_name = model_name
+        self.reason = reason
+
+
+class NoSafeFallbackError(ModelRouterError):
+    """Raised when routing fallback is required but no installed safe fallback model exists."""
+
+    def __init__(self, target_model: str, reason: str):
+        msg = f"No installed safe fallback model available when routing '{target_model}': {reason}"
+        super().__init__(msg, status_code=400)
+        self.target_model = target_model
+        self.reason = reason
+
+
 class ModelRouter:
     """Core deterministic local-first Model Routing Engine."""
 
@@ -210,6 +230,11 @@ class ModelRouter:
         vram_margin = getattr(settings, "ROUTING_VRAM_SAFETY_MARGIN_MB", 512)
         ram_margin = getattr(settings, "ROUTING_RAM_SAFETY_MARGIN_MB", 1024)
 
+        # Baseline safety margins for small tier models (256 MB VRAM margin, 512 MB RAM margin)
+        if candidate_model.tier == ModelTier.SMALL:
+            vram_margin = min(vram_margin, 256)
+            ram_margin = min(ram_margin, 512)
+
         is_sufficient = True
         pressure_reason: Optional[str] = None
 
@@ -221,10 +246,14 @@ class ModelRouter:
         # Check GPU VRAM if GPU is active
         if gpu_available and vram_free is not None:
             if is_loaded:
-                # Still check minimal headroom for KV-cache expansion (>250 MiB)
-                if vram_free < 250:
+                # Assess runtime headroom for resident model
+                loaded_headroom = getattr(settings, "ROUTING_LOADED_HEADROOM_MARGIN_MB", 250)
+                if vram_free < loaded_headroom:
                     is_sufficient = False
-                    pressure_reason = f"VRAM critically low for loaded model ({vram_free} MiB free)"
+                    pressure_reason = (
+                        f"Resident model '{candidate_model.name}' has insufficient runtime VRAM headroom "
+                        f"({vram_free} MiB free < {loaded_headroom} MiB headroom required)"
+                    )
             else:
                 # If candidate is not resident, Ollama will evict idle models if no request is in-flight
                 evictable_vram = loaded_other_vram_mb if in_flight == 0 else 0
@@ -249,6 +278,16 @@ class ModelRouter:
                         f"{required_headroom} MiB required for {candidate_model.name} [{estimated_vram}MB + {vram_margin}MB margin])"
                     )
 
+        # Check unknown capacity tier constraints
+        allow_unknown = getattr(settings, "ROUTING_ALLOW_UNKNOWN_TIER", False)
+        if candidate_model.tier == ModelTier.UNKNOWN and not allow_unknown:
+            is_sufficient = False
+            if not pressure_reason:
+                pressure_reason = (
+                    f"Model '{candidate_model.name}' has UNKNOWN capacity tier (verified parameter metadata unavailable). "
+                    f"Automatic admission disabled by ROUTING_ALLOW_UNKNOWN_TIER."
+                )
+
         return ResourceAssessment(
             gpu_available=gpu_available,
             vram_total_mb=vram_total,
@@ -266,6 +305,48 @@ class ModelRouter:
         )
 
     @classmethod
+    def find_safe_fallback(
+        cls,
+        all_models: List[DiscoveredModel],
+        configured_fallback_name: Optional[str] = None,
+        exclude_names: Optional[List[str]] = None,
+    ) -> Optional[DiscoveredModel]:
+        """Find a verified installed model that is safe and resource-sufficient for fallback.
+
+        Never assumes a configured default or hardcoded model is installed.
+        Returns None if no verified safe fallback is available.
+        """
+        excluded = [n.lower() for n in (exclude_names or [])]
+        candidates = [m for m in all_models if m.name.lower() not in excluded]
+
+        # 1. First, check configured fallback model if present in installed candidates
+        if configured_fallback_name:
+            target = next((m for m in candidates if m.name.lower() == configured_fallback_name.lower()), None)
+            if target:
+                res = cls.evaluate_resources(target)
+                if res.is_resource_sufficient:
+                    return target
+
+        # 2. Check installed small models (verified parameter tier)
+        small_models = [m for m in candidates if m.tier == ModelTier.SMALL]
+        for m in small_models:
+            res = cls.evaluate_resources(m)
+            if res.is_resource_sufficient:
+                return m
+
+        # 3. Check any other installed model whose resources are verified sufficient
+        # (excluding unknown unless ROUTING_ALLOW_UNKNOWN_TIER is True)
+        allow_unknown = getattr(settings, "ROUTING_ALLOW_UNKNOWN_TIER", False)
+        for m in candidates:
+            if m.tier == ModelTier.UNKNOWN and not allow_unknown:
+                continue
+            res = cls.evaluate_resources(m)
+            if res.is_resource_sufficient:
+                return m
+
+        return None
+
+    @classmethod
     async def route(
         cls,
         prompt: str,
@@ -273,6 +354,7 @@ class ModelRouter:
         task_analysis: Optional[TaskAnalysisResult] = None,
         requested_model: Optional[str] = None,
         requested_output_budget: Optional[int] = None,
+        allow_override_fallback: Optional[bool] = None,
     ) -> RoutingDecision:
         """Execute deterministic model routing for the prompt optimization request."""
         t0 = time.perf_counter()
@@ -281,6 +363,13 @@ class ModelRouter:
         await LocalModelRegistry.refresh()
         all_models = await LocalModelRegistry.get_all_models()
         available_names = [m.name for m in all_models]
+
+        if not all_models:
+            raise ModelRouterError(
+                "No models are installed in the local Ollama daemon. "
+                f"Pull at least one model before routing (e.g. 'ollama pull {settings.OLLAMA_MODEL}').",
+                status_code=400,
+            )
 
         # Analyze task characteristics if not provided
         analysis = task_analysis or TaskAnalyzer.analyze(prompt)
@@ -311,19 +400,27 @@ class ModelRouter:
         # 1. Routing Disabled by Configuration
         if not routing_enabled:
             default_model = await LocalModelRegistry.get_model(settings.OLLAMA_MODEL)
+            if not default_model:
+                raise ModelNotInstalledError(settings.OLLAMA_MODEL, available_names)
             resources = cls.evaluate_resources(default_model)
+            if not resources.is_resource_sufficient:
+                raise ModelResourceConstraintError(
+                    settings.OLLAMA_MODEL,
+                    resources.resource_pressure_reason or "Insufficient resources to run configured default model",
+                )
             elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
             return RoutingDecision(
-                selected_model=settings.OLLAMA_MODEL,
-                target_model_tier=default_model.tier if default_model else ModelTier.UNKNOWN,
+                selected_model=default_model.name,
+                target_model_tier=default_model.tier,
                 routing_status=RoutingStatus.DISABLED,
                 policy_applied="disabled",
-                reason=f"Automatic routing disabled. Using configured default '{settings.OLLAMA_MODEL}'.",
+                reason=f"Automatic routing disabled. Verified configured default '{default_model.name}' is installed and safe.",
                 decision_confidence=1.0,
+                heuristic_margin=0.0,
                 complexity_assessment=complexity,
                 resource_assessment=resources,
                 routing_duration_ms=elapsed_ms,
-                fallback_model=fallback_model_name,
+                fallback_model=default_model.name,
                 is_fallback=False,
             )
 
@@ -335,29 +432,74 @@ class ModelRouter:
 
             resources = cls.evaluate_resources(target_model)
             elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
-            warning = None
-            if not resources.is_resource_sufficient:
-                warning = f"Resource constraint detected: {resources.resource_pressure_reason}. Execution may be slow."
 
+            if not resources.is_resource_sufficient:
+                permit_fallback = (
+                    allow_override_fallback
+                    if allow_override_fallback is not None
+                    else getattr(settings, "ROUTING_ALLOW_OVERRIDE_FALLBACK", False)
+                )
+                if not permit_fallback:
+                    raise ModelResourceConstraintError(
+                        target_model.name,
+                        resources.resource_pressure_reason or "Insufficient hardware resources",
+                    )
+
+                # Fallback explicitly permitted: find verified safe installed fallback
+                safe_fallback = cls.find_safe_fallback(
+                    all_models,
+                    configured_fallback_name=fallback_model_name,
+                    exclude_names=[target_model.name],
+                )
+                if not safe_fallback:
+                    raise NoSafeFallbackError(
+                        target_model.name,
+                        f"Requested model '{target_model.name}' exceeded resource limits "
+                        f"({resources.resource_pressure_reason}), and no alternative safe fallback is installed.",
+                    )
+
+                fallback_res = cls.evaluate_resources(safe_fallback)
+                return RoutingDecision(
+                    selected_model=safe_fallback.name,
+                    target_model_tier=safe_fallback.tier,
+                    routing_status=RoutingStatus.FALLBACK,
+                    policy_applied="manual_override_fallback",
+                    reason=(
+                        f"Manual override to '{target_model.name}' rejected due to resource constraints "
+                        f"({resources.resource_pressure_reason}). Fell back to safe installed model "
+                        f"'{safe_fallback.name}' because fallback was permitted."
+                    ),
+                    decision_confidence=1.0,
+                    heuristic_margin=0.0,
+                    complexity_assessment=complexity,
+                    resource_assessment=fallback_res,
+                    routing_duration_ms=elapsed_ms,
+                    fallback_model=safe_fallback.name,
+                    is_fallback=True,
+                    warning=f"Manual override model '{target_model.name}' was not admitted due to resource constraints.",
+                )
+
+            # Manual override admitted safely
             return RoutingDecision(
                 selected_model=target_model.name,
                 target_model_tier=target_model.tier,
                 routing_status=RoutingStatus.MANUAL_OVERRIDE,
                 policy_applied="manual",
-                reason=f"Manual user override to installed model '{target_model.name}'.",
+                reason=f"Manual user override safely admitted for installed model '{target_model.name}'.",
                 decision_confidence=1.0,
+                heuristic_margin=0.0,
                 complexity_assessment=complexity,
                 resource_assessment=resources,
                 routing_duration_ms=elapsed_ms,
                 fallback_model=fallback_model_name,
                 is_fallback=False,
-                warning=warning,
             )
 
         # 3. Categorize Discovered Models by Tier
         small_models = [m for m in all_models if m.tier == ModelTier.SMALL]
         medium_models = [m for m in all_models if m.tier == ModelTier.MEDIUM]
         large_models = [m for m in all_models if m.tier == ModelTier.LARGE]
+        unknown_models = [m for m in all_models if m.tier == ModelTier.UNKNOWN]
 
         preferred_small = (
             next((m for m in small_models if "qwen" in m.name.lower()), None)
@@ -405,51 +547,95 @@ class ModelRouter:
                     f"(heuristic complexity {complexity.heuristic_score:.2f} >= threshold {threshold:.2f}). "
                     f"Resources verified sufficient ({res_assessment.vram_free_mb} MiB VRAM free)."
                 )
+                resources = res_assessment
             else:
-                # Resource-constrained fallback to small model
-                if preferred_small:
-                    selected_model = preferred_small.name
-                    selected_tier = preferred_small.tier
-                    is_fallback = True
-                    status = RoutingStatus.FALLBACK
-                    reason = (
-                        f"Prompt complexity ({complexity.heuristic_score:.2f}) favored '{preferred_medium.name}', "
-                        f"but resource constraints intervened: {res_assessment.resource_pressure_reason}. "
-                        f"Safely fell back to '{preferred_small.name}'."
+                # Resource-constrained fallback: must be verified safe and installed
+                safe_fallback = cls.find_safe_fallback(
+                    all_models,
+                    configured_fallback_name=preferred_small.name if preferred_small else fallback_model_name,
+                    exclude_names=[preferred_medium.name],
+                )
+                if not safe_fallback:
+                    raise NoSafeFallbackError(
+                        preferred_medium.name,
+                        f"Preferred model '{preferred_medium.name}' is resource-constrained "
+                        f"({res_assessment.resource_pressure_reason}), and no verified safe fallback is installed.",
                     )
-                else:
-                    selected_model = preferred_medium.name
-                    selected_tier = preferred_medium.tier
-                    reason = (
-                        f"Selected '{preferred_medium.name}' under resource pressure "
-                        f"({res_assessment.resource_pressure_reason}); no smaller model installed."
-                    )
-            resources = res_assessment
+
+                selected_model = safe_fallback.name
+                selected_tier = safe_fallback.tier
+                is_fallback = True
+                status = RoutingStatus.FALLBACK
+                reason = (
+                    f"Prompt complexity ({complexity.heuristic_score:.2f}) favored '{preferred_medium.name}', "
+                    f"but resource constraints intervened: {res_assessment.resource_pressure_reason}. "
+                    f"Safely fell back to installed '{safe_fallback.name}'."
+                )
+                resources = res_assessment
 
         elif wants_medium and not preferred_medium:
-            fallback_target = preferred_small or (all_models[0] if all_models else None)
-            selected_model = fallback_target.name if fallback_target else settings.OLLAMA_MODEL
-            selected_tier = fallback_target.tier if fallback_target else ModelTier.SMALL
+            # Medium capacity desired, but no medium model is installed
+            safe_fallback = cls.find_safe_fallback(
+                all_models,
+                configured_fallback_name=fallback_model_name,
+            )
+            if not safe_fallback:
+                raise NoSafeFallbackError(
+                    "medium_tier",
+                    f"Prompt complexity ({complexity.heuristic_score:.2f}) indicates medium-tier capacity, "
+                    f"but no medium model is installed and no safe fallback model is available.",
+                )
+
+            selected_model = safe_fallback.name
+            selected_tier = safe_fallback.tier
             is_fallback = True
             status = RoutingStatus.FALLBACK
             reason = (
                 f"Prompt complexity ({complexity.heuristic_score:.2f}) indicates medium-tier capacity, "
-                f"but no medium model is installed. Fell back to '{selected_model}'."
+                f"but no medium model is installed in local Ollama. Fell back to installed '{safe_fallback.name}'."
             )
-            resources = cls.evaluate_resources(fallback_target)
+            resources = cls.evaluate_resources(safe_fallback)
 
         else:
-            target_small = preferred_small or (all_models[0] if all_models else None)
-            selected_model = target_small.name if target_small else settings.OLLAMA_MODEL
-            selected_tier = target_small.tier if target_small else ModelTier.SMALL
-            reason = (
-                f"Selected lightweight fast model '{selected_model}' "
-                f"(heuristic complexity {complexity.heuristic_score:.2f} < threshold {threshold:.2f})."
+            # Small tier requested / simple prompt
+            target_small = preferred_small or cls.find_safe_fallback(
+                all_models,
+                configured_fallback_name=fallback_model_name,
             )
-            resources = cls.evaluate_resources(target_small)
+            if not target_small:
+                raise NoSafeFallbackError(
+                    "small_tier",
+                    "No small tier model is installed and no safe fallback model is available.",
+                )
 
-        # Decision confidence heuristic: distance from threshold in auto mode
-        margin = abs(complexity.heuristic_score - threshold)
+            res_assessment = cls.evaluate_resources(target_small)
+            if not res_assessment.is_resource_sufficient:
+                alt_fallback = cls.find_safe_fallback(all_models, exclude_names=[target_small.name])
+                if not alt_fallback:
+                    raise ModelResourceConstraintError(
+                        target_small.name,
+                        res_assessment.resource_pressure_reason or "Insufficient resources to run small model",
+                    )
+                selected_model = alt_fallback.name
+                selected_tier = alt_fallback.tier
+                is_fallback = True
+                status = RoutingStatus.FALLBACK
+                reason = (
+                    f"Small model '{target_small.name}' constrained ({res_assessment.resource_pressure_reason}). "
+                    f"Fell back to installed '{alt_fallback.name}'."
+                )
+                resources = cls.evaluate_resources(alt_fallback)
+            else:
+                selected_model = target_small.name
+                selected_tier = target_small.tier
+                reason = (
+                    f"Selected lightweight fast model '{selected_model}' "
+                    f"(heuristic complexity {complexity.heuristic_score:.2f} < threshold {threshold:.2f})."
+                )
+                resources = res_assessment
+
+        # Decision heuristic margin: distance from threshold in auto mode
+        margin = round(abs(complexity.heuristic_score - threshold), 3)
         confidence = round(min(1.0, 0.5 + margin), 2)
 
         elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -461,6 +647,7 @@ class ModelRouter:
             policy_applied=policy,
             reason=reason,
             decision_confidence=confidence,
+            heuristic_margin=margin,
             complexity_assessment=complexity,
             resource_assessment=resources,
             routing_duration_ms=elapsed_ms,
