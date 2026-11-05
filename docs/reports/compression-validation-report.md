@@ -21,7 +21,7 @@ The benchmark was executed using `scripts/benchmark_compression.py` against loca
 - **Compression-Stage Character Reduction:** **+31.07% aggregate** (mean: +28.71%, median: +31.18%, stdev: 8.01%).
 - **Final Optimized Prompt Character Reduction:** **+18.31% aggregate** (mean: +18.20%, median: +11.30%, stdev: 27.70%).
 - **Actual Downstream Model Token Savings:** **-16.12% prompt prefill tokens** (462 input tokens saved across task execution trials; mean: 46.2 tokens saved, median: 15.5 tokens, stdev: 78.55 tokens).
-- **Internal Optimizer Rewriter Token Savings:** **-13.40% prompt prefill tokens** (1214 input tokens saved across neural prompt rewriting calls; mean: 121.4 tokens saved, median: 124.0 tokens, stdev: 85.33 tokens).
+- **Internal Optimizer Rewriter Token Savings (Primary Call Attempt):** **-13.40% prompt prefill tokens** (1214 input tokens saved across primary neural prompt rewriting calls; mean: 121.4 tokens saved, median: 124.0 tokens, stdev: 85.33 tokens). *Note: Reflects primary rewrite prefill input requirements; retries are explicitly isolated.*
 - **Compression Engine Overhead Latency:** **mean 0.564 ms** (median: 0.400 ms, stdev: 0.495 ms) — sub-millisecond overhead.
 - **Downstream Answer Quality:** **6 preserved / 10 trials (60.0%)** under strict rule-based heuristic checks.
 - **Reversible Restoration Verification:** **100.0%** (8 of 8 tested references verified byte-exact against the actual expected original payload, with full SHA-256 hash match and 100% negative test passes).
@@ -67,9 +67,9 @@ Dynamic hardware telemetry detection (`detect_hardware_metadata()`) reported:
 To prevent conflation of internal optimization costs with downstream inference savings:
 
 1. **Internal Optimizer Inference (Prompt Rewriter):**
-   - Represents the local model call inside Argus (Stage C) that neuralizes and restructures the prompt.
-   - Compares the prefill token footprint when the rewriter is fed uncompressed input vs. compressed input.
-   - Recorded in `trial["comparison"]["internal_optimizer_token_savings"]`.
+   - **Primary Rewrite Call Savings (`primary_rewrite_call_savings`):** Compares the prompt prefill token footprint during the initial rewrite attempt (`first_call_prompt_eval_count`). This represents the historical benchmark measurement: **1,214 input tokens saved (-13.40% aggregate)**.
+   - **Total Optimizer Inference Cost (`total_optimizer_inference_cost`):** Aggregates the prompt evaluation token footprint across all relevant model calls, including corrective validation retries. In the historical benchmark where per-call retry telemetry was not preserved, total multi-call cost is explicitly labeled as `unavailable` rather than fabricated. Newly collected benchmark runs compute and report both metrics with per-call isolation and completeness tracking.
+   - Recorded in `trial["comparison"]["primary_rewrite_call_savings"]`, `trial["comparison"]["total_optimizer_inference_cost"]`, and backward-compatible `trial["comparison"]["internal_optimizer_token_savings"]`.
 
 2. **Downstream Model Inference (Task Answer Generation):**
    - Represents the actual downstream model executing the user's task using the final optimized prompt produced by Argus.
@@ -152,8 +152,9 @@ Answer quality evaluation uses hardened programmatic heuristic checks against wo
 | | Mean / Median / StdDev | +18.20% / +11.30% / 27.70% |
 | **Downstream Model Tokens** | Total Input Tokens Saved | **462 tokens (-16.12%)** |
 | | Mean / Median / StdDev | 46.2 tokens / 15.5 tokens / 78.55 tokens |
-| **Internal Optimizer Tokens** | Total Prefill Tokens Saved | **1214 tokens (-13.40%)** |
+| **Internal Optimizer Tokens (Primary Call)** | Total Prefill Tokens Saved | **1214 tokens (-13.40%)** |
 | | Mean / Median / StdDev | 121.4 tokens / 124.0 tokens / 85.33 tokens |
+| **Total Optimizer Inference Cost** | Scope & Retries | Multi-call aggregation enabled; historical retry totals unavailable |
 | **Engine Overhead Latency** | Mean / Median / StdDev | **0.564 ms** / 0.400 ms / 0.495 ms |
 | **Downstream Task Quality** | Preserved / Total Trials | **6 / 10 (60.0%)** |
 | | Regressions / Improvements / Both Failed | 1 regression / 1 improvement / 2 both failed |

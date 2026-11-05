@@ -87,6 +87,29 @@
       "total_tested": 8,
       "verified_byte_exact": 8,
       "verification_rate_percent": 100.0
+    },
+    "primary_rewrite_call_prompt_token_savings": {
+      "total_baseline_tokens": 9058,
+      "total_compressed_tokens": 7844,
+      "total_tokens_saved": 1214,
+      "aggregate_percent": 13.4,
+      "mean_tokens_saved": 121.4,
+      "median_tokens_saved": 124.0,
+      "stdev_tokens_saved": 85.33,
+      "measurement_scope": "first_call_primary_rewrite"
+    },
+    "total_optimizer_inference_token_cost": {
+      "status": "unavailable_in_historical_run",
+      "total_baseline_tokens": null,
+      "total_compressed_tokens": null,
+      "total_tokens_saved": null,
+      "aggregate_percent": null,
+      "mean_tokens_saved": null,
+      "median_tokens_saved": null,
+      "stdev_tokens_saved": null,
+      "has_complete_telemetry": false,
+      "measurement_scope": "all_relevant_calls",
+      "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
     }
   },
   "trials": [
@@ -290,6 +313,29 @@
           "negative_tests_passed": true,
           "retrieved_char_length": 1066,
           "expected_char_length": 1066
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 905,
+          "compressed_prompt_eval_count": 765,
+          "tokens_saved": 140,
+          "reduction_percent": 15.47
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     },
@@ -493,6 +539,29 @@
           "negative_tests_passed": true,
           "retrieved_char_length": 1066,
           "expected_char_length": 1066
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 905,
+          "compressed_prompt_eval_count": 765,
+          "tokens_saved": 140,
+          "reduction_percent": 15.47
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     },
@@ -688,6 +757,29 @@
           "negative_tests_passed": true,
           "retrieved_char_length": 1913,
           "expected_char_length": 1913
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 1000,
+          "compressed_prompt_eval_count": 876,
+          "tokens_saved": 124,
+          "reduction_percent": 12.4
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     },
@@ -883,6 +975,29 @@
           "negative_tests_passed": true,
           "retrieved_char_length": 1913,
           "expected_char_length": 1913
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 1000,
+          "compressed_prompt_eval_count": 876,
+          "tokens_saved": 124,
+          "reduction_percent": 12.4
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     },
@@ -1076,6 +1191,29 @@
           "negative_tests_passed": true,
           "retrieved_char_length": 692,
           "expected_char_length": 692
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 1224,
+          "compressed_prompt_eval_count": 966,
+          "tokens_saved": 258,
+          "reduction_percent": 21.08
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     },
@@ -1269,6 +1407,29 @@
           "negative_tests_passed": true,
           "retrieved_char_length": 692,
           "expected_char_length": 692
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 1224,
+          "compressed_prompt_eval_count": 966,
+          "tokens_saved": 258,
+          "reduction_percent": 21.08
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     },
@@ -1468,6 +1629,29 @@
           "expected_hash": null,
           "actual_hash": null,
           "negative_tests_passed": null
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 623,
+          "compressed_prompt_eval_count": 606,
+          "tokens_saved": 17,
+          "reduction_percent": 2.73
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     },
@@ -1667,6 +1851,29 @@
           "expected_hash": null,
           "actual_hash": null,
           "negative_tests_passed": null
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 623,
+          "compressed_prompt_eval_count": 606,
+          "tokens_saved": 17,
+          "reduction_percent": 2.73
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     },
@@ -1860,6 +2067,29 @@
           "negative_tests_passed": true,
           "retrieved_char_length": 240,
           "expected_char_length": 240
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 777,
+          "compressed_prompt_eval_count": 709,
+          "tokens_saved": 68,
+          "reduction_percent": 8.75
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     },
@@ -2053,6 +2283,29 @@
           "negative_tests_passed": true,
           "retrieved_char_length": 240,
           "expected_char_length": 240
+        },
+        "primary_rewrite_call_savings": {
+          "metric_name": "primary_rewrite_call_savings",
+          "measurement_scope": "first_call_only",
+          "status": "evaluated",
+          "baseline_prompt_eval_count": 777,
+          "compressed_prompt_eval_count": 709,
+          "tokens_saved": 68,
+          "reduction_percent": 8.75
+        },
+        "total_optimizer_inference_cost": {
+          "metric_name": "total_optimizer_inference_cost",
+          "measurement_scope": "all_relevant_calls",
+          "status": "unavailable",
+          "baseline_total_prompt_eval_count": null,
+          "compressed_total_prompt_eval_count": null,
+          "tokens_saved": null,
+          "reduction_percent": null,
+          "baseline_call_count": null,
+          "compressed_call_count": null,
+          "has_complete_telemetry": false,
+          "telemetry_source": "unavailable_in_historical_benchmark",
+          "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated."
         }
       }
     }

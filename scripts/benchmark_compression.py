@@ -1137,6 +1137,138 @@ def verify_workload_restoration(workload: Dict[str, Any], compressed_run: Dict[s
     }
 
 
+def calculate_primary_rewrite_savings(
+    base_run: Dict[str, Any],
+    comp_run: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Calculate prefill token savings for the primary (initial) rewrite attempt.
+
+    Preserves comparability with historical first-call benchmark measurements.
+    Prioritizes 'first_call_prompt_eval_count' if present; safely falls back to
+    'prompt_eval_count' for historical benchmark records where only the first call was recorded.
+    """
+    base_opt = base_run.get("optimizer_inference", {})
+    comp_opt = comp_run.get("optimizer_inference", {})
+
+    base_tok = base_opt.get("first_call_prompt_eval_count")
+    if base_tok is None:
+        base_tok = base_opt.get("prompt_eval_count")
+
+    comp_tok = comp_opt.get("first_call_prompt_eval_count")
+    if comp_tok is None:
+        comp_tok = comp_opt.get("prompt_eval_count")
+
+    if (
+        base_tok is not None
+        and comp_tok is not None
+        and isinstance(base_tok, (int, float))
+        and isinstance(comp_tok, (int, float))
+    ):
+        base_int = int(base_tok)
+        comp_int = int(comp_tok)
+        saved = base_int - comp_int
+        pct = round((saved / max(1, base_int)) * 100.0, 2)
+        status = "evaluated"
+    else:
+        base_int = None
+        comp_int = None
+        saved = None
+        pct = None
+        status = "unavailable"
+
+    return {
+        "metric_name": "primary_rewrite_call_savings",
+        "measurement_scope": "first_call_only",
+        "status": status,
+        "baseline_prompt_eval_count": base_int,
+        "compressed_prompt_eval_count": comp_int,
+        "tokens_saved": saved,
+        "reduction_percent": pct,
+    }
+
+
+def calculate_total_optimizer_cost(
+    base_run: Dict[str, Any],
+    comp_run: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Calculate total optimizer inference cost across all relevant model calls including retries.
+
+    Reports baseline total, compressed total, tokens saved, percentage, call counts,
+    and telemetry completeness.
+    If multi-call telemetry is unavailable (such as historical benchmarks where calls were not recorded),
+    explicitly reports status as 'unavailable' and does not fabricate missing token counts.
+    """
+    base_opt = base_run.get("optimizer_inference", {})
+    comp_opt = comp_run.get("optimizer_inference", {})
+
+    base_calls = base_opt.get("calls")
+    comp_calls = comp_opt.get("calls")
+    base_call_count = base_opt.get("call_count")
+    comp_call_count = comp_opt.get("call_count")
+    base_complete = base_opt.get("has_complete_telemetry")
+    comp_complete = comp_opt.get("has_complete_telemetry")
+
+    # If neither calls list nor call_count is present, this is historical single-call data
+    is_historical = (
+        base_calls is None
+        and comp_calls is None
+        and base_call_count is None
+        and comp_call_count is None
+    )
+
+    if is_historical:
+        return {
+            "metric_name": "total_optimizer_inference_cost",
+            "measurement_scope": "all_relevant_calls",
+            "status": "unavailable",
+            "baseline_total_prompt_eval_count": None,
+            "compressed_total_prompt_eval_count": None,
+            "tokens_saved": None,
+            "reduction_percent": None,
+            "baseline_call_count": None,
+            "compressed_call_count": None,
+            "has_complete_telemetry": False,
+            "telemetry_source": "unavailable_in_historical_benchmark",
+            "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated.",
+        }
+
+    base_tot = base_opt.get("prompt_eval_count")
+    comp_tot = comp_opt.get("prompt_eval_count")
+    has_complete = bool(base_complete and comp_complete)
+
+    if (
+        base_tot is not None
+        and comp_tot is not None
+        and isinstance(base_tot, (int, float))
+        and isinstance(comp_tot, (int, float))
+    ):
+        base_int = int(base_tot)
+        comp_int = int(comp_tot)
+        saved = base_int - comp_int
+        pct = round((saved / max(1, base_int)) * 100.0, 2)
+        status = "evaluated" if has_complete else "incomplete_telemetry"
+    else:
+        base_int = None
+        comp_int = None
+        saved = None
+        pct = None
+        status = "unavailable"
+
+    return {
+        "metric_name": "total_optimizer_inference_cost",
+        "measurement_scope": "all_relevant_calls",
+        "status": status,
+        "baseline_total_prompt_eval_count": base_int,
+        "compressed_total_prompt_eval_count": comp_int,
+        "tokens_saved": saved,
+        "reduction_percent": pct,
+        "baseline_call_count": base_call_count if base_call_count is not None else len(base_calls or []),
+        "compressed_call_count": comp_call_count if comp_call_count is not None else len(comp_calls or []),
+        "has_complete_telemetry": has_complete,
+        "telemetry_source": "complete_all_calls" if has_complete else "incomplete",
+    }
+
+
 async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
     """Execute complete benchmark across workloads with warm-up, repetitions, and alternating order."""
     print("=" * 80)
@@ -1230,17 +1362,12 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
                     (saved / max(1, int(base_down_prompt_tok))) * 100.0, 2
                 )
 
-            # Section 1: Internal optimizer rewriter token savings
-            base_opt_prompt_tok = base_run["optimizer_inference"]["prompt_eval_count"]
-            comp_opt_prompt_tok = comp_run["optimizer_inference"]["prompt_eval_count"]
-            optimizer_tokens_saved: Optional[int] = None
-            optimizer_tokens_saved_pct: Optional[float] = None
-            if base_opt_prompt_tok is not None and comp_opt_prompt_tok is not None:
-                opt_saved = int(base_opt_prompt_tok) - int(comp_opt_prompt_tok)
-                optimizer_tokens_saved = opt_saved
-                optimizer_tokens_saved_pct = round(
-                    (opt_saved / max(1, int(base_opt_prompt_tok))) * 100.0, 2
-                )
+            # Section 1: Calculate both distinct optimizer inference metrics:
+            # 1. Primary rewrite call savings (first-call only, historical baseline compatible)
+            primary_rewrite_savings = calculate_primary_rewrite_savings(base_run, comp_run)
+
+            # 2. Total optimizer inference cost (all relevant calls including retries)
+            total_optimizer_cost = calculate_total_optimizer_cost(base_run, comp_run)
 
             trial_result = {
                 "workload_id": workload["id"],
@@ -1278,17 +1405,17 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
                         "tokens_saved": downstream_tokens_saved,
                         "reduction_percent": downstream_tokens_saved_pct,
                     },
-                    # Section 1: Internal Optimizer Rewriter Token Savings
+                    # Section 1: Primary Rewrite Call Token Savings (First-Call Only)
+                    "primary_rewrite_call_savings": primary_rewrite_savings,
+                    # Section 1: Total Optimizer Inference Cost (All Calls Including Retries)
+                    "total_optimizer_inference_cost": total_optimizer_cost,
+                    # Section 1: Internal Optimizer Rewriter Token Savings (Backward-compatible alias)
                     "internal_optimizer_token_savings": {
-                        "baseline_prompt_eval_count": base_opt_prompt_tok,
-                        "compressed_prompt_eval_count": comp_opt_prompt_tok,
-                        "tokens_saved": optimizer_tokens_saved,
-                        "reduction_percent": optimizer_tokens_saved_pct,
-                        "telemetry_source": (
-                            "complete_all_calls"
-                            if (base_run["optimizer_inference"].get("telemetry_source") == "complete_all_calls" and comp_run["optimizer_inference"].get("telemetry_source") == "complete_all_calls")
-                            else "first_call_only"
-                        ),
+                        "baseline_prompt_eval_count": primary_rewrite_savings["baseline_prompt_eval_count"],
+                        "compressed_prompt_eval_count": primary_rewrite_savings["compressed_prompt_eval_count"],
+                        "tokens_saved": primary_rewrite_savings["tokens_saved"],
+                        "reduction_percent": primary_rewrite_savings["reduction_percent"],
+                        "telemetry_source": primary_rewrite_savings["measurement_scope"],
                         "baseline_call_count": base_run["optimizer_inference"].get("call_count", 1),
                         "compressed_call_count": comp_run["optimizer_inference"].get("call_count", 1),
                     },
@@ -1330,7 +1457,7 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
         median_down_saved = None
         stdev_down_saved = None
 
-    # 2. Internal optimizer token savings aggregation
+    # 2. Internal optimizer token savings aggregation (Primary Rewrite Call)
     valid_opt_token_trials = [
         t for t in all_trials
         if t["comparison"]["internal_optimizer_token_savings"]["tokens_saved"] is not None
@@ -1352,6 +1479,48 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
         mean_opt_saved = None
         median_opt_saved = None
         stdev_opt_saved = None
+
+    # Total optimizer inference cost aggregation (All Calls Including Retries)
+    valid_tot_cost_trials = [
+        t for t in all_trials
+        if t["comparison"].get("total_optimizer_inference_cost", {}).get("tokens_saved") is not None
+    ]
+    if valid_tot_cost_trials:
+        tot_base = sum(t["comparison"]["total_optimizer_inference_cost"]["baseline_total_prompt_eval_count"] for t in valid_tot_cost_trials)
+        tot_comp = sum(t["comparison"]["total_optimizer_inference_cost"]["compressed_total_prompt_eval_count"] for t in valid_tot_cost_trials)
+        tot_saved = tot_base - tot_comp
+        tot_pct = round((tot_saved / max(1, tot_base)) * 100.0, 2)
+        saved_list = [t["comparison"]["total_optimizer_inference_cost"]["tokens_saved"] for t in valid_tot_cost_trials]
+        mean_tot_saved = round(statistics.mean(saved_list), 2)
+        median_tot_saved = round(statistics.median(saved_list), 2)
+        stdev_tot_saved = round(statistics.stdev(saved_list), 2) if len(saved_list) > 1 else 0.0
+        all_complete = all(t["comparison"]["total_optimizer_inference_cost"].get("has_complete_telemetry", False) for t in valid_tot_cost_trials)
+        total_optimizer_cost_summary: Dict[str, Any] = {
+            "status": "evaluated",
+            "total_baseline_tokens": tot_base,
+            "total_compressed_tokens": tot_comp,
+            "total_tokens_saved": tot_saved,
+            "aggregate_percent": tot_pct,
+            "mean_tokens_saved": mean_tot_saved,
+            "median_tokens_saved": median_tot_saved,
+            "stdev_tokens_saved": stdev_tot_saved,
+            "has_complete_telemetry": all_complete,
+            "measurement_scope": "all_relevant_calls",
+        }
+    else:
+        total_optimizer_cost_summary = {
+            "status": "unavailable_in_historical_run",
+            "total_baseline_tokens": None,
+            "total_compressed_tokens": None,
+            "total_tokens_saved": None,
+            "aggregate_percent": None,
+            "mean_tokens_saved": None,
+            "median_tokens_saved": None,
+            "stdev_tokens_saved": None,
+            "has_complete_telemetry": False,
+            "measurement_scope": "all_relevant_calls",
+            "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated.",
+        }
 
     # 3. Compression-stage character reduction aggregation
     comp_stage_pcts = [t["comparison"]["stage_measurements_comparison"]["compression_stage"]["reduction_percent"] for t in all_trials]
@@ -1421,7 +1590,18 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
                 "median_tokens_saved": median_down_saved,
                 "stdev_tokens_saved": stdev_down_saved,
             },
-            # Section 1: Internal Argus Rewriter Token Savings
+            # Section 1: Primary Rewrite Call Token Savings (First-Call Only)
+            "primary_rewrite_call_prompt_token_savings": {
+                "total_baseline_tokens": total_base_opt_tokens,
+                "total_compressed_tokens": total_comp_opt_tokens,
+                "total_tokens_saved": total_opt_saved,
+                "aggregate_percent": agg_opt_token_pct,
+                "mean_tokens_saved": mean_opt_saved,
+                "median_tokens_saved": median_opt_saved,
+                "stdev_tokens_saved": stdev_opt_saved,
+                "measurement_scope": "first_call_primary_rewrite",
+            },
+            # Section 1: Internal Argus Rewriter Token Savings (Backward-compatible alias)
             "internal_optimizer_prompt_token_savings": {
                 "total_baseline_tokens": total_base_opt_tokens,
                 "total_compressed_tokens": total_comp_opt_tokens,
@@ -1431,6 +1611,8 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
                 "median_tokens_saved": median_opt_saved,
                 "stdev_tokens_saved": stdev_opt_saved,
             },
+            # Section 1: Total Optimizer Inference Token Cost (All Relevant Calls Including Retries)
+            "total_optimizer_inference_token_cost": total_optimizer_cost_summary,
             # Section 2: Compression-Stage Character Reduction
             "compression_stage_character_reduction": {
                 "total_baseline_chars": total_base_orig_chars,
