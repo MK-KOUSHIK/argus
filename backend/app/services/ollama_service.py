@@ -22,10 +22,8 @@ from app.schemas.optimizer import (
     OptimizeResponse,
     OllamaStatusResponse,
     OutputBudgetTelemetry,
-    CompressionTelemetry,
     TokenEstimation,
 )
-from app.services.compression import CompressionOrchestrator, CompressionStrategy
 from app.services.task_analyzer import TaskAnalyzer, TaskAnalysisResult
 from app.services.strategy_selector import StrategySelector
 from app.services.prompt_rewriter import PromptRewriter
@@ -432,16 +430,8 @@ class OllamaService:
     @classmethod
     async def optimize_prompt(cls, request: OptimizeRequest) -> OptimizeResponse:
         """Task-aware prompt optimization pipeline orchestrating Stages A through D."""
-        # --- STAGE 0: Independent Content-Aware Compression (Phase 4.2) ---
-        compression_res = CompressionOrchestrator.compress(
-            text=request.prompt,
-            enabled=request.enable_compression,
-            reversible=request.compression_reversible,
-        )
-        working_prompt = compression_res.compressed_text
-
         # --- STAGE A: Understand the Prompt ---
-        analysis = TaskAnalyzer.analyze(working_prompt)
+        analysis = TaskAnalyzer.analyze(request.prompt)
 
         # --- STAGE B: Select Strategy ---
         strategy = StrategySelector.select_strategy(analysis, request.mode)
@@ -466,7 +456,7 @@ class OllamaService:
         # Output Budget Allocation (Phase 4.1) accounts for actual system instruction & formatted prompt
         try:
             output_allocation = OutputBudgetController.allocate_budget(
-                prompt=working_prompt,
+                prompt=request.prompt,
                 mode=request.mode,
                 task_analysis=analysis,
                 requested_output_budget=request.requested_output_budget,
@@ -478,19 +468,19 @@ class OllamaService:
         # --- STAGE C: Rewrite Prompt (or PRESERVE directly) ---
         if strategy == "preserve":
             # Prompt is already concise, unambiguous, and effective
-            optimized_prompt = working_prompt
+            optimized_prompt = request.prompt
             validation_status = "passed"
             is_preserved = True
             total_duration_ms = 1
         else:
             raw_candidate, call_ms, call_telemetry = await cls._execute_model_call(
                 system_instruction=system_instruction or "",
-                prompt=working_prompt,
+                prompt=request.prompt,
                 output_budget=output_allocation,
             )
             inference_telemetry.append(call_telemetry)
             total_duration_ms += call_ms
-            cleaned_candidate = cls.clean_optimized_output(raw_candidate, working_prompt)
+            cleaned_candidate = cls.clean_optimized_output(raw_candidate, request.prompt)
 
             # --- STAGE D: Validate Candidate ---
             validation = CandidateValidator.validate(
@@ -515,12 +505,12 @@ class OllamaService:
                 try:
                     retry_raw, retry_ms, retry_telemetry = await cls._execute_model_call(
                         system_instruction=retry_instruction,
-                        prompt=working_prompt,
+                        prompt=request.prompt,
                         output_budget=output_allocation,
                     )
                     inference_telemetry.append(retry_telemetry)
                     total_duration_ms += retry_ms
-                    retry_cleaned = cls.clean_optimized_output(retry_raw, working_prompt)
+                    retry_cleaned = cls.clean_optimized_output(retry_raw, request.prompt)
                     retry_validation = CandidateValidator.validate(
                         original_prompt=request.prompt,
                         candidate_prompt=retry_cleaned,
@@ -624,31 +614,6 @@ class OllamaService:
             else None
         )
 
-        compression_telemetry = (
-            CompressionTelemetry(
-                enabled=(
-                    compression_res.strategy_applied != CompressionStrategy.NONE
-                    and compression_res.validation_passed
-                    and compression_res.tokens_reduced > 0
-                ),
-                detected_content_type=compression_res.content_type.value,
-                confidence_score=compression_res.confidence_score,
-                strategy_applied=compression_res.strategy_applied.value,
-                original_tokens=compression_res.original_tokens,
-                compressed_tokens=compression_res.compressed_tokens,
-                tokens_reduced=compression_res.tokens_reduced,
-                compression_ratio=compression_res.compression_ratio,
-                reduction_percent=compression_res.reduction_percent,
-                token_measurement_method=compression_res.token_measurement_method,
-                validation_status=compression_res.validation_status,
-                processing_time_ms=compression_res.processing_time_ms,
-                restoration_reference=compression_res.restoration_reference,
-                fallback_reason=compression_res.fallback_reason,
-            )
-            if compression_res
-            else None
-        )
-
         return OptimizeResponse(
             original_prompt=request.prompt,
             optimized_prompt=optimized_prompt,
@@ -684,6 +649,5 @@ class OllamaService:
                 } if inference_telemetry else None
             ),
             output_budget=output_budget_telemetry,
-            compression=compression_telemetry,
             kv_runtime_policy=OllamaProcessManager.get_runtime_policy(),
         )
