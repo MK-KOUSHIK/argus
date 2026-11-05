@@ -16,6 +16,7 @@ from benchmark_compression import (  # type: ignore[import-not-found] # pyright:
     extract_primary_rewrite_prompt_tokens,
     is_demonstrably_historical_single_call,
     is_new_schema_optimizer_record,
+    validate_token_count,
 )
 
 
@@ -607,7 +608,7 @@ def test_case_9_existing_historical_benchmark_records_retain_valid_metrics() -> 
 
 
 def test_total_optimizer_cost_incomplete_telemetry() -> None:
-    """Incomplete telemetry in multi-call records is safely handled without fabricating counts."""
+    """Incomplete telemetry in multi-call records safely returns None for savings without fabricating complete totals."""
     base_run = {
         "optimizer_inference": {
             "call_count": 2,
@@ -631,8 +632,221 @@ def test_total_optimizer_cost_incomplete_telemetry() -> None:
     assert total["status"] == "incomplete_telemetry"
     assert total["baseline_call_count"] == 2
     assert total["compressed_call_count"] == 1
-    assert total["tokens_saved"] == 200
-    assert total["reduction_percent"] == 20.0
+    # Savings and percent MUST be None for incomplete telemetry
+    assert total["tokens_saved"] is None
+    assert total["reduction_percent"] is None
+    assert total["baseline_total_prompt_eval_count"] is None
+    assert total["compressed_total_prompt_eval_count"] is None
+    # Raw observed counts are preserved strictly as partial observations
+    assert total["partial_observed_baseline_tokens"] == 1000
+    assert total["partial_observed_compressed_tokens"] == 800
+    assert "incomplete" in total["note"].lower()
+
+
+def test_regression_complete_telemetry_produces_valid_total_savings() -> None:
+    """Regression test 1: Complete baseline and compressed telemetry produces valid total savings."""
+    base_run = {
+        "optimizer_inference": {
+            "call_count": 2,
+            "has_complete_telemetry": True,
+            "prompt_eval_count": 1200,
+            "calls": [{"prompt_eval_count": 800}, {"prompt_eval_count": 400}],
+        }
+    }
+    comp_run = {
+        "optimizer_inference": {
+            "call_count": 1,
+            "has_complete_telemetry": True,
+            "prompt_eval_count": 600,
+            "calls": [{"prompt_eval_count": 600}],
+        }
+    }
+
+    total = calculate_total_optimizer_cost(base_run, comp_run)
+
+    assert total["status"] == "evaluated"
+    assert total["has_complete_telemetry"] is True
+    assert total["baseline_total_prompt_eval_count"] == 1200
+    assert total["compressed_total_prompt_eval_count"] == 600
+    assert total["tokens_saved"] == 600
+    assert total["reduction_percent"] == 50.0
+    assert total["baseline_call_count"] == 2
+    assert total["compressed_call_count"] == 1
+
+
+def test_regression_incomplete_baseline_telemetry_produces_no_savings() -> None:
+    """Regression test 2: Incomplete baseline telemetry produces no savings or percentage."""
+    base_run = {
+        "optimizer_inference": {
+            "call_count": 2,
+            "has_complete_telemetry": False,
+            "prompt_eval_count": 1200,
+            "calls": [{"prompt_eval_count": 1200}, {"prompt_eval_count": None}],
+        }
+    }
+    comp_run = {
+        "optimizer_inference": {
+            "call_count": 1,
+            "has_complete_telemetry": True,
+            "prompt_eval_count": 600,
+            "calls": [{"prompt_eval_count": 600}],
+        }
+    }
+
+    total = calculate_total_optimizer_cost(base_run, comp_run)
+
+    assert total["status"] == "incomplete_telemetry"
+    assert total["has_complete_telemetry"] is False
+    assert total["tokens_saved"] is None
+    assert total["reduction_percent"] is None
+    assert total["baseline_total_prompt_eval_count"] is None
+    assert total["compressed_total_prompt_eval_count"] is None
+    assert total["partial_observed_baseline_tokens"] == 1200
+    assert total["partial_observed_compressed_tokens"] == 600
+    assert "baseline run has incomplete call telemetry" in total["note"]
+
+
+def test_regression_incomplete_compressed_telemetry_produces_no_savings() -> None:
+    """Regression test 3: Incomplete compressed telemetry produces no savings or percentage."""
+    base_run = {
+        "optimizer_inference": {
+            "call_count": 1,
+            "has_complete_telemetry": True,
+            "prompt_eval_count": 1200,
+            "calls": [{"prompt_eval_count": 1200}],
+        }
+    }
+    comp_run = {
+        "optimizer_inference": {
+            "call_count": 2,
+            "has_complete_telemetry": False,
+            "prompt_eval_count": 600,
+            "calls": [{"prompt_eval_count": 600}, {"prompt_eval_count": None}],
+        }
+    }
+
+    total = calculate_total_optimizer_cost(base_run, comp_run)
+
+    assert total["status"] == "incomplete_telemetry"
+    assert total["has_complete_telemetry"] is False
+    assert total["tokens_saved"] is None
+    assert total["reduction_percent"] is None
+    assert total["baseline_total_prompt_eval_count"] is None
+    assert total["compressed_total_prompt_eval_count"] is None
+    assert total["partial_observed_baseline_tokens"] == 1200
+    assert total["partial_observed_compressed_tokens"] == 600
+    assert "compressed run has incomplete call telemetry" in total["note"]
+
+
+def test_regression_missing_retry_telemetry_does_not_produce_partial_savings() -> None:
+    """Regression test 4: Missing retry telemetry does not produce partial savings presented as complete."""
+    # Baseline had a retry that was not captured by the driver
+    base_run = {
+        "optimizer_inference": {
+            "call_count": 3,
+            "has_complete_telemetry": False,
+            "prompt_eval_count": 1000,  # Only first call captured; 2 retries missed
+            "calls": [{"prompt_eval_count": 1000}],
+        }
+    }
+    comp_run = {
+        "optimizer_inference": {
+            "call_count": 1,
+            "has_complete_telemetry": True,
+            "prompt_eval_count": 800,
+            "calls": [{"prompt_eval_count": 800}],
+        }
+    }
+
+    total = calculate_total_optimizer_cost(base_run, comp_run)
+
+    # Must NOT report 1000 - 800 = 200 as complete savings
+    assert total["status"] == "incomplete_telemetry"
+    assert total["tokens_saved"] is None
+    assert total["reduction_percent"] is None
+    assert total["baseline_total_prompt_eval_count"] is None
+    assert total["compressed_total_prompt_eval_count"] is None
+    assert total["tokens_saved"] != 200
+
+
+def test_regression_unavailable_telemetry_remains_unavailable() -> None:
+    """Regression test 5: Unavailable telemetry remains unavailable when required fields are missing or invalid."""
+    invalid_cases = [
+        {"prompt_eval_count": None, "call_count": 1},
+        {"prompt_eval_count": "invalid_string", "call_count": 1},
+        {"prompt_eval_count": True, "call_count": 1},
+        {"prompt_eval_count": float("nan"), "call_count": 1},
+    ]
+    for bad_opt in invalid_cases:
+        base_run = {"optimizer_inference": bad_opt}
+        comp_run = {
+            "optimizer_inference": {
+                "call_count": 1,
+                "has_complete_telemetry": True,
+                "prompt_eval_count": 800,
+                "calls": [{"prompt_eval_count": 800}],
+            }
+        }
+        total = calculate_total_optimizer_cost(base_run, comp_run)
+        assert total["status"] == "unavailable"
+        assert total["tokens_saved"] is None
+        assert total["baseline_total_prompt_eval_count"] is None
+
+
+def test_regression_invalid_types_rejected_safely() -> None:
+    """Regression test 6: Boolean, NaN, infinity, negative, string, and malformed values are rejected safely."""
+    import math
+
+    invalid_token_values = [
+        True,
+        False,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        -1,
+        -100,
+        -0.5,
+        "100",
+        "0",
+        "-50",
+        [100],
+        {"tokens": 100},
+        100.5,  # Fractional float must not be silently truncated
+        None,
+    ]
+
+    for val in invalid_token_values:
+        # validate_token_count directly
+        assert validate_token_count(val) is None
+
+        # Primary extraction directly
+        opt_dict = {
+            "first_call_prompt_eval_count": val,
+            "call_count": 1,
+            "prompt_eval_count": val,
+        }
+        assert extract_primary_rewrite_prompt_tokens(opt_dict) is None
+
+        # Primary savings calculation
+        p_res = calculate_primary_rewrite_savings(
+            {"optimizer_inference": opt_dict},
+            {"optimizer_inference": {"first_call_prompt_eval_count": 700, "call_count": 1}},
+        )
+        assert p_res["status"] == "unavailable"
+        assert p_res["tokens_saved"] is None
+
+        # Total cost calculation
+        t_res = calculate_total_optimizer_cost(
+            {"optimizer_inference": opt_dict},
+            {"optimizer_inference": {"prompt_eval_count": 700, "call_count": 1, "has_complete_telemetry": True}},
+        )
+        assert t_res["status"] == "unavailable"
+        assert t_res["tokens_saved"] is None
+
+    # Valid values accept correctly
+    assert validate_token_count(0) == 0
+    assert validate_token_count(100) == 100
+    assert validate_token_count(100.0) == 100
 
 
 def test_primary_savings_missing_metrics_unavailable() -> None:
@@ -644,3 +858,4 @@ def test_primary_savings_missing_metrics_unavailable() -> None:
     assert primary["status"] == "unavailable"
     assert primary["tokens_saved"] is None
     assert primary["reduction_percent"] is None
+

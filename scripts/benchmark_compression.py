@@ -21,6 +21,7 @@ import asyncio
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -799,6 +800,38 @@ async def execute_downstream_generation(prompt: str) -> Dict[str, Any]:
     }
 
 
+def validate_token_count(val: Any) -> Optional[int]:
+    """Validate and normalize a token count value.
+
+    Accepts valid non-negative integer token counts.
+    If a floating-point value is provided, it is accepted only if it is finite,
+    non-negative, and exactly represents an integer (val.is_integer()). Fractional
+    floats (e.g. 10.5) are rejected to prevent silent truncation.
+
+    Rejects:
+      - Booleans (True and False, which inherit from int in Python)
+      - NaN, +inf, -inf
+      - Negative counts
+      - Numeric strings
+      - Lists, dicts, None, and all other non-numeric types
+
+    Returns int if valid, else None.
+    """
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val if val >= 0 else None
+    if isinstance(val, float):
+        if math.isnan(val) or math.isinf(val):
+            return None
+        if val < 0:
+            return None
+        if val.is_integer():
+            return int(val)
+        return None
+    return None
+
+
 def aggregate_optimizer_inference_telemetry(
     inference_telemetry: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
@@ -838,24 +871,24 @@ def aggregate_optimizer_inference_telemetry(
 
     call_count = len(valid_calls)
     first_call = valid_calls[0]
-    first_call_prompt_eval_count = first_call.get("prompt_eval_count")
-    first_call_eval_count = first_call.get("eval_count")
+    first_call_prompt_eval_count = validate_token_count(first_call.get("prompt_eval_count"))
+    first_call_eval_count = validate_token_count(first_call.get("eval_count"))
 
     # Aggregate prompt evaluation tokens
     prompt_eval_counts = [
-        int(c["prompt_eval_count"])
+        tok
         for c in valid_calls
-        if isinstance(c.get("prompt_eval_count"), (int, float))
+        if (tok := validate_token_count(c.get("prompt_eval_count"))) is not None
     ]
     prompt_eval_cached_counts = [
-        int(c["prompt_eval_cached_count"])
+        tok
         for c in valid_calls
-        if isinstance(c.get("prompt_eval_cached_count"), (int, float))
+        if (tok := validate_token_count(c.get("prompt_eval_cached_count"))) is not None
     ]
     eval_counts = [
-        int(c["eval_count"])
+        tok
         for c in valid_calls
-        if isinstance(c.get("eval_count"), (int, float))
+        if (tok := validate_token_count(c.get("eval_count"))) is not None
     ]
 
     # Durations (ns to ms)
@@ -863,11 +896,19 @@ def aggregate_optimizer_inference_telemetry(
         float(c["prompt_eval_duration_ns"])
         for c in valid_calls
         if isinstance(c.get("prompt_eval_duration_ns"), (int, float))
+        and not isinstance(c.get("prompt_eval_duration_ns"), bool)
+        and not math.isnan(float(c["prompt_eval_duration_ns"]))
+        and not math.isinf(float(c["prompt_eval_duration_ns"]))
+        and float(c["prompt_eval_duration_ns"]) >= 0
     ]
     eval_dur_ns_list = [
         float(c["eval_duration_ns"])
         for c in valid_calls
         if isinstance(c.get("eval_duration_ns"), (int, float))
+        and not isinstance(c.get("eval_duration_ns"), bool)
+        and not math.isnan(float(c["eval_duration_ns"]))
+        and not math.isinf(float(c["eval_duration_ns"]))
+        and float(c["eval_duration_ns"]) >= 0
     ]
 
     # Determine completeness
@@ -1179,8 +1220,11 @@ def is_demonstrably_historical_single_call(opt_dict: Dict[str, Any]) -> bool:
     # 2. Must NOT indicate multi-call or retries
     for k in ("retry_count", "retries", "retries_attempted"):
         v = opt_dict.get(k)
-        if v is not None and isinstance(v, (int, float)) and v > 0:
+        if v is True:
             return False
+        if v is not None and not isinstance(v, bool) and isinstance(v, (int, float)):
+            if math.isnan(v) or math.isinf(v) or v > 0:
+                return False
 
     for k in ("is_multi_call", "multi_call"):
         if opt_dict.get(k) is True:
@@ -1188,12 +1232,15 @@ def is_demonstrably_historical_single_call(opt_dict: Dict[str, Any]) -> bool:
 
     for k in ("total_calls", "call_count"):
         v = opt_dict.get(k)
-        if v is not None and isinstance(v, (int, float)) and v > 1:
+        if v is True:
             return False
+        if v is not None and not isinstance(v, bool) and isinstance(v, (int, float)):
+            if math.isnan(v) or math.isinf(v) or v > 1:
+                return False
 
     # 3. Must have a valid non-negative prompt_eval_count
-    pe = opt_dict.get("prompt_eval_count")
-    if pe is None or not isinstance(pe, (int, float)) or pe < 0:
+    pe = validate_token_count(opt_dict.get("prompt_eval_count"))
+    if pe is None:
         return False
 
     # 4. Must demonstrably contain authentic Argus historical run context
@@ -1213,27 +1260,25 @@ def extract_primary_rewrite_prompt_tokens(opt_dict: Dict[str, Any]) -> Optional[
 
     For new-schema records:
       - STRICTLY uses 'first_call_prompt_eval_count'.
+      - Validates with validate_token_count (rejects bool, NaN, inf, negative, strings, objects).
       - NEVER falls back to 'prompt_eval_count' (which may be aggregate across retries).
-      - If first-call telemetry is missing or incomplete, returns None.
+      - If first-call telemetry is missing or invalid, returns None.
 
     For historical records:
       - ONLY allows fallback to 'prompt_eval_count' if demonstrably a legacy single-call record.
+      - Validates with validate_token_count.
       - If record has multi-call indicators or lacks historical run context, returns None.
     """
     if not isinstance(opt_dict, dict):
         return None
 
     if is_new_schema_optimizer_record(opt_dict):
-        val = opt_dict.get("first_call_prompt_eval_count")
-        if val is not None and isinstance(val, (int, float)) and val >= 0:
-            return int(val)
-        return None
+        raw = opt_dict.get("first_call_prompt_eval_count")
+        return validate_token_count(raw)
 
     if is_demonstrably_historical_single_call(opt_dict):
-        val = opt_dict.get("prompt_eval_count")
-        if val is not None and isinstance(val, (int, float)) and val >= 0:
-            return int(val)
-        return None
+        raw = opt_dict.get("prompt_eval_count")
+        return validate_token_count(raw)
 
     return None
 
@@ -1283,8 +1328,15 @@ def calculate_total_optimizer_cost(
 
     Reports baseline total, compressed total, tokens saved, percentage, call counts,
     and telemetry completeness.
-    If multi-call telemetry is unavailable (such as historical benchmarks where calls were not recorded),
-    explicitly reports status as 'unavailable' and does not fabricate missing token counts.
+
+    - When both baseline and compressed telemetry are complete:
+        Evaluates complete total counts, tokens saved, percentage savings, and status 'evaluated'.
+    - When either side has incomplete telemetry:
+        Marks status 'incomplete_telemetry', sets tokens_saved and reduction_percent to None,
+        does not report partial aggregate counts as complete totals, and preserves raw counts
+        strictly as partial observations with an identifying explanation.
+    - When required telemetry is missing or invalid:
+        Returns status 'unavailable' without fabricating counts.
     """
     base_opt = base_run.get("optimizer_inference", {}) if isinstance(base_run, dict) else {}
     comp_opt = comp_run.get("optimizer_inference", {}) if isinstance(comp_run, dict) else {}
@@ -1332,42 +1384,74 @@ def calculate_total_optimizer_cost(
             "note": "Mismatched telemetry schema between baseline and compressed runs; cannot compare total cost.",
         }
 
-    base_tot = base_opt.get("prompt_eval_count")
-    comp_tot = comp_opt.get("prompt_eval_count")
-    has_complete = bool(base_complete and comp_complete)
+    base_tot = validate_token_count(base_opt.get("prompt_eval_count"))
+    comp_tot = validate_token_count(comp_opt.get("prompt_eval_count"))
+    has_complete = bool(base_complete is True and comp_complete is True)
 
-    if (
-        base_tot is not None
-        and comp_tot is not None
-        and isinstance(base_tot, (int, float))
-        and isinstance(comp_tot, (int, float))
-        and base_tot >= 0
-        and comp_tot >= 0
-    ):
-        base_int = int(base_tot)
-        comp_int = int(comp_tot)
-        saved = base_int - comp_int
-        pct = round((saved / max(1, base_int)) * 100.0, 2)
-        status = "evaluated" if has_complete else "incomplete_telemetry"
-    else:
-        base_int = None
-        comp_int = None
-        saved = None
-        pct = None
-        status = "unavailable"
+    b_calls_count = base_call_count if isinstance(base_call_count, int) and not isinstance(base_call_count, bool) and base_call_count >= 0 else len(base_calls or [])
+    c_calls_count = comp_call_count if isinstance(comp_call_count, int) and not isinstance(comp_call_count, bool) and comp_call_count >= 0 else len(comp_calls or [])
+
+    # If required telemetry is missing or invalid on either side -> unavailable
+    if base_tot is None or comp_tot is None:
+        return {
+            "metric_name": "total_optimizer_inference_cost",
+            "measurement_scope": "all_relevant_calls",
+            "status": "unavailable",
+            "baseline_total_prompt_eval_count": None,
+            "compressed_total_prompt_eval_count": None,
+            "tokens_saved": None,
+            "reduction_percent": None,
+            "baseline_call_count": b_calls_count,
+            "compressed_call_count": c_calls_count,
+            "has_complete_telemetry": False,
+            "telemetry_source": "unavailable",
+            "note": "Required total prompt evaluation tokens are missing or invalid; cannot evaluate total cost.",
+        }
+
+    # If both sides have complete telemetry -> evaluated
+    if has_complete:
+        saved = base_tot - comp_tot
+        pct = round((saved / max(1, base_tot)) * 100.0, 2)
+        return {
+            "metric_name": "total_optimizer_inference_cost",
+            "measurement_scope": "all_relevant_calls",
+            "status": "evaluated",
+            "baseline_total_prompt_eval_count": base_tot,
+            "compressed_total_prompt_eval_count": comp_tot,
+            "tokens_saved": saved,
+            "reduction_percent": pct,
+            "baseline_call_count": b_calls_count,
+            "compressed_call_count": c_calls_count,
+            "has_complete_telemetry": True,
+            "telemetry_source": "complete_all_calls",
+        }
+
+    # If either side has incomplete telemetry -> incomplete_telemetry
+    # Do not present partial aggregate counts as complete total-cost measurements.
+    # Set tokens_saved = None, reduction_percent = None.
+    # Preserve available raw counts strictly as partial observations.
+    reasons: List[str] = []
+    if base_complete is not True:
+        reasons.append("baseline run has incomplete call telemetry (e.g. unmeasured retries)")
+    if comp_complete is not True:
+        reasons.append("compressed run has incomplete call telemetry (e.g. unmeasured retries)")
+    note = f"Incomplete multi-call telemetry: {'; '.join(reasons)}. Actual total cost and savings cannot be determined."
 
     return {
         "metric_name": "total_optimizer_inference_cost",
         "measurement_scope": "all_relevant_calls",
-        "status": status,
-        "baseline_total_prompt_eval_count": base_int,
-        "compressed_total_prompt_eval_count": comp_int,
-        "tokens_saved": saved,
-        "reduction_percent": pct,
-        "baseline_call_count": base_call_count if base_call_count is not None else len(base_calls or []),
-        "compressed_call_count": comp_call_count if comp_call_count is not None else len(comp_calls or []),
-        "has_complete_telemetry": has_complete,
-        "telemetry_source": "complete_all_calls" if has_complete else "incomplete",
+        "status": "incomplete_telemetry",
+        "baseline_total_prompt_eval_count": None,
+        "compressed_total_prompt_eval_count": None,
+        "tokens_saved": None,
+        "reduction_percent": None,
+        "partial_observed_baseline_tokens": base_tot,
+        "partial_observed_compressed_tokens": comp_tot,
+        "baseline_call_count": b_calls_count,
+        "compressed_call_count": c_calls_count,
+        "has_complete_telemetry": False,
+        "telemetry_source": "incomplete",
+        "note": note,
     }
 
 
