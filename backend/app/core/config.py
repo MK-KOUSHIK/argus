@@ -78,6 +78,19 @@ class Settings(BaseSettings):
         "structure": 1.2,
     }
 
+    # Independent Content-Aware Compression Engine (Phase 4.2)
+    COMPRESSION_ENABLED: bool = True
+    COMPRESSION_REVERSIBLE: bool = True
+    COMPRESSION_TTL_SECONDS: int = 3600
+    COMPRESSION_REGISTRY_MAX_ENTRIES: int = 1000
+    COMPRESSION_MIN_CHARS_THRESHOLD: int = 40
+    COMPRESSION_STRATEGIES_ENABLED: Dict[str, bool] = {
+        "json": True,
+        "code": True,
+        "logs": True,
+        "text": True,
+    }
+
     # Optimization & Token Estimation Heuristics
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0
     MAX_VALIDATION_RETRY_ATTEMPTS: int = 1
@@ -216,6 +229,29 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"OUTPUT_BUDGET_MAX_TOKENS ({v}) must be greater than or equal to OUTPUT_BUDGET_MIN_TOKENS ({min_budget})"
             )
+        return v
+
+    @field_validator("COMPRESSION_TTL_SECONDS")
+    @classmethod
+    def validate_compression_ttl(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"COMPRESSION_TTL_SECONDS must be >= 1; got {v}")
+        return v
+
+    @field_validator("COMPRESSION_REGISTRY_MAX_ENTRIES")
+    @classmethod
+    def validate_compression_registry_max(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"COMPRESSION_REGISTRY_MAX_ENTRIES must be >= 1; got {v}")
+        return v
+
+    @field_validator("COMPRESSION_STRATEGIES_ENABLED")
+    @classmethod
+    def validate_compression_strategies(cls, v: Dict[str, bool]) -> Dict[str, bool]:
+        required = {"json", "code", "logs", "text"}
+        missing = required - set(v.keys())
+        if missing:
+            raise ValueError(f"COMPRESSION_STRATEGIES_ENABLED missing required strategies: {sorted(missing)}")
         return v
 
     @field_validator("CORS_ORIGINS", mode="before")

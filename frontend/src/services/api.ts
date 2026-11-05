@@ -178,6 +178,7 @@ export class ApiService {
           }
         : null,
       outputBudget: data.output_budget || null,
+      compression: data.compression || null,
       kvRuntimePolicy: data.kv_runtime_policy || null,
     };
   }
