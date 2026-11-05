@@ -799,6 +799,142 @@ async def execute_downstream_generation(prompt: str) -> Dict[str, Any]:
     }
 
 
+def aggregate_optimizer_inference_telemetry(
+    inference_telemetry: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Aggregate internal optimizer native Ollama telemetry across all relevant model calls.
+
+    Handles single calls, multiple retry calls, missing telemetry, and incomplete records.
+    Preserves per-call telemetry for traceability while providing aggregated metrics.
+    """
+    default_result: Dict[str, Any] = {
+        "call_count": 0,
+        "calls": [],
+        "has_complete_telemetry": False,
+        "telemetry_source": "unavailable",
+        "prompt_eval_count": None,
+        "prompt_eval_cached_count": None,
+        "cache_hit_ratio": None,
+        "prompt_eval_duration_ms": None,
+        "eval_count": None,
+        "eval_duration_ms": None,
+        "generation_tokens_per_second": None,
+        "selected_num_ctx": None,
+        "done_reason": None,
+        "first_call_prompt_eval_count": None,
+        "first_call_eval_count": None,
+    }
+
+    if not inference_telemetry or not isinstance(inference_telemetry, dict):
+        return default_result
+
+    calls = inference_telemetry.get("calls")
+    if not calls or not isinstance(calls, list):
+        return default_result
+
+    valid_calls: List[Dict[str, Any]] = [c for c in calls if isinstance(c, dict)]
+    if not valid_calls:
+        return default_result
+
+    call_count = len(valid_calls)
+    first_call = valid_calls[0]
+    first_call_prompt_eval_count = first_call.get("prompt_eval_count")
+    first_call_eval_count = first_call.get("eval_count")
+
+    # Aggregate prompt evaluation tokens
+    prompt_eval_counts = [
+        int(c["prompt_eval_count"])
+        for c in valid_calls
+        if isinstance(c.get("prompt_eval_count"), (int, float))
+    ]
+    prompt_eval_cached_counts = [
+        int(c["prompt_eval_cached_count"])
+        for c in valid_calls
+        if isinstance(c.get("prompt_eval_cached_count"), (int, float))
+    ]
+    eval_counts = [
+        int(c["eval_count"])
+        for c in valid_calls
+        if isinstance(c.get("eval_count"), (int, float))
+    ]
+
+    # Durations (ns to ms)
+    prompt_dur_ns_list = [
+        float(c["prompt_eval_duration_ns"])
+        for c in valid_calls
+        if isinstance(c.get("prompt_eval_duration_ns"), (int, float))
+    ]
+    eval_dur_ns_list = [
+        float(c["eval_duration_ns"])
+        for c in valid_calls
+        if isinstance(c.get("eval_duration_ns"), (int, float))
+    ]
+
+    # Determine completeness
+    all_calls_have_tokens = (
+        len(prompt_eval_counts) == call_count and len(eval_counts) == call_count
+    )
+
+    total_prompt_eval_count: Optional[int] = sum(prompt_eval_counts) if prompt_eval_counts else None
+    total_prompt_eval_cached_count: Optional[int] = (
+        sum(prompt_eval_cached_counts)
+        if prompt_eval_cached_counts
+        else (0 if total_prompt_eval_count is not None else None)
+    )
+    total_eval_count: Optional[int] = sum(eval_counts) if eval_counts else None
+
+    # Aggregate durations
+    total_prompt_eval_dur_ms: Optional[float] = (
+        round(sum(prompt_dur_ns_list) / 1_000_000.0, 2) if prompt_dur_ns_list else None
+    )
+    total_eval_dur_ms: Optional[float] = (
+        round(sum(eval_dur_ns_list) / 1_000_000.0, 2) if eval_dur_ns_list else None
+    )
+
+    # Cache hit ratio
+    cache_hit_ratio: Optional[float] = None
+    if total_prompt_eval_count is not None and total_prompt_eval_count > 0 and total_prompt_eval_cached_count is not None:
+        cache_hit_ratio = round(total_prompt_eval_cached_count / float(total_prompt_eval_count), 4)
+    elif call_count == 1 and first_call.get("cache_hit_ratio") is not None:
+        cache_hit_ratio = float(first_call["cache_hit_ratio"])
+
+    # Overall generation speed (tokens / sec)
+    gen_tok_per_sec: Optional[float] = None
+    if total_eval_count is not None and eval_dur_ns_list and sum(eval_dur_ns_list) > 0:
+        total_eval_sec = sum(eval_dur_ns_list) / 1_000_000_000.0
+        gen_tok_per_sec = round(float(total_eval_count) / total_eval_sec, 2)
+    elif call_count == 1 and first_call.get("generation_tokens_per_second") is not None:
+        gen_tok_per_sec = float(first_call["generation_tokens_per_second"])
+
+    # Context window & done_reason
+    selected_num_ctx = valid_calls[-1].get("selected_num_ctx") or first_call.get("selected_num_ctx")
+    done_reason = valid_calls[-1].get("done_reason") or first_call.get("done_reason")
+
+    telemetry_source = (
+        "complete_all_calls"
+        if all_calls_have_tokens
+        else ("first_call_only" if first_call_prompt_eval_count is not None else "incomplete")
+    )
+
+    return {
+        "call_count": call_count,
+        "calls": valid_calls,
+        "has_complete_telemetry": all_calls_have_tokens,
+        "telemetry_source": telemetry_source,
+        "prompt_eval_count": total_prompt_eval_count,
+        "prompt_eval_cached_count": total_prompt_eval_cached_count,
+        "cache_hit_ratio": cache_hit_ratio,
+        "prompt_eval_duration_ms": total_prompt_eval_dur_ms,
+        "eval_count": total_eval_count,
+        "eval_duration_ms": total_eval_dur_ms,
+        "generation_tokens_per_second": gen_tok_per_sec,
+        "selected_num_ctx": selected_num_ctx,
+        "done_reason": done_reason,
+        "first_call_prompt_eval_count": first_call_prompt_eval_count,
+        "first_call_eval_count": first_call_eval_count,
+    }
+
+
 async def run_single_workload_run(
     workload: Dict[str, Any],
     enable_compression: bool,
@@ -831,34 +967,17 @@ async def run_single_workload_run(
     opt_resp = await ollama_service.optimize_prompt(req)
     total_opt_latency_ms = (time.perf_counter() - t0) * 1000.0
 
-    # Extract internal optimizer native Ollama telemetry
-    native_eval_count: Optional[int] = None
-    native_prompt_eval_count: Optional[int] = None
-    native_prompt_eval_cached_count: Optional[int] = None
-    native_cache_hit_ratio: Optional[float] = None
-    native_eval_duration_ms: Optional[float] = None
-    native_prompt_eval_duration_ms: Optional[float] = None
-    native_gen_tok_per_sec: Optional[float] = None
-    selected_num_ctx: Optional[int] = None
-    done_reason: Optional[str] = None
-
-    if opt_resp.inference_telemetry and isinstance(opt_resp.inference_telemetry, dict):
-        calls = opt_resp.inference_telemetry.get("calls", [])
-        if calls and isinstance(calls, list):
-            first_call: Dict[str, Any] = calls[0]
-            native_eval_count = first_call.get("eval_count")
-            native_prompt_eval_count = first_call.get("prompt_eval_count")
-            native_prompt_eval_cached_count = first_call.get("prompt_eval_cached_count")
-            native_cache_hit_ratio = first_call.get("cache_hit_ratio")
-            eval_dur_ns = first_call.get("eval_duration_ns")
-            if eval_dur_ns is not None:
-                native_eval_duration_ms = round(float(eval_dur_ns) / 1_000_000.0, 2)
-            prompt_dur_ns = first_call.get("prompt_eval_duration_ns")
-            if prompt_dur_ns is not None:
-                native_prompt_eval_duration_ms = round(float(prompt_dur_ns) / 1_000_000.0, 2)
-            native_gen_tok_per_sec = first_call.get("generation_tokens_per_second")
-            selected_num_ctx = first_call.get("selected_num_ctx")
-            done_reason = first_call.get("done_reason")
+    # Extract internal optimizer native Ollama telemetry across all calls
+    opt_telemetry = aggregate_optimizer_inference_telemetry(opt_resp.inference_telemetry)
+    native_eval_count = opt_telemetry["eval_count"]
+    native_prompt_eval_count = opt_telemetry["prompt_eval_count"]
+    native_prompt_eval_cached_count = opt_telemetry["prompt_eval_cached_count"]
+    native_cache_hit_ratio = opt_telemetry["cache_hit_ratio"]
+    native_eval_duration_ms = opt_telemetry["eval_duration_ms"]
+    native_prompt_eval_duration_ms = opt_telemetry["prompt_eval_duration_ms"]
+    native_gen_tok_per_sec = opt_telemetry["generation_tokens_per_second"]
+    selected_num_ctx = opt_telemetry["selected_num_ctx"]
+    done_reason = opt_telemetry["done_reason"]
 
     # Compression telemetry from response
     comp_applied = False
@@ -921,6 +1040,9 @@ async def run_single_workload_run(
         "optimizer_inference": {
             "total_latency_ms": round(total_opt_latency_ms, 2),
             "validation_status": opt_resp.validation_status,
+            "call_count": opt_telemetry["call_count"],
+            "telemetry_source": opt_telemetry["telemetry_source"],
+            "has_complete_telemetry": opt_telemetry["has_complete_telemetry"],
             "selected_num_ctx": selected_num_ctx,
             "prompt_eval_count": native_prompt_eval_count,
             "prompt_eval_cached_count": native_prompt_eval_cached_count,
@@ -930,6 +1052,9 @@ async def run_single_workload_run(
             "eval_duration_ms": native_eval_duration_ms,
             "generation_tokens_per_second": native_gen_tok_per_sec,
             "done_reason": done_reason,
+            "first_call_prompt_eval_count": opt_telemetry["first_call_prompt_eval_count"],
+            "first_call_eval_count": opt_telemetry["first_call_eval_count"],
+            "calls": opt_telemetry["calls"],
             "final_optimized_prompt_preview": opt_resp.optimized_prompt[:250] + ("..." if len(opt_resp.optimized_prompt) > 250 else ""),
             "prompt_preservation_evaluation": prompt_preservation,
         },
@@ -1159,6 +1284,13 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
                         "compressed_prompt_eval_count": comp_opt_prompt_tok,
                         "tokens_saved": optimizer_tokens_saved,
                         "reduction_percent": optimizer_tokens_saved_pct,
+                        "telemetry_source": (
+                            "complete_all_calls"
+                            if (base_run["optimizer_inference"].get("telemetry_source") == "complete_all_calls" and comp_run["optimizer_inference"].get("telemetry_source") == "complete_all_calls")
+                            else "first_call_only"
+                        ),
+                        "baseline_call_count": base_run["optimizer_inference"].get("call_count", 1),
+                        "compressed_call_count": comp_run["optimizer_inference"].get("call_count", 1),
                     },
                     "compression_overhead_ms": comp_run["compression_stage"]["processing_time_ms"],
                     "prompt_preservation_status": prompt_preservation_status,
