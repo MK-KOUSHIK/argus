@@ -84,45 +84,6 @@ class OutputBudgetTelemetry(BaseModel):
     )
 
 
-class CompressionTelemetry(BaseModel):
-    """Telemetry captured during independent content-aware input compression."""
-
-    enabled: bool = Field(description="Whether input compression was applied")
-    detected_content_type: str = Field(
-        description="Detected input content type (json, code, logs, text, mixed)"
-    )
-    confidence_score: float = Field(
-        description="Confidence score for content classification [0.0, 1.0]"
-    )
-    strategy_applied: str = Field(
-        description="Compression strategy applied (e.g., json_structural, code_ast, log_repeated, text_redundancy, mixed)"
-    )
-    original_tokens: int = Field(description="Token count of original input")
-    compressed_tokens: int = Field(description="Token count of compressed input")
-    tokens_reduced: int = Field(description="Tokens reduced by compression")
-    compression_ratio: float = Field(
-        description="Ratio of compressed tokens to original tokens (compressed / original)"
-    )
-    reduction_percent: float = Field(
-        description="Percentage token reduction (tokens_reduced / original_tokens * 100)"
-    )
-    token_measurement_method: str = Field(
-        description="Method used for token counting (estimated_heuristic, measured_ollama_native)"
-    )
-    validation_status: str = Field(
-        description="Information preservation validation status (passed, fallback)"
-    )
-    processing_time_ms: float = Field(description="Compression latency in milliseconds")
-    restoration_reference: Optional[str] = Field(
-        default=None,
-        description="Reference identifier to retrieve exact original content if stored in registry",
-    )
-    fallback_reason: Optional[str] = Field(
-        default=None,
-        description="Reason original content was preserved if compression or validation failed",
-    )
-
-
 class OptimizeRequest(BaseModel):
     """Incoming request to optimize a prompt."""
 
@@ -144,14 +105,6 @@ class OptimizeRequest(BaseModel):
         ge=1,
         le=8192,
         description="Optional explicit generation token limit override",
-    )
-    enable_compression: Optional[bool] = Field(
-        default=None,
-        description="Optional override to enable/disable content-aware input compression",
-    )
-    compression_reversible: Optional[bool] = Field(
-        default=None,
-        description="Optional override to enable/disable registry storage of omitted original content",
     )
 
     @field_validator("prompt")
@@ -249,10 +202,6 @@ class OptimizeResponse(BaseModel):
     output_budget: Optional[OutputBudgetTelemetry] = Field(
         default=None,
         description="Output budget allocation decision and execution telemetry",
-    )
-    compression: Optional[CompressionTelemetry] = Field(
-        default=None,
-        description="Content-aware compression telemetry and execution metadata",
     )
     kv_runtime_policy: Optional[Dict[str, Any]] = Field(
         default=None,

@@ -12,7 +12,6 @@ from .task_analyzer import TaskAnalyzer, TaskAnalysisResult
 from .strategy_selector import StrategySelector
 from .prompt_rewriter import PromptRewriter
 from .candidate_validator import CandidateValidator, ValidationResult
-from .compression import CompressionOrchestrator, CompressionRegistry
 
 __all__ = [
     "HealthService",
@@ -27,6 +26,4 @@ __all__ = [
     "PromptRewriter",
     "CandidateValidator",
     "ValidationResult",
-    "CompressionOrchestrator",
-    "CompressionRegistry",
 ]

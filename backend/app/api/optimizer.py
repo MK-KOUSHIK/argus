@@ -14,7 +14,6 @@ from app.services.ollama_service import (
     OllamaResponseError,
 )
 from app.services.adaptive_context_manager import ContextOverflowError
-from app.services.compression import CompressionRegistry
 
 router = APIRouter(tags=["Prompt Optimization"])
 
@@ -52,20 +51,3 @@ async def optimize_prompt(request: OptimizeRequest) -> OptimizeResponse:
 async def check_ollama_status() -> OllamaStatusResponse:
     """Verify local Ollama service health and model installation."""
     return await OllamaService.check_status()
-
-
-@router.get(
-    "/compression/registry/{ref_key}",
-    status_code=status.HTTP_200_OK,
-    summary="Retrieve Original Content",
-    description="Retrieves uncompressed original content from the registry using its unique reference key.",
-)
-async def get_registered_content(ref_key: str):
-    """Retrieve original content by reference key."""
-    content = CompressionRegistry.retrieve(ref_key)
-    if content is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Original content for reference '{ref_key}' not found or expired.",
-        )
-    return {"ref_key": ref_key, "content": content}
