@@ -1456,4 +1456,16 @@ def test_settings_cpu_allowance_validation():
     with pytest.raises(ValidationError):
         Settings(ROUTING_CPU_ALLOWANCE_DEFAULT_MB=-1)
 
+@pytest.mark.parametrize("boolean_value", [True, False])
+def test_settings_cpu_allowance_rejects_boolean_values(boolean_value):
+    """Booleans must not pass integer validation (bool subclasses int in Python)."""
+    from pydantic import ValidationError
 
+    with pytest.raises(ValidationError, match="must be an integer, not a boolean"):
+        Settings(ROUTING_CPU_ALLOWANCE_SMALL_MB=boolean_value)
+
+
+def test_settings_cpu_allowance_accepts_integer_string():
+    """Environment-style integer strings remain valid after strict boolean rejection."""
+    configured = Settings(ROUTING_CPU_ALLOWANCE_SMALL_MB="96")
+    assert configured.ROUTING_CPU_ALLOWANCE_SMALL_MB == 96
