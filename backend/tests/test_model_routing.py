@@ -1465,7 +1465,17 @@ def test_settings_cpu_allowance_rejects_boolean_values(boolean_value):
         Settings(ROUTING_CPU_ALLOWANCE_SMALL_MB=boolean_value)
 
 
-def test_settings_cpu_allowance_accepts_integer_string():
+def test_settings_cpu_allowance_accepts_integer_string(monkeypatch: pytest.MonkeyPatch):
     """Environment-style integer strings remain valid after strict boolean rejection."""
-    configured = Settings(ROUTING_CPU_ALLOWANCE_SMALL_MB="96")
+    monkeypatch.setenv("ROUTING_CPU_ALLOWANCE_SMALL_MB", "96")
+    configured = Settings()
     assert configured.ROUTING_CPU_ALLOWANCE_SMALL_MB == 96
+
+
+@pytest.mark.parametrize("float_value", [1.5, 0.5, -1.5, "1.5"])
+def test_settings_cpu_allowance_rejects_float_values(float_value):
+    """Floats must be rejected, not silently truncated."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="must be an integer"):
+        Settings(ROUTING_CPU_ALLOWANCE_SMALL_MB=float_value)

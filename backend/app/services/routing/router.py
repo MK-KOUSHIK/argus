@@ -188,12 +188,12 @@ class ModelRouter:
         tier_val = getattr(model.tier, "value", str(model.tier))
         tier_str = str(tier_val).lower()
         if tier_str == "small":
-            return getattr(settings, "ROUTING_CPU_ALLOWANCE_SMALL_MB", 64)
+            return getattr(settings, "ROUTING_CPU_ALLOWANCE_SMALL_MB")
         elif tier_str == "medium":
-            return getattr(settings, "ROUTING_CPU_ALLOWANCE_MEDIUM_MB", 128)
+            return getattr(settings, "ROUTING_CPU_ALLOWANCE_MEDIUM_MB")
         elif tier_str == "large":
-            return getattr(settings, "ROUTING_CPU_ALLOWANCE_LARGE_MB", 256)
-        return getattr(settings, "ROUTING_CPU_ALLOWANCE_DEFAULT_MB", 128)
+            return getattr(settings, "ROUTING_CPU_ALLOWANCE_LARGE_MB")
+        return getattr(settings, "ROUTING_CPU_ALLOWANCE_DEFAULT_MB")
 
     @classmethod
     def evaluate_resources(
