@@ -29,6 +29,25 @@ class LocalModelRegistry:
     _last_error: Optional[str] = None
     _lock = asyncio.Lock()
 
+    @staticmethod
+    def parse_parameter_billions(param_size_str: Optional[str], param_count: Optional[int]) -> Optional[float]:
+        """Parse parameter scale to billions (e.g. '1.5B' -> 1.5, 7600000000 -> 7.6)."""
+        if param_count is not None and param_count > 0:
+            return round(param_count / 1e9, 2)
+        if param_size_str:
+            clean = param_size_str.strip().upper()
+            if clean.endswith("B"):
+                try:
+                    return float(clean[:-1])
+                except ValueError:
+                    pass
+            elif clean.endswith("M"):
+                try:
+                    return round(float(clean[:-1]) / 1000.0, 3)
+                except ValueError:
+                    pass
+        return None
+
     @classmethod
     def _parse_tier(cls, param_size_str: Optional[str], param_count: Optional[int], name: str = "") -> ModelTier:
         """Derive model capacity tier from verified parameter metadata without guessing.
@@ -39,25 +58,13 @@ class LocalModelRegistry:
         - Never infers model capacity from a model-name substring when metadata is unavailable.
         - If metadata is absent or unparseable, returns ModelTier.UNKNOWN.
         """
-        if param_count is not None and param_count > 0:
-            if param_count <= 3_500_000_000:
+        val = cls.parse_parameter_billions(param_size_str, param_count)
+        if val is not None:
+            if val <= 3.5:
                 return ModelTier.SMALL
-            if param_count <= 14_500_000_000:
+            if val <= 14.5:
                 return ModelTier.MEDIUM
             return ModelTier.LARGE
-
-        if param_size_str:
-            clean = param_size_str.strip().upper()
-            if clean.endswith("B"):
-                try:
-                    val = float(clean[:-1])
-                    if val <= 3.5:
-                        return ModelTier.SMALL
-                    if val <= 14.5:
-                        return ModelTier.MEDIUM
-                    return ModelTier.LARGE
-                except ValueError:
-                    pass
 
         return ModelTier.UNKNOWN
 
@@ -288,6 +295,7 @@ class LocalModelRegistry:
                     tier=m.tier.value,
                     is_loaded=m.is_loaded,
                     size_vram_mb=vram_mb,
+                    estimated_runtime_vram_mb=float(m.estimate_runtime_vram_mb()),
                     modified_at=m.modified_at,
                 )
             )

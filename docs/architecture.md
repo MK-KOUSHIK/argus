@@ -181,33 +181,49 @@ The Phase 5 routing engine automatically selects the optimal local Ollama model 
 1. **Explainable Heuristic Complexity Assessment**:
    $$\text{Score} = w_{\text{category}} + \min(0.30, 0.075 \cdot N_{\text{constraints}}) + \min(0.25, 0.06 \cdot N_{\text{ops}}) + 0.10 \cdot \mathbf{1}_{\text{prohibitions}} + 0.10 \cdot \mathbf{1}_{\text{code/data}} + w_{\text{tokens}} + w_{\text{mode}}$$
    - Score is clamped to $[0.0, 1.0]$.
-   - Tasks with $\text{Score} \ge \text{threshold}$ (default `0.55`) target `ModelTier.MEDIUM` (`qwen2.5:7b` or discovered high-capacity candidate).
-   - Tasks with $\text{Score} < \text{threshold}$ target `ModelTier.SMALL` (`qwen2.5:1.5b` or discovered lightweight candidate).
+   - Tasks with $\text{Score} \ge \text{threshold}$ (default `0.55`) target `ModelTier.MEDIUM` (discovered high-capacity candidate).
+   - Tasks with $\text{Score} < \text{threshold}$ target `ModelTier.SMALL` (discovered lightweight candidate).
 
-2. **Heuristic Margin Terminology**:
+2. **Neutral Model Ranking Policy**:
+   Candidate selection within target tiers is strictly vendor-neutral and family-agnostic. All substring checks (such as `"qwen"`) are prohibited. Selection is determined deterministically using verified metadata:
+   - **Resident Model Priority**: Models already resident in GPU VRAM (`is_loaded=True`) are prioritized first to avoid loading latency, cold-start latency spikes, and transient VRAM churn.
+   - **Tier-Specific Parameter Optimization**:
+     - For `ModelTier.SMALL`: Models with lower verified parameter counts are sorted first to maximize throughput and minimize memory footprint.
+     - For `ModelTier.MEDIUM` & `ModelTier.LARGE`: Models with higher verified parameter counts are sorted first to maximize reasoning depth and instruction-following fidelity.
+   - **Quantization Precision Priority**: When parameter counts are equal, higher bit-depth quantizations (e.g., `Q8_0` > `Q4_K_M`) are prioritized for superior precision.
+   - **Deterministic Alphabetical Tie-Breaking**: Any ties are broken by case-insensitive lexicographical sorting of the model name (`model.name.lower()`), ensuring 100% reproducible decisions across runs.
+
+3. **Heuristic Margin Terminology**:
    - $\text{heuristic\_margin} = |\text{Score} - \text{threshold}|$.
    - **Important Terminology Standard**: Argus explicitly defines `heuristic_margin` as an *uncalibrated heuristic distance* between prompt complexity and the tier boundary. It is **not** a calibrated probability, bayesian confidence, or model certainty metric.
 
-3. **Hardware Feasibility Gate & Dynamic Headroom**:
+4. **Hardware Feasibility Gate & Memory Footprint Distinction**:
+   Argus maintains strict distinction between different memory metrics to prevent misleading telemetry:
+   - **Measured Resident VRAM (`measured_resident`)**: Extracted directly from Ollama `/api/ps` (`size_vram`). Only reported when the model is actively resident in GPU memory.
+   - **Disk Weight Footprint (`weight_footprint_mb`)**: Physical size of the model weights on disk (`size_bytes / (1024 * 1024)`). This is never reported as measured resident VRAM.
+   - **Estimated Runtime VRAM Proxy (`estimated_proxy`)**: For unloaded models, represents the estimated memory required to load and execute the model, computed as weight footprint plus context KV-cache buffer proxy scaled to the target context tier.
+   - **Conservative Admission (`unverified`)**: Models with missing, non-positive, or unverified size metadata are treated as unverified and rejected from admission to prevent OOM panics.
    - **Resident Headroom**: If candidate model is already resident in GPU VRAM, checks runtime headroom ($\text{VRAM}_{\text{free}} \ge \text{ROUTING\_LOADED\_HEADROOM\_MARGIN\_MB}$, default 250 MiB).
-   - **Load Headroom**: If candidate model is not currently resident, evaluates load headroom against physical weights footprint plus safety margin ($\text{VRAM}_{\text{available}} \ge \text{Model Size} + \text{ROUTING\_VRAM\_SAFETY\_MARGIN\_MB}$, default 512 MiB).
-   - **Host RAM Protection**: Requires $\text{RAM}_{\text{free}} \ge \text{ROUTING\_RAM\_SAFETY\_MARGIN\_MB}$ (default 1024 MiB).
+   - **Load Headroom**: If candidate model is not currently resident, evaluates load headroom against estimated runtime requirement plus safety margin ($\text{VRAM}_{\text{available}} \ge \text{Estimated Runtime VRAM} + \text{ROUTING\_VRAM\_SAFETY\_MARGIN\_MB}$, default 512 MiB; capped at 128 MiB for small-tier models).
+   - **Host RAM Protection**: Requires $\text{RAM}_{\text{free}} \ge \text{ROUTING\_RAM\_SAFETY\_MARGIN\_MB}$ (default 1024 MiB; 512 MiB for small-tier models).
 
-4. **Model Registry Classification & Zero-Guessing Policy**:
+5. **Model Registry Classification & Zero-Guessing Policy**:
    - `LocalModelRegistry` queries `/api/tags`, `/api/ps`, and deep `/api/show` metadata.
    - **Zero Name Guessing**: Substring matching on model names is forbidden. Tiers are assigned strictly from verified parameter metadata (`parameter_count` or `/api/show` `details.parameter_size`).
    - Models without verifiable parameter counts are classified as `ModelTier.UNKNOWN`.
    - Unknown-tier models are never assumed small or safe. Admission is strictly guarded by `ROUTING_ALLOW_UNKNOWN_TIER` (default: `False`).
 
-5. **Manual Override Safety & Rejection Standards**:
+6. **Manual Override Safety & Rejection Standards**:
    - Manual overrides never silently bypass memory or resource checks.
    - If a requested override model cannot fit safely in memory, Argus rejects the request with a structured `ModelResourceConstraintError` (HTTP 400).
    - Override fallback is only permitted if explicitly authorized by the caller via `allow_override_fallback=True` (or `ROUTING_ALLOW_OVERRIDE_FALLBACK=True`).
 
-6. **Verified Fallback Standards**:
+7. **Verified Fallback Standards**:
    - Fallback models must be verified as installed in the local Ollama catalog and verified to have sufficient memory.
+   - Fallback candidates are ranked using the same deterministic, neutral ranking policy.
    - Configured defaults are never assumed installed.
    - If no verified safe installed fallback exists, `NoSafeFallbackError` is raised with a clear error payload.
 
-7. **Validation & Benchmarking Protocol**:
-   - Live validation differentiates between **Policy Simulations** (artificially strict policy thresholds such as high safety margins) and **Natural Hardware Resource Observations** (accurate reporting of physical hardware state without artificial exhaustion or crash risks).
+8. **Validation & Benchmarking Protocol**:
+   - Live validation differentiates between **Scenario 3A: Policy Simulations** (artificially strict policy thresholds such as high safety margins to verify that fallback triggers when policies require it) and **Scenario 3B: Natural Hardware Resource Observations** (accurate reporting of physical hardware state without artificial exhaustion or crash risks).
+   - In Scenario 3B: If physical hardware has sufficient headroom, the benchmark accurately reports `natural_fallback_triggered: false` and status `VERIFIED (NATURAL_HEADROOM_SUFFICIENT_NO_FALLBACK)`. Argus never fabricates or claims natural fallback when `is_fallback=false`.

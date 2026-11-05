@@ -182,10 +182,15 @@ class ModelRouter:
         cls,
         candidate_model: Optional[DiscoveredModel],
         loaded_other_vram_mb: int = 0,
+        gpu_telemetry: Optional[dict] = None,
+        ram_telemetry: Optional[dict] = None,
+        context_tier: Optional[int] = None,
     ) -> ResourceAssessment:
         """Inspect live hardware state and assess safety for candidate model execution."""
-        gpu_telemetry = HardwareTelemetryProvider.get_gpu_memory(force_refresh=True)
-        ram_telemetry = HardwareTelemetryProvider.get_system_ram()
+        if gpu_telemetry is None:
+            gpu_telemetry = HardwareTelemetryProvider.get_gpu_memory(force_refresh=True)
+        if ram_telemetry is None:
+            ram_telemetry = HardwareTelemetryProvider.get_system_ram()
         concurrency_capacity, _, _, _ = concurrency_controller.get_admission_capacity()
         in_flight = concurrency_controller.in_flight
 
@@ -223,16 +228,55 @@ class ModelRouter:
                 is_currently_loaded=False,
                 concurrency_in_flight=in_flight,
                 concurrency_capacity=concurrency_capacity,
+                measured_vram_mb=None,
+                weight_footprint_mb=None,
+                estimated_runtime_vram_mb=None,
+                vram_measurement_type="none",
             )
 
-        estimated_vram = candidate_model.estimated_vram_mb
         is_loaded = candidate_model.is_loaded
+
+        # Handle missing resource metadata: conservative admission rejection
+        if not is_loaded and (not candidate_model.size_bytes or candidate_model.size_bytes <= 0):
+            return ResourceAssessment(
+                gpu_available=gpu_available,
+                vram_total_mb=vram_total,
+                vram_free_mb=vram_free,
+                vram_used_mb=vram_used,
+                ram_total_mb=ram_total,
+                ram_free_mb=ram_free,
+                ram_used_mb=ram_used,
+                estimated_model_vram_mb=0,
+                is_resource_sufficient=False,
+                resource_pressure_reason=(
+                    f"Candidate model '{candidate_model.name}' has unverified resource metadata (missing size); "
+                    "conservative admission rejected."
+                ),
+                is_currently_loaded=False,
+                concurrency_in_flight=in_flight,
+                concurrency_capacity=concurrency_capacity,
+                measured_vram_mb=None,
+                weight_footprint_mb=0,
+                estimated_runtime_vram_mb=0,
+                vram_measurement_type="unverified",
+            )
+
+        weight_mb = round(candidate_model.weight_size_mb)
+        if is_loaded:
+            measured_vram = candidate_model.measured_vram_mb
+            runtime_req = measured_vram if measured_vram is not None else int(candidate_model.estimate_runtime_vram_mb(context_tier=context_tier))
+            vram_measurement_type = "measured_resident" if measured_vram is not None else "estimated_proxy"
+        else:
+            measured_vram = None
+            runtime_req = candidate_model.estimate_runtime_vram_mb(context_tier=context_tier)
+            vram_measurement_type = "estimated_proxy"
+
         vram_margin = getattr(settings, "ROUTING_VRAM_SAFETY_MARGIN_MB", 512)
         ram_margin = getattr(settings, "ROUTING_RAM_SAFETY_MARGIN_MB", 1024)
 
-        # Baseline safety margins for small tier models (256 MB VRAM margin, 512 MB RAM margin)
+        # Baseline safety margins for small tier models (128 MB VRAM margin, 512 MB RAM margin)
         if candidate_model.tier == ModelTier.SMALL:
-            vram_margin = min(vram_margin, 256)
+            vram_margin = min(vram_margin, 128)
             ram_margin = min(ram_margin, 512)
 
         is_sufficient = True
@@ -258,7 +302,7 @@ class ModelRouter:
                 # If candidate is not resident, Ollama will evict idle models if no request is in-flight
                 evictable_vram = loaded_other_vram_mb if in_flight == 0 else 0
                 effective_available_vram = vram_free + evictable_vram
-                required_headroom = estimated_vram + vram_margin
+                required_headroom = runtime_req + vram_margin
 
                 if in_flight > 0 and vram_free < required_headroom:
                     is_sufficient = False
@@ -275,7 +319,8 @@ class ModelRouter:
                     )
                     pressure_reason = (
                         f"Insufficient available VRAM ({effective_available_vram} MiB available {detail} < "
-                        f"{required_headroom} MiB required for {candidate_model.name} [{estimated_vram}MB + {vram_margin}MB margin])"
+                        f"{required_headroom} MiB required for {candidate_model.name} "
+                        f"[estimated runtime proxy: {runtime_req}MB (weights: {weight_mb}MB) + {vram_margin}MB margin])"
                     )
 
         # Check unknown capacity tier constraints
@@ -296,13 +341,69 @@ class ModelRouter:
             ram_total_mb=ram_total,
             ram_free_mb=ram_free,
             ram_used_mb=ram_used,
-            estimated_model_vram_mb=estimated_vram,
+            estimated_model_vram_mb=runtime_req,
             is_resource_sufficient=is_sufficient,
             resource_pressure_reason=pressure_reason,
             is_currently_loaded=is_loaded,
             concurrency_in_flight=in_flight,
             concurrency_capacity=concurrency_capacity,
+            measured_vram_mb=measured_vram,
+            weight_footprint_mb=weight_mb,
+            estimated_runtime_vram_mb=runtime_req,
+            vram_measurement_type=vram_measurement_type,
         )
+
+    @classmethod
+    def rank_candidates(
+        cls,
+        candidates: List[DiscoveredModel],
+        target_tier: ModelTier,
+    ) -> List[DiscoveredModel]:
+        """Rank candidate models within a tier using neutral, verified metadata.
+
+        Vendor-independent ranking policy (no model-name substring heuristics):
+        1. Loaded/Resident state: Currently loaded models rank first to minimize
+           cold-start latency and avoid GPU context swapping.
+        2. Parameter completeness: Models with verified parameter counts/sizes rank ahead
+           of unverified models.
+        3. Tier-specific parameter optimization:
+           - For ModelTier.SMALL: favors lighter footprint / higher throughput (ascending parameter count).
+           - For ModelTier.MEDIUM / LARGE: favors higher capacity / reasoning fidelity (descending parameter count).
+        4. Quantization precision: When parameter counts match, higher precision quantization
+           ranks ahead of lower bit-depths.
+        5. Deterministic tie-breaker: Alphabetical order by lowercase model name.
+        """
+        def _quant_rank(q: Optional[str]) -> int:
+            if not q:
+                return 0
+            u = q.upper()
+            if "Q8" in u or "F16" in u:
+                return 8
+            if "Q6" in u:
+                return 6
+            if "Q5" in u:
+                return 5
+            if "Q4" in u:
+                return 4
+            if "Q3" in u:
+                return 3
+            if "Q2" in u:
+                return 2
+            return 1
+
+        def _param_val(m: DiscoveredModel) -> float:
+            return LocalModelRegistry.parse_parameter_billions(m.parameter_size, m.parameter_count) or 0.0
+
+        def _sort_key(m: DiscoveredModel):
+            loaded_priority = 1 if m.is_loaded else 0
+            has_param = 1 if (m.parameter_count or m.parameter_size) else 0
+            p = _param_val(m)
+            param_score = -p if target_tier == ModelTier.SMALL else p
+            q_score = _quant_rank(m.quantization_level)
+            name_tiebreaker = m.name.lower()
+            return (-loaded_priority, -has_param, -param_score, -q_score, name_tiebreaker)
+
+        return sorted(candidates, key=_sort_key)
 
     @classmethod
     def find_safe_fallback(
@@ -310,6 +411,7 @@ class ModelRouter:
         all_models: List[DiscoveredModel],
         configured_fallback_name: Optional[str] = None,
         exclude_names: Optional[List[str]] = None,
+        context_tier: Optional[int] = None,
     ) -> Optional[DiscoveredModel]:
         """Find a verified installed model that is safe and resource-sufficient for fallback.
 
@@ -323,24 +425,28 @@ class ModelRouter:
         if configured_fallback_name:
             target = next((m for m in candidates if m.name.lower() == configured_fallback_name.lower()), None)
             if target:
-                res = cls.evaluate_resources(target)
+                res = cls.evaluate_resources(target, context_tier=context_tier)
                 if res.is_resource_sufficient:
                     return target
 
-        # 2. Check installed small models (verified parameter tier)
+        # 2. Check installed small models (verified parameter tier) ranked deterministically
         small_models = [m for m in candidates if m.tier == ModelTier.SMALL]
-        for m in small_models:
-            res = cls.evaluate_resources(m)
+        ranked_small = cls.rank_candidates(small_models, ModelTier.SMALL)
+        for m in ranked_small:
+            res = cls.evaluate_resources(m, context_tier=context_tier)
             if res.is_resource_sufficient:
                 return m
 
         # 3. Check any other installed model whose resources are verified sufficient
         # (excluding unknown unless ROUTING_ALLOW_UNKNOWN_TIER is True)
         allow_unknown = getattr(settings, "ROUTING_ALLOW_UNKNOWN_TIER", False)
-        for m in candidates:
-            if m.tier == ModelTier.UNKNOWN and not allow_unknown:
-                continue
-            res = cls.evaluate_resources(m)
+        other_candidates = [
+            m for m in candidates
+            if m.tier != ModelTier.SMALL and (m.tier != ModelTier.UNKNOWN or allow_unknown)
+        ]
+        ranked_others = cls.rank_candidates(other_candidates, ModelTier.SMALL)
+        for m in ranked_others:
+            res = cls.evaluate_resources(m, context_tier=context_tier)
             if res.is_resource_sufficient:
                 return m
 
@@ -501,13 +607,13 @@ class ModelRouter:
         large_models = [m for m in all_models if m.tier == ModelTier.LARGE]
         unknown_models = [m for m in all_models if m.tier == ModelTier.UNKNOWN]
 
-        preferred_small = (
-            next((m for m in small_models if "qwen" in m.name.lower()), None)
-            or (small_models[0] if small_models else None)
-        )
+        ranked_small = cls.rank_candidates(small_models, ModelTier.SMALL)
+        ranked_medium = cls.rank_candidates(medium_models, ModelTier.MEDIUM)
+        ranked_large = cls.rank_candidates(large_models, ModelTier.LARGE)
+
+        preferred_small = ranked_small[0] if ranked_small else None
         preferred_medium = (
-            next((m for m in medium_models if "qwen" in m.name.lower()), None)
-            or (medium_models[0] if medium_models else None)
+            ranked_medium[0] if ranked_medium else (ranked_large[0] if ranked_large else None)
         )
 
         threshold = getattr(settings, "ROUTING_COMPLEXITY_THRESHOLD", 0.55)

@@ -55,18 +55,15 @@ async def run_live_validation():
     for m in all_models:
         print(f"  - {m.name} | Tier: {m.tier.value} | Params: {m.parameter_size or m.parameter_count or 'unknown'} | Size: {round(m.size_bytes / (1024*1024), 1)} MB | Resident: {m.is_loaded}")
 
-    # Identify small and higher-capacity candidate models dynamically
+    # Identify small and higher-capacity candidate models dynamically using neutral ranking
     small_models = [m for m in all_models if m.tier == ModelTier.SMALL]
     strong_models = [m for m in all_models if m.tier in (ModelTier.MEDIUM, ModelTier.LARGE)]
 
-    small_candidate = (
-        next((m for m in small_models if "qwen" in m.name.lower()), None)
-        or (small_models[0] if small_models else None)
-    )
-    strong_candidate = (
-        next((m for m in strong_models if "qwen" in m.name.lower()), None)
-        or (strong_models[0] if strong_models else None)
-    )
+    ranked_small = ModelRouter.rank_candidates(small_models, ModelTier.SMALL)
+    ranked_strong = ModelRouter.rank_candidates(strong_models, ModelTier.MEDIUM)
+
+    small_candidate = ranked_small[0] if ranked_small else None
+    strong_candidate = ranked_strong[0] if ranked_strong else None
 
     print(f"\nCandidate Selection (Model-Agnostic):")
     print(f"  Lightweight Candidate: {small_candidate.name if small_candidate else 'None installed'}")
@@ -98,7 +95,9 @@ async def run_live_validation():
                 "tier": m.tier.value,
                 "parameter_size": m.parameter_size,
                 "parameter_count": m.parameter_count,
-                "size_mb": round(m.size_bytes / (1024 * 1024), 1),
+                "weight_size_mb": m.weight_size_mb,
+                "measured_vram_mb": m.measured_vram_mb,
+                "estimated_runtime_vram_mb": m.estimate_runtime_vram_mb(),
                 "is_loaded": m.is_loaded,
             }
             for m in all_models
@@ -251,7 +250,7 @@ async def run_live_validation():
             "prompt_eval_count": prim3a.get("prompt_eval_count"),
             "eval_count": prim3a.get("eval_count"),
             "latency_ms": resp3a.execution_time_ms,
-            "status": "VERIFIED" if s3a_verified else "NOT VERIFIED",
+            "status": "VERIFIED (SIMULATED_POLICY_FALLBACK)" if s3a_verified else "NOT VERIFIED",
         })
     finally:
         settings.ROUTING_RAM_SAFETY_MARGIN_MB = orig_ram_margin
@@ -265,44 +264,42 @@ async def run_live_validation():
     cur_vram_free: int = int(live_gpu.get("free_mb") or 0) if live_gpu else 0
     cur_ram_free: float = float(live_ram.get("free_mb") or 0)
 
-    # Check whether natural resource constraints are currently present on this host
-    ram_constrained = cur_ram_free < settings.ROUTING_RAM_SAFETY_MARGIN_MB
-    vram_constrained = False
-    if strong_candidate:
-        req_headroom = strong_candidate.estimated_vram_mb + settings.ROUTING_VRAM_SAFETY_MARGIN_MB
-        vram_constrained = cur_vram_free < req_headroom
+    print(f"Live Hardware Snapshot -> Free VRAM: {cur_vram_free} MiB | Free Host RAM: {cur_ram_free:.1f} MiB")
 
-    natural_pressure_present = ram_constrained or vram_constrained
-    print(f"Live Observation -> Free VRAM: {cur_vram_free} MiB | Free RAM: {cur_ram_free} MiB")
-    print(f"Natural Constraints Present: {natural_pressure_present} (RAM constrained: {ram_constrained}, VRAM constrained: {vram_constrained})")
+    req3b = OptimizeRequest(prompt=s2_prompt, mode="structure")
+    resp3b: OptimizeResponse = await OllamaService.optimize_prompt(req3b)
+    assert resp3b.routing is not None
 
-    if natural_pressure_present:
-        req3b = OptimizeRequest(prompt=s2_prompt, mode="structure")
-        resp3b: OptimizeResponse = await OllamaService.optimize_prompt(req3b)
-        assert resp3b.routing is not None
-        print(f"Observed Natural Fallback -> Selected: {resp3b.routing.selected_model}, Status: {resp3b.routing.routing_status}")
-        report_metadata["scenarios"].append({
-            "scenario_id": "3b_natural_hardware_pressure_observation",
-            "type": "natural_resource_observation",
-            "natural_pressure_present": True,
-            "selected_model": resp3b.routing.selected_model,
-            "executed_model": resp3b.model,
-            "routing_status": resp3b.routing.routing_status,
-            "is_fallback": resp3b.routing.is_fallback,
-            "status": "VERIFIED",
-        })
+    natural_fallback = resp3b.routing.is_fallback
+    print(f"Selected Model: {resp3b.routing.selected_model}")
+    print(f"Actual Executed Model: {resp3b.model}")
+    print(f"Routing Status: {resp3b.routing.routing_status} (is_fallback: {natural_fallback})")
+    print(f"Routing Reason: {resp3b.routing.reason}")
+
+    if natural_fallback:
+        print("Finding: Natural hardware pressure triggered fallback.")
+        finding_text = f"Natural hardware constraints triggered fallback to '{resp3b.routing.selected_model}' ({resp3b.routing.reason})."
+        status_text = "VERIFIED (NATURAL_FALLBACK_TRIGGERED)"
     else:
-        print("Natural resource pressure is NOT present on this host (system has sufficient VRAM and RAM headroom).")
-        print("Reporting natural observation accurately without artificial memory exhaustion.")
-        report_metadata["scenarios"].append({
-            "scenario_id": "3b_natural_hardware_pressure_observation",
-            "type": "natural_resource_observation",
-            "natural_pressure_present": False,
-            "observed_vram_free_mb": cur_vram_free,
-            "observed_ram_free_mb": cur_ram_free,
-            "finding": "Host hardware has ample free memory; natural fallback did not trigger. Artificial exhaustion was not performed to prevent system instability.",
-            "status": "VERIFIED (NATURAL_PRESSURE_NOT_PRESENT)",
-        })
+        print("Finding: Host hardware has sufficient natural headroom; no fallback was triggered.")
+        finding_text = f"Host hardware has sufficient natural headroom ({cur_vram_free} MiB free VRAM, {cur_ram_free:.0f} MiB free RAM); normal routing to '{resp3b.routing.selected_model}' succeeded without fallback."
+        status_text = "VERIFIED (NATURAL_HEADROOM_SUFFICIENT_NO_FALLBACK)"
+
+    report_metadata["scenarios"].append({
+        "scenario_id": "3b_natural_hardware_pressure_observation",
+        "type": "natural_resource_observation",
+        "natural_fallback_triggered": natural_fallback,
+        "selected_model": resp3b.routing.selected_model,
+        "executed_model": resp3b.model,
+        "target_tier": resp3b.routing.target_model_tier,
+        "routing_status": resp3b.routing.routing_status,
+        "is_fallback": natural_fallback,
+        "measured_vram_free_mb": cur_vram_free,
+        "measured_ram_free_mb": cur_ram_free,
+        "vram_measurement_type": resp3b.routing.resources.vram_measurement_type,
+        "finding": finding_text,
+        "status": status_text,
+    })
 
     # --------------------------------------------------------------------------
     # Scenario 4: Manual Model Override with Resource Verification

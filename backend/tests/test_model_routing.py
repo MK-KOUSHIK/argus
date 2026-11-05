@@ -802,3 +802,230 @@ def test_api_post_route_override_fallback_permitted(client, mock_two_models):
         assert data["routing_status"] == "fallback"
         assert data["selected_model"] == "qwen2.5:1.5b"
         assert data["is_fallback"] is True
+
+
+# ==============================================================================
+# Phase 5 Corrections: Neutral Ranking, VRAM Estimation & Fallback Tests
+# ==============================================================================
+
+
+def test_neutral_ranking_vendor_independent_non_qwen():
+    """Verify that routing decisions are strictly vendor-independent and treat non-Qwen models neutrally."""
+    m_llama = DiscoveredModel(
+        name="llama3.2:1b", model="llama3.2:1b", digest="d1", size_bytes=1_200_000_000,
+        modified_at="2026-10-01", parameter_size="1.2B", quantization_level="Q4_K_M",
+        tier=ModelTier.SMALL, is_loaded=False,
+    )
+    m_phi = DiscoveredModel(
+        name="phi3:mini", model="phi3:mini", digest="d2", size_bytes=2_400_000_000,
+        modified_at="2026-10-01", parameter_size="3.8B", quantization_level="Q4_K_M",
+        tier=ModelTier.MEDIUM, is_loaded=False,
+    )
+    m_mistral = DiscoveredModel(
+        name="mistral:7b", model="mistral:7b", digest="d3", size_bytes=4_500_000_000,
+        modified_at="2026-10-01", parameter_size="7.2B", quantization_level="Q4_K_M",
+        tier=ModelTier.MEDIUM, is_loaded=False,
+    )
+
+    # In medium tier, higher parameter count (mistral 7.2B > phi 3.8B) is ranked first
+    ranked_medium = ModelRouter.rank_candidates([m_phi, m_mistral], ModelTier.MEDIUM)
+    assert ranked_medium[0].name == "mistral:7b"
+    assert ranked_medium[1].name == "phi3:mini"
+
+    # In small tier, llama3.2:1b is cleanly ranked
+    ranked_small = ModelRouter.rank_candidates([m_llama], ModelTier.SMALL)
+    assert ranked_small[0].name == "llama3.2:1b"
+
+
+def test_ranking_ties_deterministic_alphabetical():
+    """Verify that when parameters and quantization are identical, tie-breaking is deterministically alphabetical."""
+    m_alpha = DiscoveredModel(
+        name="alpha-llm:7b", model="alpha-llm:7b", digest="da", size_bytes=4_000_000_000,
+        modified_at="2026-10-01", parameter_size="7B", quantization_level="Q4_K_M",
+        tier=ModelTier.MEDIUM, is_loaded=False,
+    )
+    m_beta = DiscoveredModel(
+        name="beta-llm:7b", model="beta-llm:7b", digest="db", size_bytes=4_000_000_000,
+        modified_at="2026-10-01", parameter_size="7B", quantization_level="Q4_K_M",
+        tier=ModelTier.MEDIUM, is_loaded=False,
+    )
+    m_gamma = DiscoveredModel(
+        name="gamma-llm:7b", model="gamma-llm:7b", digest="dg", size_bytes=4_000_000_000,
+        modified_at="2026-10-01", parameter_size="7B", quantization_level="Q4_K_M",
+        tier=ModelTier.MEDIUM, is_loaded=False,
+    )
+
+    ranked_1 = ModelRouter.rank_candidates([m_gamma, m_alpha, m_beta], ModelTier.MEDIUM)
+    ranked_2 = ModelRouter.rank_candidates([m_beta, m_gamma, m_alpha], ModelTier.MEDIUM)
+
+    expected = ["alpha-llm:7b", "beta-llm:7b", "gamma-llm:7b"]
+    assert [m.name for m in ranked_1] == expected
+    assert [m.name for m in ranked_2] == expected
+
+
+def test_ranking_resident_priority_over_unloaded():
+    """Verify currently loaded/resident model is prioritized over unloaded candidate in same tier."""
+    m_unloaded = DiscoveredModel(
+        name="unloaded-model:7b", model="unloaded-model:7b", digest="d1", size_bytes=4_500_000_000,
+        modified_at="2026-10-01", parameter_size="7.5B", quantization_level="Q4_K_M",
+        tier=ModelTier.MEDIUM, is_loaded=False,
+    )
+    m_loaded = DiscoveredModel(
+        name="resident-model:7b", model="resident-model:7b", digest="d2", size_bytes=4_200_000_000,
+        modified_at="2026-10-01", parameter_size="7.0B", quantization_level="Q4_K_M",
+        tier=ModelTier.MEDIUM, is_loaded=True, size_vram=4_300_000_000,
+    )
+
+    ranked = ModelRouter.rank_candidates([m_unloaded, m_loaded], ModelTier.MEDIUM)
+    assert ranked[0].name == "resident-model:7b"
+    assert ranked[0].is_loaded is True
+
+
+def test_ranking_quantization_precision_priority():
+    """Verify higher precision quantization is prioritized when parameter counts match."""
+    m_q4 = DiscoveredModel(
+        name="model:7b-q4", model="model:7b-q4", digest="d1", size_bytes=4_000_000_000,
+        modified_at="2026-10-01", parameter_size="7B", quantization_level="Q4_K_M",
+        tier=ModelTier.MEDIUM, is_loaded=False,
+    )
+    m_q8 = DiscoveredModel(
+        name="model:7b-q8", model="model:7b-q8", digest="d2", size_bytes=7_500_000_000,
+        modified_at="2026-10-01", parameter_size="7B", quantization_level="Q8_0",
+        tier=ModelTier.MEDIUM, is_loaded=False,
+    )
+
+    ranked = ModelRouter.rank_candidates([m_q4, m_q8], ModelTier.MEDIUM)
+    assert ranked[0].name == "model:7b-q8"
+
+
+def test_ranking_missing_metadata_handled_gracefully():
+    """Verify models with verified metadata rank ahead of models with missing parameter information."""
+    m_verified = DiscoveredModel(
+        name="verified:1b", model="verified:1b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1B", quantization_level="Q4_0",
+        tier=ModelTier.SMALL, is_loaded=False,
+    )
+    m_unverified = DiscoveredModel(
+        name="unverified:1b", model="unverified:1b", digest="d2", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size=None, quantization_level=None,
+        tier=ModelTier.SMALL, is_loaded=False,
+    )
+
+    ranked = ModelRouter.rank_candidates([m_unverified, m_verified], ModelTier.SMALL)
+    assert ranked[0].name == "verified:1b"
+    assert ranked[1].name == "unverified:1b"
+
+
+def test_evaluate_resources_measured_resident_vram():
+    """Verify loaded model uses exact size_vram from /api/ps and identifies as 'measured_resident'."""
+    m_loaded = DiscoveredModel(
+        name="resident:7b", model="resident:7b", digest="d1", size_bytes=4_500_000_000,
+        modified_at="2026-10-01", parameter_size="7B", tier=ModelTier.MEDIUM,
+        is_loaded=True, size_vram=4_199_263_764,  # ~4005 MiB
+    )
+    gpu = {"total_mb": 6141, "free_mb": 4000, "used_mb": 2141, "source": "nvidia_smi"}
+    ram = {"total_mb": 16000, "free_mb": 8000, "used_mb": 8000, "source": "win32"}
+
+    res = ModelRouter.evaluate_resources(m_loaded, gpu_telemetry=gpu, ram_telemetry=ram)
+    assert res.vram_measurement_type == "measured_resident"
+    assert res.measured_vram_mb == round(4_199_263_764 / (1024 * 1024))
+    assert res.weight_footprint_mb == round(4_500_000_000 / (1024 * 1024))
+    assert res.is_resource_sufficient is True  # 4000 MiB free > 250 MiB headroom required for loaded
+
+
+def test_evaluate_resources_unloaded_model_proxy_distinction():
+    """Verify unloaded model reports 'estimated_proxy', separates weight size from runtime proxy."""
+    m_unloaded = DiscoveredModel(
+        name="unloaded:7b", model="unloaded:7b", digest="d1", size_bytes=4_683_087_332,  # ~4466 MiB
+        modified_at="2026-10-01", parameter_size="7.6B", tier=ModelTier.MEDIUM,
+        is_loaded=False, size_vram=None,
+    )
+    gpu = {"total_mb": 6141, "free_mb": 5500, "used_mb": 641, "source": "nvidia_smi"}
+    ram = {"total_mb": 16000, "free_mb": 8000, "used_mb": 8000, "source": "win32"}
+
+    res = ModelRouter.evaluate_resources(m_unloaded, gpu_telemetry=gpu, ram_telemetry=ram, context_tier=4096)
+    assert res.vram_measurement_type == "estimated_proxy"
+    assert res.measured_vram_mb is None
+    assert res.weight_footprint_mb == 4466
+    # Runtime proxy includes weight (4466) + KV cache buffer (350) = 4816 MiB
+    assert res.estimated_runtime_vram_mb == 4816
+    # Headroom check: 5500 MiB free >= 4816 + 512 margin (5328) -> True
+    assert res.is_resource_sufficient is True
+
+
+def test_evaluate_resources_missing_metadata_conservative_rejection():
+    """Verify unloaded model with 0 or missing size_bytes triggers conservative admission rejection."""
+    m_bad = DiscoveredModel(
+        name="bad:model", model="bad:model", digest="d1", size_bytes=0,
+        modified_at="2026-10-01", parameter_size="1B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+    gpu = {"total_mb": 6141, "free_mb": 5500, "used_mb": 641, "source": "nvidia_smi"}
+    ram = {"total_mb": 16000, "free_mb": 8000, "used_mb": 8000, "source": "win32"}
+
+    res = ModelRouter.evaluate_resources(m_bad, gpu_telemetry=gpu, ram_telemetry=ram)
+    assert res.is_resource_sufficient is False
+    assert res.vram_measurement_type == "unverified"
+    assert "unverified resource metadata" in str(res.resource_pressure_reason).lower()
+
+
+def test_evaluate_resources_vram_headroom_limits():
+    """Verify resource evaluation rejects models when available VRAM is insufficient for runtime requirements."""
+    m_7b = DiscoveredModel(
+        name="heavy:7b", model="heavy:7b", digest="d1", size_bytes=4_683_087_332,  # 4466 MiB
+        modified_at="2026-10-01", parameter_size="7.6B", tier=ModelTier.MEDIUM,
+        is_loaded=False,
+    )
+    # Only 3000 MiB VRAM free -> cannot fit 4950 MiB runtime requirement + 512 MiB margin
+    gpu = {"total_mb": 6141, "free_mb": 3000, "used_mb": 3141, "source": "nvidia_smi"}
+    ram = {"total_mb": 16000, "free_mb": 8000, "used_mb": 8000, "source": "win32"}
+
+    res = ModelRouter.evaluate_resources(m_7b, gpu_telemetry=gpu, ram_telemetry=ram)
+    assert res.is_resource_sufficient is False
+    assert "insufficient available vram" in str(res.resource_pressure_reason).lower()
+
+
+def test_evaluate_resources_ram_headroom_limits():
+    """Verify resource evaluation rejects model when host RAM free is below safety margin."""
+    m_1b = DiscoveredModel(
+        name="light:1b", model="light:1b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+    gpu = {"total_mb": 6141, "free_mb": 5000, "used_mb": 1141, "source": "nvidia_smi"}
+    # Only 200 MiB free host RAM (< 512 MiB small-tier RAM margin)
+    ram = {"total_mb": 16000, "free_mb": 200, "used_mb": 15800, "source": "win32"}
+
+    res = ModelRouter.evaluate_resources(m_1b, gpu_telemetry=gpu, ram_telemetry=ram)
+    assert res.is_resource_sufficient is False
+    assert "host ram is constrained" in str(res.resource_pressure_reason).lower()
+
+
+def test_find_safe_fallback_selects_best_safe_installed_model():
+    """Verify find_safe_fallback uses neutral ranking to select the best verified safe candidate."""
+    m_heavy = DiscoveredModel(
+        name="heavy:7b", model="heavy:7b", digest="d1", size_bytes=5_000_000_000,
+        modified_at="2026-10-01", parameter_size="7B", tier=ModelTier.MEDIUM,
+        is_loaded=False,
+    )
+    m_small_1 = DiscoveredModel(
+        name="model-b:1.5b", model="model-b:1.5b", digest="d2", size_bytes=1_200_000_000,
+        modified_at="2026-10-01", parameter_size="1.5B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+    m_small_2 = DiscoveredModel(
+        name="model-a:1.0b", model="model-a:1.0b", digest="d3", size_bytes=900_000_000,
+        modified_at="2026-10-01", parameter_size="1.0B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+
+    gpu = {"total_mb": 6141, "free_mb": 2000, "used_mb": 4141, "source": "nvidia_smi"}
+    ram = {"total_mb": 16000, "free_mb": 4000, "used_mb": 12000, "source": "win32"}
+
+    with patch("app.services.hardware_telemetry.HardwareTelemetryProvider.get_gpu_memory", return_value=gpu), \
+         patch("app.services.hardware_telemetry.HardwareTelemetryProvider.get_system_ram", return_value=ram):
+        # In small tier, model-a (1.0B) is ranked ahead of model-b (1.5B) for throughput
+        fallback = ModelRouter.find_safe_fallback([m_heavy, m_small_1, m_small_2])
+        assert fallback is not None
+        assert fallback.name == "model-a:1.0b"
+

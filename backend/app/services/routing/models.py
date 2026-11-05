@@ -44,15 +44,51 @@ class DiscoveredModel:
     tier: ModelTier = ModelTier.UNKNOWN
 
     @property
-    def estimated_vram_mb(self) -> int:
-        """Estimate base VRAM required in MiB based on weight size or reported resident VRAM.
+    def weight_size_mb(self) -> float:
+        """Exact model weight file size on disk in MiB."""
+        return round(self.size_bytes / (1024 * 1024), 1) if self.size_bytes else 0.0
 
-        If model is loaded and reports size_vram from /api/ps, use that exact resident value.
-        Otherwise, base on disk weight footprint (in Q4_K_M).
-        """
+    @property
+    def measured_vram_mb(self) -> Optional[int]:
+        """Exact resident VRAM footprint in MiB reported by Ollama /api/ps (when loaded)."""
         if self.is_loaded and self.size_vram and self.size_vram > 0:
             return round(self.size_vram / (1024 * 1024))
-        return round(self.size_bytes / (1024 * 1024))
+        return None
+
+    def estimate_runtime_vram_mb(self, context_tier: Optional[int] = None) -> int:
+        """Estimate total runtime VRAM requirements (weights + KV cache + working buffers).
+
+        If model is resident, returns measured resident VRAM from /api/ps.
+        If unloaded, computes a conservative runtime requirement proxy:
+        - Base weight footprint from disk size
+        - KV cache buffer proxy based on snapped context tier (default 4096)
+        - Compute/scratch buffer headroom proxy (~100 MiB)
+
+        NOTE: This is an estimated runtime requirement proxy, not an exact measurement.
+        """
+        if self.is_loaded and self.measured_vram_mb is not None:
+            return self.measured_vram_mb
+
+        if not self.size_bytes or self.size_bytes <= 0:
+            return 0
+
+        weight_mb = round(self.size_bytes / (1024 * 1024))
+        ctx = context_tier if (context_tier and context_tier > 0) else 4096
+
+        # KV cache buffer proxy scaling with snapped context tier
+        if self.tier == ModelTier.SMALL:
+            kv_buffer = max(64, round((ctx / 4096) * 100))
+        elif self.tier == ModelTier.MEDIUM:
+            kv_buffer = max(256, round((ctx / 4096) * 350))
+        else:
+            kv_buffer = max(512, round((ctx / 4096) * 700))
+
+        return weight_mb + kv_buffer
+
+    @property
+    def estimated_vram_mb(self) -> int:
+        """Backwards-compatible alias for estimated total runtime VRAM proxy."""
+        return self.estimate_runtime_vram_mb()
 
 
 @dataclass
@@ -94,6 +130,10 @@ class ResourceAssessment:
     is_currently_loaded: bool = False
     concurrency_in_flight: int = 0
     concurrency_capacity: int = 1
+    measured_vram_mb: Optional[int] = None
+    weight_footprint_mb: Optional[int] = None
+    estimated_runtime_vram_mb: Optional[int] = None
+    vram_measurement_type: str = "none"
 
 
 @dataclass

@@ -37,6 +37,7 @@ class ModelCatalogItem(BaseModel):
     tier: str = Field(description="Assigned routing tier (small, medium, large, unknown)")
     is_loaded: bool = Field(description="Whether the model is currently resident in memory")
     size_vram_mb: Optional[float] = Field(default=None, description="Active VRAM usage in MiB if loaded")
+    estimated_runtime_vram_mb: Optional[float] = Field(default=None, description="Estimated runtime VRAM requirement proxy in MiB")
     modified_at: str = Field(description="Last modified timestamp")
 
 
@@ -99,6 +100,18 @@ class ResourceTelemetry(BaseModel):
     ram_used_mb: Optional[float] = Field(default=None, description="Used system RAM in MiB")
     estimated_model_vram_mb: Optional[int] = Field(
         default=None, description="Estimated VRAM required by candidate model"
+    )
+    measured_vram_mb: Optional[int] = Field(
+        default=None, description="Exact resident VRAM measured from Ollama /api/ps when loaded"
+    )
+    weight_footprint_mb: Optional[int] = Field(
+        default=None, description="Model weight file size on disk in MiB (proxy baseline)"
+    )
+    estimated_runtime_vram_mb: Optional[int] = Field(
+        default=None, description="Estimated total runtime VRAM proxy (weights + KV cache buffer) when unloaded"
+    )
+    vram_measurement_type: str = Field(
+        default="none", description="Source of VRAM figure: 'measured_resident', 'estimated_proxy', or 'unverified'"
     )
     is_resource_sufficient: bool = Field(description="Whether available resources satisfy candidate requirements")
     resource_pressure_reason: Optional[str] = Field(

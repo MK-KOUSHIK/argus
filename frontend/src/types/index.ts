@@ -132,6 +132,7 @@ export interface ModelCatalogItem {
   tier: ModelTier;
   is_loaded: boolean;
   size_vram_mb?: number | null;
+  estimated_runtime_vram_mb?: number | null;
   modified_at: string;
 }
 
@@ -168,6 +169,10 @@ export interface ResourceTelemetry {
   ram_free_mb?: number | null;
   ram_used_mb?: number | null;
   estimated_model_vram_mb?: number | null;
+  measured_vram_mb?: number | null;
+  weight_footprint_mb?: number | null;
+  estimated_runtime_vram_mb?: number | null;
+  vram_measurement_type?: string | null;
   is_resource_sufficient: boolean;
   resource_pressure_reason?: string | null;
   is_currently_loaded: boolean;

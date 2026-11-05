@@ -365,14 +365,16 @@ Argus includes a production-grade KV-cache runtime optimization and telemetry en
 
 7. **Local-First Model Routing Engine (Phase 5)**:
    - **Dynamic Discovery & Inspection**: Introspects local Ollama instance (`/api/tags`, `/api/ps`, `/api/show`) with TTL caching to catalogue installed models, parameter scales, quantization formats, and active resident memory footprints.
-   - **Zero-Guessing Classification**: Model tiers are determined strictly from verified parameter metadata (`parameter_count` or `/api/show` `details.parameter_size`). Models without verified counts are classified as `ModelTier.UNKNOWN` and excluded unless `ROUTING_ALLOW_UNKNOWN_TIER=True`.
+   - **Zero-Guessing Classification & Neutral Ranking**: Model tiers are determined strictly from verified parameter metadata (`parameter_count` or `/api/show` `details.parameter_size`). Candidate selection within tiers uses an objective, multi-criteria ranking policy (resident models prioritized, tier-specific parameter sorting, quantization bit-depth, deterministic alphabetical tie-breaking) with zero vendor or family substring preferences.
    - **Explainable Heuristic Complexity Scoring**: Multi-signal scoring $\in [0.0, 1.0]$ based on domain category weights, explicit constraints, required functional operations, negative prohibitions, code/data syntax, and token footprint.
    - **Uncalibrated Decision Margin**: Reports `heuristic_margin = |score - threshold|`, explicitly documented as an uncalibrated heuristic distance rather than a statistical confidence score.
+   - **Precise Memory Footprint Telemetry**: Distinguishes between measured resident VRAM (`measured_resident` via Ollama `/api/ps`), disk weight footprint (`weight_footprint_mb`), and estimated runtime proxy (`estimated_proxy` = weights + context buffer proxy). Models with missing size metadata are rejected conservatively (`unverified`).
    - **Resource-Aware Feasibility Gate**: Inspects live NVIDIA GPU VRAM (`nvidia-smi`), accounts for resident runtime headroom (`ROUTING_LOADED_HEADROOM_MARGIN_MB`), host RAM margins, and triggers verified fallback under memory pressure.
    - **Manual Override Memory Safety**: Manual model overrides enforce strict resource checks. Overrides exceeding available resources are rejected with a structured `ModelResourceConstraintError` (HTTP 400) unless `allow_override_fallback=True` is provided.
    - **Verified Safe Fallbacks**: Fallbacks must be installed and verified safe; configured defaults are never assumed installed (`NoSafeFallbackError` raised if no safe model exists).
-   - **Optimizer Model Routing**: Selects lightweight models (`qwen2.5:1.5b`) for simple tasks and larger models (`qwen2.5:7b`) for complex tasks, with manual override support in the React workspace.
+   - **Optimizer Model Routing**: Selects lightweight models for simple tasks and larger models for complex tasks, with manual override support in the React workspace.
    - **Downstream Execution Routing**: Explicitly deferred to future phases to keep prompt optimization decoupled from downstream execution.
+   - **Empirical Validation Standards**: Benchmark suite separates simulated policy margins (Scenario 3A) from natural hardware observations (Scenario 3B), accurately reporting physical headroom without fabricating fallback events.
 
 See the [Compression Validation Report](docs/reports/compression-validation-report.md), [Output Budget Validation Report](docs/reports/output-budget-validation-report.md), and [KV Cache Optimization Audit](docs/kv-cache-optimization-audit.md) for complete empirical data.
 

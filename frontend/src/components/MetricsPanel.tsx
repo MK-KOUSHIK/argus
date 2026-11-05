@@ -640,7 +640,9 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ result }) => {
                   : 'N/A'}
               </div>
               <div className="text-[10px] text-slate-500">
-                {routing.resources.is_resource_sufficient ? 'Resources verified safe' : 'Resource constrained'}
+                {routing.resources.vram_measurement_type === 'measured_resident'
+                  ? `Resident: ${routing.resources.measured_vram_mb ?? routing.resources.estimated_model_vram_mb} MiB`
+                  : `Proxy: ${routing.resources.estimated_runtime_vram_mb ?? routing.resources.estimated_model_vram_mb ?? 'n/a'} MiB`}
               </div>
             </div>
           </div>
@@ -661,9 +663,19 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ result }) => {
             </div>
           )}
 
-          <div className="border-t border-white/5 pt-2 text-[11px] text-slate-400 font-mono">
-            <span className="text-slate-500">Routing Rationale: </span>
-            {routing.reason}
+          <div className="border-t border-white/5 pt-2 text-[11px] text-slate-400 font-mono space-y-1">
+            <div>
+              <span className="text-slate-500">Routing Rationale: </span>
+              {routing.reason}
+            </div>
+            {routing.resources.vram_measurement_type && routing.resources.vram_measurement_type !== 'none' && (
+              <div className="text-[10px] text-slate-500">
+                Memory Telemetry:{' '}
+                {routing.resources.vram_measurement_type === 'measured_resident'
+                  ? `Measured resident VRAM: ${routing.resources.measured_vram_mb} MiB (active in GPU)`
+                  : `Estimated runtime proxy: ${routing.resources.estimated_runtime_vram_mb} MiB (weights: ${routing.resources.weight_footprint_mb} MiB + context/KV buffer)`}
+              </div>
+            )}
           </div>
         </div>
       )}
