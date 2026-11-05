@@ -1121,7 +1121,7 @@ async def test_route_manual_override_unavailable_telemetry(mock_two_models):
             allow_override_fallback=False,
             ram_telemetry=None,
         )
-    assert "ram telemetry is unavailable" in str(exc_info.value).lower()
+    assert "both gpu and host ram telemetry are missing" in str(exc_info.value).lower()
 
     # When override fallback is allowed, but telemetry is unavailable for all models, raises NoSafeFallbackError
     with pytest.raises(NoSafeFallbackError) as exc_info:
