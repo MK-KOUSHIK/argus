@@ -84,7 +84,7 @@ class RuntimeAwareConcurrencyController:
             and gpu_telemetry.get("source") not in (None, "unavailable")
             and gpu_telemetry.get("total_mb", 0) > 0
         )
-        if gpu_valid:
+        if gpu_valid and gpu_telemetry is not None:
             free_vram = gpu_telemetry.get("free_mb", 0)
             # Critical VRAM exhaustion (<150 MiB)
             if free_vram < 150:

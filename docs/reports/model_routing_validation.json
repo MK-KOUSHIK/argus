@@ -1,0 +1,110 @@
+{
+  "timestamp": "2026-11-05T18:39:19Z",
+  "ollama_base_url": "http://127.0.0.1:11434",
+  "hardware": {
+    "gpu_available": true,
+    "vram_total_mb": 6141,
+    "vram_free_mb": 5920,
+    "ram_total_mb": 15556.5,
+    "ram_free_mb": 3923.9
+  },
+  "discovered_models": [
+    {
+      "name": "qwen2.5:1.5b",
+      "tier": "small",
+      "parameter_size": "1.5B",
+      "parameter_count": 1543714304,
+      "weight_size_mb": 940.4,
+      "measured_vram_mb": null,
+      "estimated_runtime_vram_mb": 1000,
+      "is_loaded": false
+    },
+    {
+      "name": "qwen2.5:7b",
+      "tier": "medium",
+      "parameter_size": "7.6B",
+      "parameter_count": 7615616512,
+      "weight_size_mb": 4466.1,
+      "measured_vram_mb": null,
+      "estimated_runtime_vram_mb": 4585,
+      "is_loaded": false
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "1_simple_task_lightweight_model",
+      "type": "live_inference",
+      "prompt": "Summarize the key differences between synchronous and asynchronous I/O in three brief sentences.",
+      "selected_model": "qwen2.5:1.5b",
+      "executed_model": "qwen2.5:1.5b",
+      "target_tier": "small",
+      "complexity_score": 0.225,
+      "heuristic_margin": 0.325,
+      "routing_status": "routed",
+      "prompt_eval_count": 535,
+      "eval_count": 18,
+      "latency_ms": 4634,
+      "done_reason": "stop",
+      "status": "VERIFIED"
+    },
+    {
+      "scenario_id": "2_complex_task_high_capacity_model",
+      "type": "live_inference",
+      "prompt": "Write an asynchronous Python data ingestion service using httpx and asyncio. Do not use requests or aiohttp. Parse incoming JSON, extract entities matching keys ['user_id', 'transaction_value', 'timestamp'], validate non-negative values, handle transient network retries with exponential backoff, and save aggregated dictionary to metrics.json.",
+      "selected_model": "qwen2.5:7b",
+      "executed_model": "qwen2.5:7b",
+      "target_tier": "medium",
+      "complexity_score": 1.0,
+      "heuristic_margin": 0.45,
+      "routing_status": "routed",
+      "prompt_eval_count": 637,
+      "eval_count": 63,
+      "latency_ms": 18881,
+      "done_reason": "stop",
+      "status": "VERIFIED"
+    },
+    {
+      "scenario_id": "3a_policy_simulation_restrictive_margin",
+      "type": "policy_simulation",
+      "description": "Simulated strict memory policy via ROUTING_RAM_SAFETY_MARGIN_MB=100000. Not natural hardware pressure.",
+      "prompt": "Write an asynchronous Python data ingestion service using httpx and asyncio. Do not use requests or aiohttp. Parse incoming JSON, extract entities matching keys ['user_id', 'transaction_value', 'timestamp'], validate non-negative values, handle transient network retries with exponential backoff, and save aggregated dictionary to metrics.json.",
+      "selected_model": "qwen2.5:1.5b",
+      "executed_model": "qwen2.5:1.5b",
+      "target_tier": "small",
+      "routing_status": "fallback",
+      "is_fallback": true,
+      "prompt_eval_count": 639,
+      "eval_count": 63,
+      "latency_ms": 7210,
+      "status": "VERIFIED (SIMULATED_POLICY_FALLBACK)"
+    },
+    {
+      "scenario_id": "3b_natural_hardware_pressure_observation",
+      "type": "natural_resource_observation",
+      "natural_fallback_triggered": false,
+      "selected_model": "qwen2.5:7b",
+      "executed_model": "qwen2.5:7b",
+      "target_tier": "medium",
+      "routing_status": "routed",
+      "is_fallback": false,
+      "measured_vram_free_mb": 4708,
+      "measured_ram_free_mb": 3346.7,
+      "vram_measurement_type": "architecture_proxy",
+      "finding": "Host hardware has sufficient natural headroom (4708 MiB free VRAM, 3347 MiB free RAM); normal routing to 'qwen2.5:7b' succeeded without fallback.",
+      "status": "VERIFIED (NATURAL_HEADROOM_SUFFICIENT_NO_FALLBACK)"
+    },
+    {
+      "scenario_id": "4_manual_model_override",
+      "type": "live_inference",
+      "requested_model": "qwen2.5:1.5b",
+      "selected_model": "qwen2.5:1.5b",
+      "executed_model": "qwen2.5:1.5b",
+      "target_tier": "small",
+      "routing_status": "manual_override",
+      "prompt_eval_count": 531,
+      "eval_count": 11,
+      "latency_ms": 5730,
+      "status": "VERIFIED"
+    }
+  ]
+}

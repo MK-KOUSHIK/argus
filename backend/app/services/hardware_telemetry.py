@@ -20,7 +20,7 @@ class HardwareTelemetryProvider:
     _cache_ttl_seconds: float = 1.0
 
     @classmethod
-    def get_gpu_memory(cls, force_refresh: bool = False) -> Optional[Dict[str, int]]:
+    def get_gpu_memory(cls, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
         """Query NVIDIA GPU VRAM metrics in MiB.
 
         Returns:
@@ -65,7 +65,7 @@ class HardwareTelemetryProvider:
         return None
 
     @classmethod
-    def get_system_ram(cls) -> Dict[str, float]:
+    def get_system_ram(cls) -> Dict[str, Any]:
         """Query physical host RAM usage in MiB using Win32 API or fallback."""
         if os.name == "nt":
             try:

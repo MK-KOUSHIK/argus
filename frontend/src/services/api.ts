@@ -5,9 +5,12 @@
 
 import {
   HealthResponse,
+  ModelCatalogResponse,
   OllamaStatus,
   OptimizationResult,
   OptimizeRequestPayload,
+  RouteRequestPayload,
+  RoutingDecisionTelemetry,
 } from '@/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
@@ -82,7 +85,51 @@ export class ApiService {
   }
 
   /**
-   * Real Prompt Optimization endpoint powered by local Ollama LLM (Phase 3 & 3.1)
+   * Discover installed local models and hardware state (Phase 5)
+   */
+  async getModels(signal?: AbortSignal): Promise<ModelCatalogResponse> {
+    const response = await fetch(`${this.baseUrl}/models`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to retrieve models catalog (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Evaluate model routing decision without running inference (Phase 5)
+   */
+  async routePrompt(
+    payload: RouteRequestPayload,
+    signal?: AbortSignal
+  ): Promise<RoutingDecisionTelemetry> {
+    const response = await fetch(`${this.baseUrl}/route`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err?.error?.message || err?.detail || `Routing evaluation failed (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Real Prompt Optimization endpoint powered by local Ollama LLM (Phase 3, 4 & 5)
    */
   async optimizePrompt(payload: OptimizeRequestPayload, signal?: AbortSignal): Promise<OptimizationResult> {
     let response: Response;
@@ -123,7 +170,7 @@ export class ApiService {
 
       if (response.status === 503) {
         throw new Error(
-          `Ollama service is unreachable. Ensure Ollama is running ('ollama serve') and '${payload.target_model || 'qwen2.5:1.5b'}' is available: ${errorMessage}`
+          `Ollama service is unreachable. Ensure Ollama is running ('ollama serve') and '${payload.requested_model || 'qwen2.5:1.5b'}' is available: ${errorMessage}`
         );
       }
       if (response.status === 504) {
@@ -179,6 +226,7 @@ export class ApiService {
         : null,
       outputBudget: data.output_budget || null,
       compression: data.compression || null,
+      routing: data.routing || null,
       kvRuntimePolicy: data.kv_runtime_policy || null,
     };
   }

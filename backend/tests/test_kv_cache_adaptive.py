@@ -183,7 +183,7 @@ def test_concurrency_controller_adaptive_healthy_gpu():
         capacity, mode, gpu, ram = controller.get_admission_capacity()
         assert capacity == 3
         assert mode == "adaptive_hardware_aware"
-        assert gpu["free_mb"] == 4000
+        assert gpu is not None and gpu["free_mb"] == 4000
 
 
 def test_concurrency_controller_adaptive_restricted_vram():

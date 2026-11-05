@@ -27,6 +27,29 @@ MOCK_OLLAMA_RESPONSE = {
 }
 
 
+DEFAULT_MOCK_TAGS_RESPONSE = httpx.Response(
+    status_code=200,
+    json={
+        "models": [
+            {
+                "name": "qwen2.5:1.5b",
+                "model": "qwen2.5:1.5b",
+                "size": 986061892,
+                "details": {
+                    "parent_model": "",
+                    "format": "gguf",
+                    "family": "qwen2",
+                    "families": ["qwen2"],
+                    "parameter_size": "1.5B",
+                    "quantization_level": "Q4_K_M",
+                },
+            }
+        ]
+    },
+    request=httpx.Request("GET", "http://127.0.0.1:11434/api/tags"),
+)
+
+
 def create_mock_client(
     post_response=None,
     get_response=None,
@@ -45,6 +68,8 @@ def create_mock_client(
         mock_instance.get.side_effect = get_side_effect
     elif get_response is not None:
         mock_instance.get.return_value = get_response
+    else:
+        mock_instance.get.return_value = DEFAULT_MOCK_TAGS_RESPONSE
 
     mock_cls = MagicMock()
     mock_cls.return_value.__aenter__.return_value = mock_instance
@@ -461,6 +486,7 @@ def test_validator_rejects_student_marks_turn_reversal():
     validation = CandidateValidator.validate(prompt, invalid_candidate, analysis)
     assert validation.is_valid is False
     assert validation.status == "fallback"
+    assert validation.reason is not None
     assert any(
         kw in validation.reason.lower()
         for kw in ["user data", "deliverable", "requesting"]
@@ -604,6 +630,7 @@ def test_phase_3_2_1_test_a_confirmed_failure_rejected():
 
     assert result.is_valid is False
     assert result.status == "fallback"
+    assert result.reason is not None
     assert "calculate average marks" in result.reason
     assert "identify highest-scoring student" in result.reason
     assert any("average marks" in c for c in result.missing_constraints)

@@ -391,8 +391,21 @@ async def test_end_to_end_optimize_endpoint_with_compression(async_client: Async
     mock_resp = MagicMock(status_code=200)
     mock_resp.json.return_value = fake_response
 
+    mock_tags = MagicMock(status_code=200)
+    mock_tags.json.return_value = {
+        "models": [
+            {
+                "name": "qwen2.5:1.5b",
+                "model": "qwen2.5:1.5b",
+                "size": 986061892,
+                "details": {"parameter_size": "1.5B"},
+            }
+        ]
+    }
+
     mock_client = AsyncMock()
     mock_client.post.return_value = mock_resp
+    mock_client.get.return_value = mock_tags
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
 
