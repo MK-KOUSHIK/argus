@@ -189,19 +189,37 @@ class LocalModelRegistry:
                         size_vram = ps_info.get("size_vram") if ps_info else None
                         expires_at = ps_info.get("expires_at") if ps_info else None
 
-                        # If context_len or parameter_size is missing from tags, query /api/show
+                        # Query /api/show for architecture metadata, parameter count, and context length
                         param_count = None
-                        if context_len is None or param_size is None:
-                            show_data = await cls.fetch_model_details(client, name)
-                            if show_data:
-                                model_info = show_data.get("model_info", {})
-                                for k, v in model_info.items():
-                                    if k.endswith(".context_length") and isinstance(v, int) and context_len is None:
-                                        context_len = v
-                                    if k.endswith("general.parameter_count") and isinstance(v, int):
-                                        param_count = v
-                                if not param_size and "details" in show_data:
-                                    param_size = show_data["details"].get("parameter_size")
+                        num_layers = None
+                        num_kv_heads = None
+                        head_dim = None
+
+                        show_data = await cls.fetch_model_details(client, name)
+                        if show_data:
+                            model_info = show_data.get("model_info", {})
+                            num_heads = None
+                            for k, v in model_info.items():
+                                if k.endswith(".context_length") and isinstance(v, int) and context_len is None:
+                                    context_len = v
+                                if k.endswith("general.parameter_count") and isinstance(v, int):
+                                    param_count = v
+                                if (k.endswith(".block_count") or k.endswith(".layer_count")) and isinstance(v, int):
+                                    num_layers = v
+                                if k.endswith(".head_count_kv") and isinstance(v, int):
+                                    num_kv_heads = v
+                                if k.endswith(".head_count") and not k.endswith(".head_count_kv") and isinstance(v, int):
+                                    num_heads = v
+                                if k.endswith(".head_dim") and isinstance(v, int):
+                                    head_dim = v
+                                if k.endswith(".embedding_length") and isinstance(v, int) and embedding_len is None:
+                                    embedding_len = v
+
+                            if head_dim is None and num_heads and embedding_len:
+                                head_dim = embedding_len // num_heads
+
+                            if not param_size and "details" in show_data:
+                                param_size = show_data["details"].get("parameter_size")
 
                         tier = cls._parse_tier(param_size, param_count, name)
 
@@ -223,6 +241,9 @@ class LocalModelRegistry:
                             size_vram=size_vram,
                             expires_at=expires_at,
                             tier=tier,
+                            num_layers=num_layers,
+                            num_kv_heads=num_kv_heads,
+                            head_dim=head_dim,
                         )
                         updated_models[name.lower()] = disc
 

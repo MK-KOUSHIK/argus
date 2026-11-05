@@ -111,7 +111,8 @@ class ResourceTelemetry(BaseModel):
         default=None, description="Estimated total runtime VRAM proxy (weights + KV cache buffer) when unloaded"
     )
     vram_measurement_type: str = Field(
-        default="none", description="Source of VRAM figure: 'measured_resident', 'estimated_proxy', or 'unverified'"
+        default="none",
+        description="Source of memory figure: 'measured_resident', 'architecture_proxy', 'rough_proxy', 'cpu_only', or 'unverified'",
     )
     is_resource_sufficient: bool = Field(description="Whether available resources satisfy candidate requirements")
     resource_pressure_reason: Optional[str] = Field(

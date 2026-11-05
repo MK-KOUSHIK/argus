@@ -33,6 +33,9 @@ from app.services.routing.registry import LocalModelRegistry
 from app.services.task_analyzer import TaskAnalysisResult, TaskAnalyzer
 
 
+_UNSET: Any = object()
+
+
 class ModelRouterError(Exception):
     """Base exception for routing failures."""
 
@@ -182,36 +185,41 @@ class ModelRouter:
         cls,
         candidate_model: Optional[DiscoveredModel],
         loaded_other_vram_mb: int = 0,
-        gpu_telemetry: Optional[dict] = None,
-        ram_telemetry: Optional[dict] = None,
+        gpu_telemetry: Any = _UNSET,
+        ram_telemetry: Any = _UNSET,
         context_tier: Optional[int] = None,
     ) -> ResourceAssessment:
         """Inspect live hardware state and assess safety for candidate model execution."""
-        if gpu_telemetry is None:
+        if gpu_telemetry is _UNSET:
             gpu_telemetry = HardwareTelemetryProvider.get_gpu_memory(force_refresh=True)
-        if ram_telemetry is None:
+        if ram_telemetry is _UNSET:
             ram_telemetry = HardwareTelemetryProvider.get_system_ram()
         concurrency_capacity, _, _, _ = concurrency_controller.get_admission_capacity()
         in_flight = concurrency_controller.in_flight
 
-        gpu_available = (
+        gpu_valid = (
             gpu_telemetry is not None
+            and isinstance(gpu_telemetry, dict)
             and gpu_telemetry.get("source") not in (None, "unavailable")
             and gpu_telemetry.get("total_mb", 0) > 0
+            and gpu_telemetry.get("free_mb") is not None
         )
+        gpu_available = gpu_valid
 
-        vram_total = gpu_telemetry.get("total_mb") if (gpu_available and gpu_telemetry is not None) else None
-        vram_free = gpu_telemetry.get("free_mb") if (gpu_available and gpu_telemetry is not None) else None
-        vram_used = gpu_telemetry.get("used_mb") if (gpu_available and gpu_telemetry is not None) else None
+        vram_total = int(gpu_telemetry["total_mb"]) if (gpu_valid and gpu_telemetry is not None) else None
+        vram_free = int(gpu_telemetry["free_mb"]) if (gpu_valid and gpu_telemetry is not None) else None
+        vram_used = int(gpu_telemetry.get("used_mb", 0)) if (gpu_valid and gpu_telemetry is not None) else None
 
         ram_valid = (
             ram_telemetry is not None
+            and isinstance(ram_telemetry, dict)
             and ram_telemetry.get("source") not in (None, "unavailable")
             and ram_telemetry.get("total_mb", 0) > 0
+            and ram_telemetry.get("free_mb") is not None
         )
-        ram_total = ram_telemetry.get("total_mb") if (ram_valid and ram_telemetry is not None) else None
-        ram_free = ram_telemetry.get("free_mb") if (ram_valid and ram_telemetry is not None) else None
-        ram_used = ram_telemetry.get("used_mb") if (ram_valid and ram_telemetry is not None) else None
+        ram_total = float(ram_telemetry["total_mb"]) if (ram_valid and ram_telemetry is not None) else None
+        ram_free = float(ram_telemetry["free_mb"]) if (ram_valid and ram_telemetry is not None) else None
+        ram_used = float(ram_telemetry.get("used_mb", 0.0)) if (ram_valid and ram_telemetry is not None) else None
 
         if candidate_model is None:
             return ResourceAssessment(
@@ -223,8 +231,8 @@ class ModelRouter:
                 ram_free_mb=ram_free,
                 ram_used_mb=ram_used,
                 estimated_model_vram_mb=None,
-                is_resource_sufficient=True,
-                resource_pressure_reason=None,
+                is_resource_sufficient=False,
+                resource_pressure_reason="No candidate model provided for resource evaluation",
                 is_currently_loaded=False,
                 concurrency_in_flight=in_flight,
                 concurrency_capacity=concurrency_capacity,
@@ -261,20 +269,148 @@ class ModelRouter:
                 vram_measurement_type="unverified",
             )
 
+        # Explicit handling for unavailable hardware telemetry
+        # 1. Both GPU and RAM telemetry unavailable
+        if not gpu_valid and not ram_valid:
+            runtime_req = candidate_model.estimate_runtime_vram_mb(context_tier=context_tier)
+            return ResourceAssessment(
+                gpu_available=False,
+                vram_total_mb=None,
+                vram_free_mb=None,
+                vram_used_mb=None,
+                ram_total_mb=None,
+                ram_free_mb=None,
+                ram_used_mb=None,
+                estimated_model_vram_mb=runtime_req,
+                is_resource_sufficient=False,
+                resource_pressure_reason=(
+                    f"Hardware telemetry unavailable: Both GPU and host RAM telemetry are missing; "
+                    f"resource safety cannot be verified for '{candidate_model.name}'."
+                ),
+                is_currently_loaded=is_loaded,
+                concurrency_in_flight=in_flight,
+                concurrency_capacity=concurrency_capacity,
+                measured_vram_mb=candidate_model.measured_vram_mb,
+                weight_footprint_mb=round(candidate_model.weight_size_mb),
+                estimated_runtime_vram_mb=runtime_req,
+                vram_measurement_type="unverified",
+            )
+
+        # 2. RAM telemetry unavailable (even if GPU is available)
+        if not ram_valid:
+            runtime_req = candidate_model.estimate_runtime_vram_mb(context_tier=context_tier)
+            return ResourceAssessment(
+                gpu_available=gpu_available,
+                vram_total_mb=vram_total,
+                vram_free_mb=vram_free,
+                vram_used_mb=vram_used,
+                ram_total_mb=None,
+                ram_free_mb=None,
+                ram_used_mb=None,
+                estimated_model_vram_mb=runtime_req,
+                is_resource_sufficient=False,
+                resource_pressure_reason=(
+                    f"Host RAM telemetry is unavailable; system memory safety cannot be established for '{candidate_model.name}'."
+                ),
+                is_currently_loaded=is_loaded,
+                concurrency_in_flight=in_flight,
+                concurrency_capacity=concurrency_capacity,
+                measured_vram_mb=candidate_model.measured_vram_mb,
+                weight_footprint_mb=round(candidate_model.weight_size_mb),
+                estimated_runtime_vram_mb=runtime_req,
+                vram_measurement_type="unverified",
+            )
+
+        # 3. GPU telemetry unavailable, but RAM is valid -> CPU-only execution policy
+        if not gpu_valid:
+            allow_cpu = getattr(settings, "ROUTING_ALLOW_CPU_EXECUTION", True)
+            runtime_req = candidate_model.estimate_runtime_vram_mb(context_tier=context_tier)
+            weight_mb = round(candidate_model.weight_size_mb)
+
+            if not allow_cpu:
+                return ResourceAssessment(
+                    gpu_available=False,
+                    vram_total_mb=None,
+                    vram_free_mb=None,
+                    vram_used_mb=None,
+                    ram_total_mb=ram_total,
+                    ram_free_mb=ram_free,
+                    ram_used_mb=ram_used,
+                    estimated_model_vram_mb=runtime_req,
+                    is_resource_sufficient=False,
+                    resource_pressure_reason=(
+                        "GPU acceleration is unavailable, and CPU-only execution is disabled by ROUTING_ALLOW_CPU_EXECUTION policy."
+                    ),
+                    is_currently_loaded=is_loaded,
+                    concurrency_in_flight=in_flight,
+                    concurrency_capacity=concurrency_capacity,
+                    measured_vram_mb=None,
+                    weight_footprint_mb=weight_mb,
+                    estimated_runtime_vram_mb=runtime_req,
+                    vram_measurement_type="none",
+                )
+
+            # CPU execution is permitted: validate host RAM headroom
+            ram_margin = getattr(settings, "ROUTING_RAM_SAFETY_MARGIN_MB", 1024)
+            if candidate_model.tier == ModelTier.SMALL:
+                ram_margin = min(ram_margin, 512)
+
+            required_ram = ram_margin if is_loaded else (weight_mb + ram_margin)
+            assert ram_free is not None
+            is_cpu_sufficient = ram_free >= required_ram
+            cpu_pressure_reason: Optional[str] = None
+            if not is_cpu_sufficient:
+                cpu_pressure_reason = (
+                    f"Insufficient host RAM for CPU-only execution of '{candidate_model.name}' "
+                    f"({ram_free:.0f} MiB free < {required_ram} MiB required [weights: {weight_mb} MiB + {ram_margin} MiB margin])"
+                )
+
+            # Check unknown tier constraints
+            allow_unknown = getattr(settings, "ROUTING_ALLOW_UNKNOWN_TIER", False)
+            if candidate_model.tier == ModelTier.UNKNOWN and not allow_unknown:
+                is_cpu_sufficient = False
+                if not cpu_pressure_reason:
+                    cpu_pressure_reason = (
+                        f"Model '{candidate_model.name}' has UNKNOWN capacity tier (verified parameter metadata unavailable). "
+                        f"Automatic admission disabled by ROUTING_ALLOW_UNKNOWN_TIER."
+                    )
+
+            return ResourceAssessment(
+                gpu_available=False,
+                vram_total_mb=None,
+                vram_free_mb=None,
+                vram_used_mb=None,
+                ram_total_mb=ram_total,
+                ram_free_mb=ram_free,
+                ram_used_mb=ram_used,
+                estimated_model_vram_mb=runtime_req,
+                is_resource_sufficient=is_cpu_sufficient,
+                resource_pressure_reason=cpu_pressure_reason,
+                is_currently_loaded=is_loaded,
+                concurrency_in_flight=in_flight,
+                concurrency_capacity=concurrency_capacity,
+                measured_vram_mb=None,
+                weight_footprint_mb=weight_mb,
+                estimated_runtime_vram_mb=runtime_req,
+                vram_measurement_type="cpu_only",
+            )
+
+        # 4. Both GPU and RAM telemetry are valid: execute full GPU VRAM and host RAM checks
+        assert ram_free is not None
+        assert vram_free is not None
+
         weight_mb = round(candidate_model.weight_size_mb)
         if is_loaded:
             measured_vram = candidate_model.measured_vram_mb
-            runtime_req = measured_vram if measured_vram is not None else int(candidate_model.estimate_runtime_vram_mb(context_tier=context_tier))
-            vram_measurement_type = "measured_resident" if measured_vram is not None else "estimated_proxy"
+            runtime_req = measured_vram if measured_vram is not None else candidate_model.estimate_runtime_vram_mb(context_tier=context_tier)
+            vram_measurement_type = "measured_resident" if measured_vram is not None else candidate_model.get_vram_measurement_type(context_tier=context_tier)
         else:
             measured_vram = None
             runtime_req = candidate_model.estimate_runtime_vram_mb(context_tier=context_tier)
-            vram_measurement_type = "estimated_proxy"
+            vram_measurement_type = candidate_model.get_vram_measurement_type(context_tier=context_tier)
 
         vram_margin = getattr(settings, "ROUTING_VRAM_SAFETY_MARGIN_MB", 512)
         ram_margin = getattr(settings, "ROUTING_RAM_SAFETY_MARGIN_MB", 1024)
-
-        # Baseline safety margins for small tier models (128 MB VRAM margin, 512 MB RAM margin)
         if candidate_model.tier == ModelTier.SMALL:
             vram_margin = min(vram_margin, 128)
             ram_margin = min(ram_margin, 512)
@@ -282,46 +418,53 @@ class ModelRouter:
         is_sufficient = True
         pressure_reason: Optional[str] = None
 
-        # If system RAM is critically low (< ram_margin)
-        if ram_free is not None and ram_free < ram_margin:
+        # System RAM safety check
+        if ram_free < ram_margin:
             is_sufficient = False
             pressure_reason = f"Host RAM is constrained ({ram_free:.0f} MiB free < {ram_margin} MiB margin)"
 
-        # Check GPU VRAM if GPU is active
-        if gpu_available and vram_free is not None:
-            if is_loaded:
-                # Assess runtime headroom for resident model
-                loaded_headroom = getattr(settings, "ROUTING_LOADED_HEADROOM_MARGIN_MB", 250)
-                if vram_free < loaded_headroom:
-                    is_sufficient = False
-                    pressure_reason = (
-                        f"Resident model '{candidate_model.name}' has insufficient runtime VRAM headroom "
-                        f"({vram_free} MiB free < {loaded_headroom} MiB headroom required)"
-                    )
-            else:
-                # If candidate is not resident, Ollama will evict idle models if no request is in-flight
-                evictable_vram = loaded_other_vram_mb if in_flight == 0 else 0
-                effective_available_vram = vram_free + evictable_vram
-                required_headroom = runtime_req + vram_margin
+        # Check architecture metadata requirement policy
+        require_arch = getattr(settings, "ROUTING_REQUIRE_ARCHITECTURE_METADATA", False)
+        if require_arch and vram_measurement_type == "rough_proxy":
+            is_sufficient = False
+            if not pressure_reason:
+                pressure_reason = (
+                    f"Candidate model '{candidate_model.name}' lacks verified architecture metadata for exact KV-cache sizing; "
+                    f"admission rejected by ROUTING_REQUIRE_ARCHITECTURE_METADATA policy."
+                )
 
-                if in_flight > 0 and vram_free < required_headroom:
-                    is_sufficient = False
-                    pressure_reason = (
-                        f"Active inference in flight; cannot evict resident model "
-                        f"(free VRAM: {vram_free} MiB < {required_headroom} MiB required)"
-                    )
-                elif effective_available_vram < required_headroom:
-                    is_sufficient = False
-                    detail = (
-                        f"[{vram_free}MB free + {evictable_vram}MB evictable]"
-                        if evictable_vram > 0
-                        else f"[{vram_free}MB free]"
-                    )
-                    pressure_reason = (
-                        f"Insufficient available VRAM ({effective_available_vram} MiB available {detail} < "
-                        f"{required_headroom} MiB required for {candidate_model.name} "
-                        f"[estimated runtime proxy: {runtime_req}MB (weights: {weight_mb}MB) + {vram_margin}MB margin])"
-                    )
+        # Check GPU VRAM
+        if is_loaded:
+            loaded_headroom = getattr(settings, "ROUTING_LOADED_HEADROOM_MARGIN_MB", 250)
+            if vram_free < loaded_headroom:
+                is_sufficient = False
+                pressure_reason = (
+                    f"Resident model '{candidate_model.name}' has insufficient runtime VRAM headroom "
+                    f"({vram_free} MiB free < {loaded_headroom} MiB headroom required)"
+                )
+        else:
+            evictable_vram = loaded_other_vram_mb if in_flight == 0 else 0
+            effective_available_vram = vram_free + evictable_vram
+            required_headroom = runtime_req + vram_margin
+
+            if in_flight > 0 and vram_free < required_headroom:
+                is_sufficient = False
+                pressure_reason = (
+                    f"Active inference in flight; cannot evict resident model "
+                    f"(free VRAM: {vram_free} MiB < {required_headroom} MiB required)"
+                )
+            elif effective_available_vram < required_headroom:
+                is_sufficient = False
+                detail = (
+                    f"[{vram_free}MB free + {evictable_vram}MB evictable]"
+                    if evictable_vram > 0
+                    else f"[{vram_free}MB free]"
+                )
+                pressure_reason = (
+                    f"Insufficient available VRAM ({effective_available_vram} MiB available {detail} < "
+                    f"{required_headroom} MiB required for {candidate_model.name} "
+                    f"[{vram_measurement_type}: {runtime_req}MB (weights: {weight_mb}MB) + {vram_margin}MB margin])"
+                )
 
         # Check unknown capacity tier constraints
         allow_unknown = getattr(settings, "ROUTING_ALLOW_UNKNOWN_TIER", False)
@@ -412,6 +555,8 @@ class ModelRouter:
         configured_fallback_name: Optional[str] = None,
         exclude_names: Optional[List[str]] = None,
         context_tier: Optional[int] = None,
+        gpu_telemetry: Any = _UNSET,
+        ram_telemetry: Any = _UNSET,
     ) -> Optional[DiscoveredModel]:
         """Find a verified installed model that is safe and resource-sufficient for fallback.
 
@@ -425,7 +570,12 @@ class ModelRouter:
         if configured_fallback_name:
             target = next((m for m in candidates if m.name.lower() == configured_fallback_name.lower()), None)
             if target:
-                res = cls.evaluate_resources(target, context_tier=context_tier)
+                res = cls.evaluate_resources(
+                    target,
+                    context_tier=context_tier,
+                    gpu_telemetry=gpu_telemetry,
+                    ram_telemetry=ram_telemetry,
+                )
                 if res.is_resource_sufficient:
                     return target
 
@@ -433,7 +583,12 @@ class ModelRouter:
         small_models = [m for m in candidates if m.tier == ModelTier.SMALL]
         ranked_small = cls.rank_candidates(small_models, ModelTier.SMALL)
         for m in ranked_small:
-            res = cls.evaluate_resources(m, context_tier=context_tier)
+            res = cls.evaluate_resources(
+                m,
+                context_tier=context_tier,
+                gpu_telemetry=gpu_telemetry,
+                ram_telemetry=ram_telemetry,
+            )
             if res.is_resource_sufficient:
                 return m
 
@@ -446,7 +601,12 @@ class ModelRouter:
         ]
         ranked_others = cls.rank_candidates(other_candidates, ModelTier.SMALL)
         for m in ranked_others:
-            res = cls.evaluate_resources(m, context_tier=context_tier)
+            res = cls.evaluate_resources(
+                m,
+                context_tier=context_tier,
+                gpu_telemetry=gpu_telemetry,
+                ram_telemetry=ram_telemetry,
+            )
             if res.is_resource_sufficient:
                 return m
 
@@ -461,9 +621,16 @@ class ModelRouter:
         requested_model: Optional[str] = None,
         requested_output_budget: Optional[int] = None,
         allow_override_fallback: Optional[bool] = None,
+        gpu_telemetry: Any = _UNSET,
+        ram_telemetry: Any = _UNSET,
     ) -> RoutingDecision:
         """Execute deterministic model routing for the prompt optimization request."""
         t0 = time.perf_counter()
+
+        if gpu_telemetry is _UNSET:
+            gpu_telemetry = HardwareTelemetryProvider.get_gpu_memory(force_refresh=True)
+        if ram_telemetry is _UNSET:
+            ram_telemetry = HardwareTelemetryProvider.get_system_ram()
 
         # Refresh local model registry
         await LocalModelRegistry.refresh()
@@ -508,7 +675,11 @@ class ModelRouter:
             default_model = await LocalModelRegistry.get_model(settings.OLLAMA_MODEL)
             if not default_model:
                 raise ModelNotInstalledError(settings.OLLAMA_MODEL, available_names)
-            resources = cls.evaluate_resources(default_model)
+            resources = cls.evaluate_resources(
+                default_model,
+                gpu_telemetry=gpu_telemetry,
+                ram_telemetry=ram_telemetry,
+            )
             if not resources.is_resource_sufficient:
                 raise ModelResourceConstraintError(
                     settings.OLLAMA_MODEL,
@@ -536,7 +707,12 @@ class ModelRouter:
             if not target_model:
                 raise ModelNotInstalledError(requested_model, available_names)
 
-            resources = cls.evaluate_resources(target_model)
+            resources = cls.evaluate_resources(
+                target_model,
+                gpu_telemetry=gpu_telemetry,
+                ram_telemetry=ram_telemetry,
+                context_tier=context_tier,
+            )
             elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
 
             if not resources.is_resource_sufficient:
@@ -556,6 +732,9 @@ class ModelRouter:
                     all_models,
                     configured_fallback_name=fallback_model_name,
                     exclude_names=[target_model.name],
+                    context_tier=context_tier,
+                    gpu_telemetry=gpu_telemetry,
+                    ram_telemetry=ram_telemetry,
                 )
                 if not safe_fallback:
                     raise NoSafeFallbackError(
@@ -564,7 +743,12 @@ class ModelRouter:
                         f"({resources.resource_pressure_reason}), and no alternative safe fallback is installed.",
                     )
 
-                fallback_res = cls.evaluate_resources(safe_fallback)
+                fallback_res = cls.evaluate_resources(
+                    safe_fallback,
+                    gpu_telemetry=gpu_telemetry,
+                    ram_telemetry=ram_telemetry,
+                    context_tier=context_tier,
+                )
                 return RoutingDecision(
                     selected_model=safe_fallback.name,
                     target_model_tier=safe_fallback.tier,
@@ -643,7 +827,13 @@ class ModelRouter:
                 for m in all_models
                 if m.is_loaded and m.name.lower() != preferred_medium.name.lower()
             )
-            res_assessment = cls.evaluate_resources(preferred_medium, loaded_other_vram_mb=loaded_other_vram)
+            res_assessment = cls.evaluate_resources(
+                preferred_medium,
+                loaded_other_vram_mb=loaded_other_vram,
+                gpu_telemetry=gpu_telemetry,
+                ram_telemetry=ram_telemetry,
+                context_tier=context_tier,
+            )
 
             if res_assessment.is_resource_sufficient:
                 selected_model = preferred_medium.name
@@ -660,6 +850,9 @@ class ModelRouter:
                     all_models,
                     configured_fallback_name=preferred_small.name if preferred_small else fallback_model_name,
                     exclude_names=[preferred_medium.name],
+                    context_tier=context_tier,
+                    gpu_telemetry=gpu_telemetry,
+                    ram_telemetry=ram_telemetry,
                 )
                 if not safe_fallback:
                     raise NoSafeFallbackError(
@@ -684,6 +877,9 @@ class ModelRouter:
             safe_fallback = cls.find_safe_fallback(
                 all_models,
                 configured_fallback_name=fallback_model_name,
+                context_tier=context_tier,
+                gpu_telemetry=gpu_telemetry,
+                ram_telemetry=ram_telemetry,
             )
             if not safe_fallback:
                 raise NoSafeFallbackError(
@@ -700,13 +896,21 @@ class ModelRouter:
                 f"Prompt complexity ({complexity.heuristic_score:.2f}) indicates medium-tier capacity, "
                 f"but no medium model is installed in local Ollama. Fell back to installed '{safe_fallback.name}'."
             )
-            resources = cls.evaluate_resources(safe_fallback)
+            resources = cls.evaluate_resources(
+                safe_fallback,
+                gpu_telemetry=gpu_telemetry,
+                ram_telemetry=ram_telemetry,
+                context_tier=context_tier,
+            )
 
         else:
             # Small tier requested / simple prompt
             target_small = preferred_small or cls.find_safe_fallback(
                 all_models,
                 configured_fallback_name=fallback_model_name,
+                context_tier=context_tier,
+                gpu_telemetry=gpu_telemetry,
+                ram_telemetry=ram_telemetry,
             )
             if not target_small:
                 raise NoSafeFallbackError(
@@ -714,9 +918,20 @@ class ModelRouter:
                     "No small tier model is installed and no safe fallback model is available.",
                 )
 
-            res_assessment = cls.evaluate_resources(target_small)
+            res_assessment = cls.evaluate_resources(
+                target_small,
+                gpu_telemetry=gpu_telemetry,
+                ram_telemetry=ram_telemetry,
+                context_tier=context_tier,
+            )
             if not res_assessment.is_resource_sufficient:
-                alt_fallback = cls.find_safe_fallback(all_models, exclude_names=[target_small.name])
+                alt_fallback = cls.find_safe_fallback(
+                    all_models,
+                    exclude_names=[target_small.name],
+                    context_tier=context_tier,
+                    gpu_telemetry=gpu_telemetry,
+                    ram_telemetry=ram_telemetry,
+                )
                 if not alt_fallback:
                     raise ModelResourceConstraintError(
                         target_small.name,
@@ -730,7 +945,12 @@ class ModelRouter:
                     f"Small model '{target_small.name}' constrained ({res_assessment.resource_pressure_reason}). "
                     f"Fell back to installed '{alt_fallback.name}'."
                 )
-                resources = cls.evaluate_resources(alt_fallback)
+                resources = cls.evaluate_resources(
+                    alt_fallback,
+                    gpu_telemetry=gpu_telemetry,
+                    ram_telemetry=ram_telemetry,
+                    context_tier=context_tier,
+                )
             else:
                 selected_model = target_small.name
                 selected_tier = target_small.tier
@@ -738,6 +958,7 @@ class ModelRouter:
                     f"Selected lightweight fast model '{selected_model}' "
                     f"(heuristic complexity {complexity.heuristic_score:.2f} < threshold {threshold:.2f})."
                 )
+                resources = res_assessment
                 resources = res_assessment
 
         # Decision heuristic margin: distance from threshold in auto mode

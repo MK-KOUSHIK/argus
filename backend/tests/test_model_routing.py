@@ -300,12 +300,12 @@ async def test_router_ram_constrained_fallback(mock_two_models):
 
 @pytest.mark.asyncio
 async def test_router_insufficient_memory_info(mock_two_models):
-    """When hardware telemetry returns unavailable, router executes without crashing."""
+    """When hardware telemetry returns unavailable, router rejects admission with structured error."""
     with patch("app.services.hardware_telemetry.HardwareTelemetryProvider.get_gpu_memory", return_value=None), \
          patch("app.services.hardware_telemetry.HardwareTelemetryProvider.get_system_ram", return_value={"source": "unavailable", "total_mb": 0}):
-        decision = await ModelRouter.route(prompt="Simple note.")
-        assert decision.selected_model == "qwen2.5:1.5b"
-        assert decision.resource_assessment.gpu_available is False
+        with pytest.raises(ModelResourceConstraintError) as exc_info:
+            await ModelRouter.route(prompt="Simple note.")
+        assert "hardware telemetry unavailable" in str(exc_info.value).lower() or "telemetry is unavailable" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -944,7 +944,7 @@ def test_evaluate_resources_unloaded_model_proxy_distinction():
     ram = {"total_mb": 16000, "free_mb": 8000, "used_mb": 8000, "source": "win32"}
 
     res = ModelRouter.evaluate_resources(m_unloaded, gpu_telemetry=gpu, ram_telemetry=ram, context_tier=4096)
-    assert res.vram_measurement_type == "estimated_proxy"
+    assert res.vram_measurement_type in ("estimated_proxy", "rough_proxy")
     assert res.measured_vram_mb is None
     assert res.weight_footprint_mb == 4466
     # Runtime proxy includes weight (4466) + KV cache buffer (350) = 4816 MiB
@@ -1028,4 +1028,175 @@ def test_find_safe_fallback_selects_best_safe_installed_model():
         fallback = ModelRouter.find_safe_fallback([m_heavy, m_small_1, m_small_2])
         assert fallback is not None
         assert fallback.name == "model-a:1.0b"
+
+
+def test_evaluate_resources_missing_ram_telemetry():
+    """Verify missing RAM telemetry does not pass safety check and reports unverified status."""
+    m_1b = DiscoveredModel(
+        name="test:1b", model="test:1b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+    gpu = {"total_mb": 6141, "free_mb": 5000, "used_mb": 1141, "source": "nvidia_smi"}
+    ram = {"total_mb": 0.0, "free_mb": 0.0, "used_mb": 0.0, "source": "unavailable"}
+
+    res = ModelRouter.evaluate_resources(m_1b, gpu_telemetry=gpu, ram_telemetry=ram)
+    assert res.is_resource_sufficient is False
+    assert res.vram_measurement_type == "unverified"
+    assert "ram telemetry is unavailable" in str(res.resource_pressure_reason).lower()
+
+
+def test_evaluate_resources_unavailable_gpu_telemetry_cpu_disabled():
+    """Verify unavailable GPU telemetry rejects execution when ROUTING_ALLOW_CPU_EXECUTION is False."""
+    m_1b = DiscoveredModel(
+        name="test:1b", model="test:1b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+    ram = {"total_mb": 16000, "free_mb": 8000, "used_mb": 8000, "source": "win32"}
+
+    with patch.object(settings, "ROUTING_ALLOW_CPU_EXECUTION", False):
+        res = ModelRouter.evaluate_resources(m_1b, gpu_telemetry=None, ram_telemetry=ram)
+        assert res.is_resource_sufficient is False
+        assert "cpu-only execution is disabled" in str(res.resource_pressure_reason).lower()
+
+
+def test_evaluate_resources_cpu_only_sufficient_ram():
+    """Verify CPU-only execution is safely admitted when host RAM is sufficient and allowed by policy."""
+    m_1b = DiscoveredModel(
+        name="test:1b", model="test:1b", digest="d1", size_bytes=1_000_000_000,  # ~954 MiB
+        modified_at="2026-10-01", parameter_size="1B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+    ram = {"total_mb": 16000, "free_mb": 8000, "used_mb": 8000, "source": "win32"}
+
+    with patch.object(settings, "ROUTING_ALLOW_CPU_EXECUTION", True):
+        res = ModelRouter.evaluate_resources(m_1b, gpu_telemetry=None, ram_telemetry=ram)
+        assert res.is_resource_sufficient is True
+        assert res.gpu_available is False
+        assert res.vram_measurement_type == "cpu_only"
+        assert res.resource_pressure_reason is None
+
+
+def test_evaluate_resources_cpu_only_insufficient_ram():
+    """Verify CPU-only execution is rejected when host RAM cannot accommodate model weights and margin."""
+    m_7b = DiscoveredModel(
+        name="test:7b", model="test:7b", digest="d1", size_bytes=4_683_087_332,  # ~4466 MiB
+        modified_at="2026-10-01", parameter_size="7.6B", tier=ModelTier.MEDIUM,
+        is_loaded=False,
+    )
+    # 2000 MiB free RAM < 4466 weights + 1024 margin (5490 MiB)
+    ram = {"total_mb": 16000, "free_mb": 2000, "used_mb": 14000, "source": "win32"}
+
+    with patch.object(settings, "ROUTING_ALLOW_CPU_EXECUTION", True):
+        res = ModelRouter.evaluate_resources(m_7b, gpu_telemetry=None, ram_telemetry=ram)
+        assert res.is_resource_sufficient is False
+        assert res.vram_measurement_type == "cpu_only"
+        assert "insufficient host ram for cpu-only execution" in str(res.resource_pressure_reason).lower()
+
+
+def test_evaluate_resources_both_telemetry_sources_unavailable():
+    """Verify resource safety cannot be established when both GPU and RAM telemetry are missing."""
+    m_1b = DiscoveredModel(
+        name="test:1b", model="test:1b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1B", tier=ModelTier.SMALL,
+        is_loaded=False,
+    )
+    res = ModelRouter.evaluate_resources(m_1b, gpu_telemetry=None, ram_telemetry=None)
+    assert res.is_resource_sufficient is False
+    assert res.vram_measurement_type == "unverified"
+    assert "both gpu and host ram telemetry are missing" in str(res.resource_pressure_reason).lower()
+
+
+@pytest.mark.asyncio
+async def test_route_manual_override_unavailable_telemetry(mock_two_models):
+    """Verify manual override enforces the safety policy and rejects admission when telemetry is unavailable."""
+    # When override fallback is disabled, raises ModelResourceConstraintError with diagnostic reason
+    with pytest.raises(ModelResourceConstraintError) as exc_info:
+        await ModelRouter.route(
+            prompt="Simple summary request",
+            requested_model="qwen2.5:1.5b",
+            allow_override_fallback=False,
+            ram_telemetry=None,
+        )
+    assert "ram telemetry is unavailable" in str(exc_info.value).lower()
+
+    # When override fallback is allowed, but telemetry is unavailable for all models, raises NoSafeFallbackError
+    with pytest.raises(NoSafeFallbackError) as exc_info:
+        await ModelRouter.route(
+            prompt="Simple summary request",
+            requested_model="qwen2.5:1.5b",
+            allow_override_fallback=True,
+            ram_telemetry=None,
+        )
+    assert "no alternative safe fallback" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_route_fallback_when_resource_measurements_unavailable(mock_two_models):
+    """Verify automatic routing fails safe with NoSafeFallbackError when measurements are unavailable."""
+    complex_prompt = (
+        "Write an asynchronous Python data ingestion service using httpx and asyncio. "
+        "Do not use requests or aiohttp. Parse incoming JSON, extract entities matching keys "
+        "['user_id', 'transaction_value', 'timestamp'], validate non-negative values, "
+        "handle transient network retries with exponential backoff, and save aggregated dictionary to metrics.json."
+    )
+    with pytest.raises(NoSafeFallbackError) as exc_info:
+        await ModelRouter.route(
+            prompt=complex_prompt,
+            ram_telemetry=None,
+        )
+    assert "no verified safe fallback" in str(exc_info.value).lower() or "no safe fallback" in str(exc_info.value).lower()
+
+
+def test_discovered_model_architecture_derived_kv_cache():
+    """Verify model with complete architecture metadata computes architecture-derived KV-cache."""
+    m_arch = DiscoveredModel(
+        name="arch:1.5b", model="arch:1.5b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1.5B", tier=ModelTier.SMALL,
+        is_loaded=False,
+        num_layers=28,
+        num_kv_heads=2,
+        head_dim=128,
+        context_length=32768,
+    )
+    assert m_arch.has_architecture_metadata is True
+    assert m_arch.get_vram_measurement_type() == "architecture_proxy"
+
+    kv_mb, method = m_arch.estimate_kv_cache_mb(context_tier=4096, kv_dtype="q8_0")
+    assert method == "architecture_derived"
+    assert 50 <= kv_mb <= 70
+
+
+def test_discovered_model_rough_proxy_when_architecture_missing():
+    """Verify model without architecture metadata clearly identifies rough proxy estimation."""
+    m_no_arch = DiscoveredModel(
+        name="noarch:1.5b", model="noarch:1.5b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1.5B", tier=ModelTier.SMALL,
+        is_loaded=False,
+        num_layers=None,
+    )
+    assert m_no_arch.has_architecture_metadata is False
+    assert m_no_arch.get_vram_measurement_type() == "rough_proxy"
+
+    kv_mb, method = m_no_arch.estimate_kv_cache_mb(context_tier=4096)
+    assert method == "rough_proxy"
+    assert kv_mb == 100
+
+
+def test_evaluate_resources_requires_architecture_metadata_policy():
+    """Verify ROUTING_REQUIRE_ARCHITECTURE_METADATA policy rejects models relying on rough proxies."""
+    m_rough = DiscoveredModel(
+        name="rough:1.5b", model="rough:1.5b", digest="d1", size_bytes=1_000_000_000,
+        modified_at="2026-10-01", parameter_size="1.5B", tier=ModelTier.SMALL,
+        is_loaded=False,
+        num_layers=None,
+    )
+    gpu = {"total_mb": 6141, "free_mb": 5000, "used_mb": 1141, "source": "nvidia_smi"}
+    ram = {"total_mb": 16000, "free_mb": 8000, "used_mb": 8000, "source": "win32"}
+
+    with patch.object(settings, "ROUTING_REQUIRE_ARCHITECTURE_METADATA", True):
+        res = ModelRouter.evaluate_resources(m_rough, gpu_telemetry=gpu, ram_telemetry=ram)
+        assert res.is_resource_sufficient is False
+        assert "lacks verified architecture metadata" in str(res.resource_pressure_reason).lower()
 

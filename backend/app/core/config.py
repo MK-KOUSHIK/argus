@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     ROUTING_REGISTRY_TTL_SECONDS: float = 5.0
     ROUTING_ALLOW_UNKNOWN_TIER: bool = False
     ROUTING_ALLOW_OVERRIDE_FALLBACK: bool = False
+    ROUTING_ALLOW_CPU_EXECUTION: bool = True
+    ROUTING_REQUIRE_ARCHITECTURE_METADATA: bool = False
 
     # Optimization & Token Estimation Heuristics
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0

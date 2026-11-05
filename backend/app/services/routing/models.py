@@ -7,7 +7,7 @@ Provides typed representations for:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.schemas.routing import (
     ComplexityTelemetry,
@@ -42,6 +42,9 @@ class DiscoveredModel:
     size_vram: Optional[int] = None
     expires_at: Optional[str] = None
     tier: ModelTier = ModelTier.UNKNOWN
+    num_layers: Optional[int] = None
+    num_kv_heads: Optional[int] = None
+    head_dim: Optional[int] = None
 
     @property
     def weight_size_mb(self) -> float:
@@ -55,16 +58,76 @@ class DiscoveredModel:
             return round(self.size_vram / (1024 * 1024))
         return None
 
+    @property
+    def has_architecture_metadata(self) -> bool:
+        """Whether model has sufficient architectural metadata to calculate KV-cache dimensions."""
+        return (
+            self.num_layers is not None
+            and self.num_layers > 0
+            and (
+                (self.num_kv_heads is not None and self.head_dim is not None)
+                or (self.embedding_length is not None and self.embedding_length > 0)
+            )
+        )
+
+    def estimate_kv_cache_mb(
+        self,
+        context_tier: Optional[int] = None,
+        kv_dtype: Optional[str] = None,
+    ) -> Tuple[int, str]:
+        """Estimate KV cache memory requirement in MiB and return (kv_mb, method).
+
+        Returns:
+            Tuple[int, str]: (estimated_kv_cache_mb, method)
+            where method is 'architecture_derived' or 'rough_proxy'.
+        """
+        from app.core.config import settings
+
+        ctx = context_tier if (context_tier and context_tier > 0) else getattr(settings, "OLLAMA_NUM_CTX", 4096)
+        dtype = (kv_dtype or getattr(settings, "OLLAMA_KV_CACHE_TYPE", "q8_0")).lower()
+
+        if "q4" in dtype:
+            bytes_per_elem = 0.5625
+        elif "q8" in dtype:
+            bytes_per_elem = 1.0625
+        elif "f32" in dtype or "fp32" in dtype:
+            bytes_per_elem = 4.0
+        elif "f16" in dtype or "fp16" in dtype:
+            bytes_per_elem = 2.0
+        else:
+            bytes_per_elem = 1.0
+
+        if self.has_architecture_metadata and self.num_layers is not None:
+            if self.num_kv_heads is not None and self.head_dim is not None:
+                kv_dim = self.num_kv_heads * self.head_dim
+            elif self.embedding_length is not None:
+                kv_dim = self.embedding_length
+            else:
+                kv_dim = None
+
+            if kv_dim:
+                # 2 (Key + Value) * layers * kv_dim * context_tokens * bytes_per_elem
+                total_kv_bytes = 2 * self.num_layers * kv_dim * ctx * bytes_per_elem
+                kv_mb = max(16, round(total_kv_bytes / (1024 * 1024)))
+                return kv_mb, "architecture_derived"
+
+        # Clearly identified rough proxy scaled by context tier and model tier when architecture metadata is missing
+        if self.tier == ModelTier.SMALL:
+            kv_mb = max(64, round((ctx / 4096) * 100))
+        elif self.tier == ModelTier.MEDIUM:
+            kv_mb = max(256, round((ctx / 4096) * 350))
+        else:
+            kv_mb = max(512, round((ctx / 4096) * 700))
+
+        return kv_mb, "rough_proxy"
+
     def estimate_runtime_vram_mb(self, context_tier: Optional[int] = None) -> int:
-        """Estimate total runtime VRAM requirements (weights + KV cache + working buffers).
+        """Estimate total runtime VRAM requirements (weights + KV cache buffer proxy).
 
         If model is resident, returns measured resident VRAM from /api/ps.
-        If unloaded, computes a conservative runtime requirement proxy:
+        If unloaded, computes runtime requirement proxy:
         - Base weight footprint from disk size
-        - KV cache buffer proxy based on snapped context tier (default 4096)
-        - Compute/scratch buffer headroom proxy (~100 MiB)
-
-        NOTE: This is an estimated runtime requirement proxy, not an exact measurement.
+        - KV cache buffer derived from architecture metadata (if available) or rough proxy
         """
         if self.is_loaded and self.measured_vram_mb is not None:
             return self.measured_vram_mb
@@ -73,17 +136,16 @@ class DiscoveredModel:
             return 0
 
         weight_mb = round(self.size_bytes / (1024 * 1024))
-        ctx = context_tier if (context_tier and context_tier > 0) else 4096
+        kv_mb, _ = self.estimate_kv_cache_mb(context_tier=context_tier)
+        return weight_mb + kv_mb
 
-        # KV cache buffer proxy scaling with snapped context tier
-        if self.tier == ModelTier.SMALL:
-            kv_buffer = max(64, round((ctx / 4096) * 100))
-        elif self.tier == ModelTier.MEDIUM:
-            kv_buffer = max(256, round((ctx / 4096) * 350))
-        else:
-            kv_buffer = max(512, round((ctx / 4096) * 700))
-
-        return weight_mb + kv_buffer
+    def get_vram_measurement_type(self, context_tier: Optional[int] = None) -> str:
+        """Determine telemetry fidelity: 'measured_resident', 'architecture_proxy', or 'rough_proxy'."""
+        if self.is_loaded and self.measured_vram_mb is not None:
+            return "measured_resident"
+        if self.has_architecture_metadata:
+            return "architecture_proxy"
+        return "rough_proxy"
 
     @property
     def estimated_vram_mb(self) -> int:

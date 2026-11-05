@@ -642,6 +642,8 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ result }) => {
               <div className="text-[10px] text-slate-500">
                 {routing.resources.vram_measurement_type === 'measured_resident'
                   ? `Resident: ${routing.resources.measured_vram_mb ?? routing.resources.estimated_model_vram_mb} MiB`
+                  : routing.resources.vram_measurement_type === 'cpu_only'
+                  ? 'CPU Mode'
                   : `Proxy: ${routing.resources.estimated_runtime_vram_mb ?? routing.resources.estimated_model_vram_mb ?? 'n/a'} MiB`}
               </div>
             </div>
@@ -673,7 +675,13 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ result }) => {
                 Memory Telemetry:{' '}
                 {routing.resources.vram_measurement_type === 'measured_resident'
                   ? `Measured resident VRAM: ${routing.resources.measured_vram_mb} MiB (active in GPU)`
-                  : `Estimated runtime proxy: ${routing.resources.estimated_runtime_vram_mb} MiB (weights: ${routing.resources.weight_footprint_mb} MiB + context/KV buffer)`}
+                  : routing.resources.vram_measurement_type === 'architecture_proxy'
+                  ? `Architecture proxy: ${routing.resources.estimated_runtime_vram_mb} MiB (weights: ${routing.resources.weight_footprint_mb} MiB + calculated KV cache)`
+                  : routing.resources.vram_measurement_type === 'cpu_only'
+                  ? `CPU execution admitted to host RAM (${routing.resources.weight_footprint_mb} MiB weights; GPU not utilized)`
+                  : routing.resources.vram_measurement_type === 'unverified'
+                  ? 'Hardware telemetry unverified (measurements missing or incomplete)'
+                  : `Rough proxy (estimate): ${routing.resources.estimated_runtime_vram_mb} MiB (weights: ${routing.resources.weight_footprint_mb} MiB + heuristic KV buffer; unverified architecture)`}
               </div>
             )}
           </div>
