@@ -5,6 +5,15 @@ Evaluates character reduction, native prompt prefill token savings, downstream t
 answer quality preservation, and exact reversible restoration across technical workloads.
 All measurements reflect genuine runtime execution against local Ollama (qwen2.5:1.5b)
 with alternating execution order and warm-up passes to eliminate driver cache bias.
+
+Distinguishes:
+1. Internal Argus Optimizer Inference (prompt rewriting pipeline)
+2. Downstream Model Inference (task answer generation)
+3. Four equivalent stage measurements:
+   - Original workload prompt
+   - Compression-stage output
+   - Final optimized prompt
+   - Downstream model input
 """
 
 import argparse
@@ -12,6 +21,7 @@ import asyncio
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -36,6 +46,7 @@ import httpx
 
 from app.core.config import settings
 from app.schemas.optimizer import OptimizationMode, OptimizeRequest, OptimizeResponse
+from app.services.compression import CompressionOrchestrator
 from app.services.compression.registry import CompressionRegistry
 from app.services.ollama_service import OllamaService
 
@@ -560,13 +571,20 @@ def evaluate_prompt_preservation(workload_id: str, optimized_prompt: str) -> Dic
 
 
 def evaluate_downstream_task_answer(workload_id: str, raw_answer: str) -> Dict[str, Any]:
-    """Objective, workload-specific rule-based programmatic heuristic check of the generated answer."""
+    """Objective, workload-specific rule-based programmatic heuristic check of the generated answer.
+
+    Explicitly acknowledges this is rule-based acceptance checking, not full semantic equivalence.
+    """
     if not raw_answer or not raw_answer.strip():
         return {
             "evaluation_type": "rule_based_answer_quality",
-            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "methodology_note": (
+                "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; "
+                "not full semantic equivalence."
+            ),
             "evaluated": True,
             "passed": False,
+            "status": "failed",
             "reason": "empty_downstream_answer",
             "details": {"length": 0},
         }
@@ -574,90 +592,161 @@ def evaluate_downstream_task_answer(workload_id: str, raw_answer: str) -> Dict[s
     lower = raw_answer.lower()
 
     if workload_id == "json_cluster_config":
-        # Task: State active nodes (alpha, beta, gamma) and total memory (320 GiB, or 64 + 128 + 128)
-        has_nodes = all(n in lower for n in ["alpha", "beta", "gamma"])
-        has_mem = bool(re.search(r"\b(?:320|64|128)\b", lower))
-        passed = has_nodes and has_mem
+        # Check required values and structure:
+        # 1. Active nodes: node-alpha, node-beta, node-gamma (or alpha, beta, gamma)
+        # 2. Memory values: components 64 and 128, or total sum (320 or 312)
+        # 3. Status/Role recognition: ready, control-plane, worker
+        has_alpha = "alpha" in lower
+        has_beta = "beta" in lower
+        has_gamma = "gamma" in lower
+        has_all_nodes = has_alpha and has_beta and has_gamma
+
+        has_mem_components = ("64" in lower and "128" in lower)
+        has_mem_total = bool(re.search(r"\b(?:320|312)\b", lower))
+        has_memory = has_mem_components or has_mem_total
+
+        has_status_or_role = any(kw in lower for kw in ["ready", "control-plane", "worker", "status", "role"])
+
+        passed = has_all_nodes and has_memory and has_status_or_role
         return {
             "evaluation_type": "rule_based_answer_quality",
-            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "methodology_note": (
+                "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; "
+                "not full semantic equivalence."
+            ),
             "evaluated": True,
             "passed": passed,
-            "reason": "rule_based_identifies_active_nodes_and_memory",
-            "details": {"has_nodes": has_nodes, "has_memory": has_mem},
+            "status": "passed" if passed else "failed",
+            "reason": "rule_based_cluster_nodes_memory_and_structure",
+            "details": {
+                "has_node_alpha": has_alpha,
+                "has_node_beta": has_beta,
+                "has_node_gamma": has_gamma,
+                "has_all_nodes": has_all_nodes,
+                "has_memory_components": has_mem_components,
+                "has_memory_total": has_mem_total,
+                "has_status_or_role": has_status_or_role,
+            },
         }
 
     elif workload_id == "code_caching_pipeline":
-        # Task: Explain eviction policy (LRU / least recently used and TTL / expiration)
-        has_lru = bool(re.search(r"\b(?:lru|least recently used|popitem|evict)\b", lower))
-        has_ttl = bool(re.search(r"\b(?:ttl|expir|time to live|timestamp)\b", lower))
-        passed = has_lru and has_ttl
+        # Check LRU and TTL concepts and required behavior:
+        # 1. LRU concept: lru, least recently used, OrderedDict, move_to_end, popitem
+        # 2. TTL concept: ttl, time-to-live, expir*, timestamp, expires_at
+        # 3. Eviction behavior: capacity limit / max_size triggers removal of oldest/least-recently used entry
+        has_lru = bool(re.search(r"\b(?:lru|least recently used|ordereddict|move_to_end|popitem)\b", lower))
+        has_ttl = bool(re.search(r"\b(?:ttl|time[- ]to[- ]live|expir\w*|timestamp|expires_at)\b", lower))
+        has_behavior = bool(re.search(r"\b(?:capacity|max_size|oldest|limit|reached|evict\w*|remov\w*|del\b)\b", lower))
+        passed = has_lru and has_ttl and has_behavior
         return {
             "evaluation_type": "rule_based_answer_quality",
-            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "methodology_note": (
+                "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; "
+                "not full semantic equivalence."
+            ),
             "evaluated": True,
             "passed": passed,
-            "reason": "rule_based_explains_lru_and_ttl_mechanisms",
-            "details": {"has_lru": has_lru, "has_ttl": has_ttl},
+            "status": "passed" if passed else "failed",
+            "reason": "rule_based_lru_ttl_and_eviction_behavior",
+            "details": {
+                "has_lru": has_lru,
+                "has_ttl": has_ttl,
+                "has_eviction_behavior": has_behavior,
+            },
         }
 
     elif workload_id == "logs_database_incident":
-        # Task: Identify cause (connection refused / postgresql / connection pool) and timestamp (08:00:12 / 08:00:13 / 08:00:18)
-        has_cause = bool(re.search(r"\b(?:connection refused|database|postgresql|connection pool|5432|exhausted|connection loss)\b", lower))
-        has_ts = bool(re.search(r"\b08:00:1[238]\b", lower))
-        passed = has_cause and has_ts
+        # Check exact failure cause and timestamp:
+        # 1. Failure cause: connection refused / database connection loss / ConnectionPoolExhausted / postgresql / 10.0.1.5:5432
+        # 2. Timestamp: 08:00:12 (refusal), 08:00:13 (exhaustion), or 08:00:18 (fatal crash)
+        has_cause = bool(re.search(
+            r"\b(?:connection refused|connection loss|connectionpoolexhausted|postgresql|10\.0\.1\.5|unhandled database|all 20 active connections)\b",
+            lower
+        ))
+        has_timestamp = bool(re.search(r"\b08:00:1[238]\b", lower)) or "2026-11-05 08:00" in lower
+        passed = has_cause and has_timestamp
         return {
             "evaluation_type": "rule_based_answer_quality",
-            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "methodology_note": (
+                "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; "
+                "not full semantic equivalence."
+            ),
             "evaluated": True,
             "passed": passed,
-            "reason": "rule_based_identifies_incident_cause_and_timestamp",
-            "details": {"has_cause": has_cause, "has_timestamp": has_ts},
+            "status": "passed" if passed else "failed",
+            "reason": "rule_based_incident_failure_cause_and_timestamp",
+            "details": {
+                "has_cause": has_cause,
+                "has_timestamp": has_timestamp,
+            },
         }
 
     elif workload_id == "text_redundant_instructions":
-        # Task: Horizontal vs Vertical scaling in 3 bullet points, no proprietary vendor names
-        has_horiz = bool(re.search(r"\b(?:horizontal|scale out|add (?:nodes|machines|instances))\b", lower))
-        has_vert = bool(re.search(r"\b(?:vertical|scale up|add (?:ram|cpu|resources))\b", lower))
-        # Negative prohibition check: AWS, Azure, GCP, Google Cloud, Amazon Web Services
-        has_vendor = bool(re.search(r"\b(?:aws|azure|gcp|google cloud|amazon web services)\b", lower))
-        # Bullet formatting check
-        bullets = len(re.findall(r"(?:^|\n)\s*[\*\-\d\.]+\s+", raw_answer))
-        passed = has_horiz and has_vert and not has_vendor and (bullets >= 2)
+        # Check required concepts, exactly three bullets, and prohibited vendor names:
+        # 1. Required concepts: horizontal scaling and vertical scaling
+        # 2. Negative check for prohibited vendor names (AWS, Azure, GCP, Google Cloud, Amazon Web Services, Microsoft)
+        # 3. Exactly three bullets check
+        has_horizontal = bool(re.search(r"\b(?:horizontal|scale out|add (?:nodes|machines|instances|servers))\b", lower))
+        has_vertical = bool(re.search(r"\b(?:vertical|scale up|add (?:ram|cpu|resources|hardware|capacity))\b", lower))
+        has_vendor = bool(re.search(r"\b(?:aws|azure|gcp|google cloud|amazon web services|microsoft)\b", lower))
+
+        bullet_matches = re.findall(r"(?:^|\n)\s*(?:[\*\-]|\d+\.)\s+", raw_answer)
+        bullet_count = len(bullet_matches)
+        has_three_bullets = (bullet_count == 3)
+
+        passed = has_horizontal and has_vertical and (not has_vendor) and has_three_bullets
         return {
             "evaluation_type": "rule_based_answer_quality",
-            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "methodology_note": (
+                "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; "
+                "not full semantic equivalence."
+            ),
             "evaluated": True,
             "passed": passed,
-            "reason": "rule_based_explains_scaling_with_bullets_and_no_vendor_names",
+            "status": "passed" if passed else "failed",
+            "reason": "rule_based_scaling_concepts_three_bullets_and_no_vendor_names",
             "details": {
-                "has_horizontal": has_horiz,
-                "has_vertical": has_vert,
+                "has_horizontal": has_horizontal,
+                "has_vertical": has_vertical,
                 "has_vendor_prohibition_violation": has_vendor,
-                "bullet_count": bullets,
+                "bullet_count": bullet_count,
+                "has_three_bullets": has_three_bullets,
             },
         }
 
     elif workload_id == "mixed_debugging_dossier":
-        # Task: Summarize service status and check port match
-        has_service = "billing" in lower
-        has_port = "8080" in lower or "5432" in lower or "port" in lower
-        passed = has_service and has_port
+        # Check service identity and port consistency:
+        # 1. Service identity: billing-aggregator
+        # 2. Port consistency: addresses service port 8080 and/or database port 5432
+        has_service = bool(re.search(r"\b(?:billing-aggregator|billing)\b", lower))
+        has_port_eval = bool(re.search(r"\b(?:8080|5432|port configuration|port matches|ports? (?:do not match|differ|match))\b", lower))
+        passed = has_service and has_port_eval
         return {
             "evaluation_type": "rule_based_answer_quality",
-            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "methodology_note": (
+                "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; "
+                "not full semantic equivalence."
+            ),
             "evaluated": True,
             "passed": passed,
-            "reason": "rule_based_summarizes_service_and_evaluates_port",
-            "details": {"has_service": has_service, "has_port": has_port},
+            "status": "passed" if passed else "failed",
+            "reason": "rule_based_service_identity_and_port_consistency",
+            "details": {
+                "has_service": has_service,
+                "has_port_consistency_evaluation": has_port_eval,
+            },
         }
 
     return {
         "evaluation_type": "rule_based_answer_quality",
-        "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-        "evaluated": True,
-        "passed": len(raw_answer) > 20,
-        "reason": "rule_based_generic_length",
+        "methodology_note": (
+            "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; "
+            "not full semantic equivalence."
+        ),
+        "evaluated": False,
+        "passed": False,
+        "status": "not_evaluated",
+        "reason": "no_workload_specific_evaluator_defined",
         "details": {},
     }
 
@@ -672,7 +761,7 @@ async def execute_downstream_generation(prompt: str) -> Dict[str, Any]:
         "options": {
             "temperature": 0.0,
             "top_p": 0.9,
-            "num_predict": 256,
+            "num_predict": 384,
             "num_ctx": 4096,
         },
     }
@@ -686,22 +775,204 @@ async def execute_downstream_generation(prompt: str) -> Dict[str, Any]:
         return {
             "success": False,
             "raw_answer": "",
-            "latency_ms": latency_ms,
-            "eval_count": None,
+            "latency_ms": round(latency_ms, 2),
             "prompt_eval_count": None,
+            "eval_count": None,
+            "prompt_eval_duration_ms": None,
+            "eval_duration_ms": None,
             "done_reason": None,
             "error": f"Ollama HTTP {resp.status_code}",
         }
 
     data = resp.json()
+    prompt_dur_ns = data.get("prompt_eval_duration")
+    eval_dur_ns = data.get("eval_duration")
     return {
         "success": True,
         "raw_answer": data.get("response", "").strip(),
         "latency_ms": round(latency_ms, 2),
-        "eval_count": data.get("eval_count"),
         "prompt_eval_count": data.get("prompt_eval_count"),
+        "eval_count": data.get("eval_count"),
+        "prompt_eval_duration_ms": round(float(prompt_dur_ns) / 1_000_000.0, 2) if prompt_dur_ns is not None else None,
+        "eval_duration_ms": round(float(eval_dur_ns) / 1_000_000.0, 2) if eval_dur_ns is not None else None,
         "done_reason": data.get("done_reason"),
         "error": None,
+    }
+
+
+def validate_token_count(val: Any) -> Optional[int]:
+    """Validate and normalize a token count value.
+
+    Accepts valid non-negative integer token counts.
+    If a floating-point value is provided, it is accepted only if it is finite,
+    non-negative, and exactly represents an integer (val.is_integer()). Fractional
+    floats (e.g. 10.5) are rejected to prevent silent truncation.
+
+    Rejects:
+      - Booleans (True and False, which inherit from int in Python)
+      - NaN, +inf, -inf
+      - Negative counts
+      - Numeric strings
+      - Lists, dicts, None, and all other non-numeric types
+
+    Returns int if valid, else None.
+    """
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val if val >= 0 else None
+    if isinstance(val, float):
+        if math.isnan(val) or math.isinf(val):
+            return None
+        if val < 0:
+            return None
+        if val.is_integer():
+            return int(val)
+        return None
+    return None
+
+
+def aggregate_optimizer_inference_telemetry(
+    inference_telemetry: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Aggregate internal optimizer native Ollama telemetry across all relevant model calls.
+
+    Handles single calls, multiple retry calls, missing telemetry, and incomplete records.
+    Preserves per-call telemetry for traceability while providing aggregated metrics.
+    """
+    default_result: Dict[str, Any] = {
+        "call_count": 0,
+        "calls": [],
+        "has_complete_telemetry": False,
+        "telemetry_source": "unavailable",
+        "prompt_eval_count": None,
+        "prompt_eval_cached_count": None,
+        "cache_hit_ratio": None,
+        "prompt_eval_duration_ms": None,
+        "eval_count": None,
+        "eval_duration_ms": None,
+        "generation_tokens_per_second": None,
+        "selected_num_ctx": None,
+        "done_reason": None,
+        "first_call_prompt_eval_count": None,
+        "first_call_eval_count": None,
+    }
+
+    if not inference_telemetry or not isinstance(inference_telemetry, dict):
+        return default_result
+
+    calls = inference_telemetry.get("calls")
+    if not calls or not isinstance(calls, list):
+        return default_result
+
+    valid_calls: List[Dict[str, Any]] = [c for c in calls if isinstance(c, dict)]
+    if not valid_calls:
+        return default_result
+
+    call_count = len(valid_calls)
+    first_call = valid_calls[0]
+    first_call_prompt_eval_count = validate_token_count(first_call.get("prompt_eval_count"))
+    first_call_eval_count = validate_token_count(first_call.get("eval_count"))
+
+    # Aggregate prompt evaluation tokens
+    prompt_eval_counts = [
+        tok
+        for c in valid_calls
+        if (tok := validate_token_count(c.get("prompt_eval_count"))) is not None
+    ]
+    prompt_eval_cached_counts = [
+        tok
+        for c in valid_calls
+        if (tok := validate_token_count(c.get("prompt_eval_cached_count"))) is not None
+    ]
+    eval_counts = [
+        tok
+        for c in valid_calls
+        if (tok := validate_token_count(c.get("eval_count"))) is not None
+    ]
+
+    # Durations (ns to ms)
+    prompt_dur_ns_list = [
+        float(c["prompt_eval_duration_ns"])
+        for c in valid_calls
+        if isinstance(c.get("prompt_eval_duration_ns"), (int, float))
+        and not isinstance(c.get("prompt_eval_duration_ns"), bool)
+        and not math.isnan(float(c["prompt_eval_duration_ns"]))
+        and not math.isinf(float(c["prompt_eval_duration_ns"]))
+        and float(c["prompt_eval_duration_ns"]) >= 0
+    ]
+    eval_dur_ns_list = [
+        float(c["eval_duration_ns"])
+        for c in valid_calls
+        if isinstance(c.get("eval_duration_ns"), (int, float))
+        and not isinstance(c.get("eval_duration_ns"), bool)
+        and not math.isnan(float(c["eval_duration_ns"]))
+        and not math.isinf(float(c["eval_duration_ns"]))
+        and float(c["eval_duration_ns"]) >= 0
+    ]
+
+    # Determine completeness
+    all_calls_have_tokens = (
+        len(prompt_eval_counts) == call_count and len(eval_counts) == call_count
+    )
+
+    total_prompt_eval_count: Optional[int] = sum(prompt_eval_counts) if prompt_eval_counts else None
+    total_prompt_eval_cached_count: Optional[int] = (
+        sum(prompt_eval_cached_counts)
+        if prompt_eval_cached_counts
+        else (0 if total_prompt_eval_count is not None else None)
+    )
+    total_eval_count: Optional[int] = sum(eval_counts) if eval_counts else None
+
+    # Aggregate durations
+    total_prompt_eval_dur_ms: Optional[float] = (
+        round(sum(prompt_dur_ns_list) / 1_000_000.0, 2) if prompt_dur_ns_list else None
+    )
+    total_eval_dur_ms: Optional[float] = (
+        round(sum(eval_dur_ns_list) / 1_000_000.0, 2) if eval_dur_ns_list else None
+    )
+
+    # Cache hit ratio
+    cache_hit_ratio: Optional[float] = None
+    if total_prompt_eval_count is not None and total_prompt_eval_count > 0 and total_prompt_eval_cached_count is not None:
+        cache_hit_ratio = round(total_prompt_eval_cached_count / float(total_prompt_eval_count), 4)
+    elif call_count == 1 and first_call.get("cache_hit_ratio") is not None:
+        cache_hit_ratio = float(first_call["cache_hit_ratio"])
+
+    # Overall generation speed (tokens / sec)
+    gen_tok_per_sec: Optional[float] = None
+    if total_eval_count is not None and eval_dur_ns_list and sum(eval_dur_ns_list) > 0:
+        total_eval_sec = sum(eval_dur_ns_list) / 1_000_000_000.0
+        gen_tok_per_sec = round(float(total_eval_count) / total_eval_sec, 2)
+    elif call_count == 1 and first_call.get("generation_tokens_per_second") is not None:
+        gen_tok_per_sec = float(first_call["generation_tokens_per_second"])
+
+    # Context window & done_reason
+    selected_num_ctx = valid_calls[-1].get("selected_num_ctx") or first_call.get("selected_num_ctx")
+    done_reason = valid_calls[-1].get("done_reason") or first_call.get("done_reason")
+
+    telemetry_source = (
+        "complete_all_calls"
+        if all_calls_have_tokens
+        else ("first_call_only" if first_call_prompt_eval_count is not None else "incomplete")
+    )
+
+    return {
+        "call_count": call_count,
+        "calls": valid_calls,
+        "has_complete_telemetry": all_calls_have_tokens,
+        "telemetry_source": telemetry_source,
+        "prompt_eval_count": total_prompt_eval_count,
+        "prompt_eval_cached_count": total_prompt_eval_cached_count,
+        "cache_hit_ratio": cache_hit_ratio,
+        "prompt_eval_duration_ms": total_prompt_eval_dur_ms,
+        "eval_count": total_eval_count,
+        "eval_duration_ms": total_eval_dur_ms,
+        "generation_tokens_per_second": gen_tok_per_sec,
+        "selected_num_ctx": selected_num_ctx,
+        "done_reason": done_reason,
+        "first_call_prompt_eval_count": first_call_prompt_eval_count,
+        "first_call_eval_count": first_call_eval_count,
     }
 
 
@@ -715,6 +986,17 @@ async def run_single_workload_run(
     mode = workload["mode"]
     mode_val = cast(OptimizationMode, mode)
 
+    # 1. Compression Stage Execution
+    t_comp_start = time.perf_counter()
+    direct_comp_res = CompressionOrchestrator.compress(
+        text=prompt,
+        enabled=enable_compression,
+        reversible=True,
+    )
+    compression_stage_text = direct_comp_res.compressed_text
+    compression_stage_chars = len(compression_stage_text)
+
+    # 2. Pipeline Execution (Stage 0 -> Stage D)
     req = OptimizeRequest(
         prompt=prompt,
         mode=mode_val,
@@ -726,46 +1008,29 @@ async def run_single_workload_run(
     opt_resp = await ollama_service.optimize_prompt(req)
     total_opt_latency_ms = (time.perf_counter() - t0) * 1000.0
 
-    # Extract native Ollama telemetry from the optimization call
-    native_eval_count: Optional[int] = None
-    native_prompt_eval_count: Optional[int] = None
-    native_prompt_eval_cached_count: Optional[int] = None
-    native_cache_hit_ratio: Optional[float] = None
-    native_eval_duration_ms: Optional[float] = None
-    native_prompt_eval_duration_ms: Optional[float] = None
-    native_gen_tok_per_sec: Optional[float] = None
-    selected_num_ctx: Optional[int] = None
-    done_reason: Optional[str] = None
+    # Extract internal optimizer native Ollama telemetry across all calls
+    opt_telemetry = aggregate_optimizer_inference_telemetry(opt_resp.inference_telemetry)
+    native_eval_count = opt_telemetry["eval_count"]
+    native_prompt_eval_count = opt_telemetry["prompt_eval_count"]
+    native_prompt_eval_cached_count = opt_telemetry["prompt_eval_cached_count"]
+    native_cache_hit_ratio = opt_telemetry["cache_hit_ratio"]
+    native_eval_duration_ms = opt_telemetry["eval_duration_ms"]
+    native_prompt_eval_duration_ms = opt_telemetry["prompt_eval_duration_ms"]
+    native_gen_tok_per_sec = opt_telemetry["generation_tokens_per_second"]
+    selected_num_ctx = opt_telemetry["selected_num_ctx"]
+    done_reason = opt_telemetry["done_reason"]
 
-    if opt_resp.inference_telemetry and isinstance(opt_resp.inference_telemetry, dict):
-        calls = opt_resp.inference_telemetry.get("calls", [])
-        if calls and isinstance(calls, list):
-            first_call: Dict[str, Any] = calls[0]
-            native_eval_count = first_call.get("eval_count")
-            native_prompt_eval_count = first_call.get("prompt_eval_count")
-            native_prompt_eval_cached_count = first_call.get("prompt_eval_cached_count")
-            native_cache_hit_ratio = first_call.get("cache_hit_ratio")
-            eval_dur_ns = first_call.get("eval_duration_ns")
-            if eval_dur_ns is not None:
-                native_eval_duration_ms = round(float(eval_dur_ns) / 1_000_000.0, 2)
-            prompt_dur_ns = first_call.get("prompt_eval_duration_ns")
-            if prompt_dur_ns is not None:
-                native_prompt_eval_duration_ms = round(float(prompt_dur_ns) / 1_000_000.0, 2)
-            native_gen_tok_per_sec = first_call.get("generation_tokens_per_second")
-            selected_num_ctx = first_call.get("selected_num_ctx")
-            done_reason = first_call.get("done_reason")
-
-    # Compression telemetry
+    # Compression telemetry from response
     comp_applied = False
     comp_content_type = workload.get("content_type", "unknown")
     comp_strategy = "none"
-    comp_orig_tokens = 0
-    comp_final_tokens = 0
-    comp_reduction_pct = 0.0
-    comp_time_ms = 0.0
-    comp_ref: Optional[str] = None
-    comp_validation_passed = True
-    comp_reason = "compression_disabled" if not enable_compression else "none"
+    comp_orig_tokens = direct_comp_res.original_tokens
+    comp_final_tokens = direct_comp_res.compressed_tokens
+    comp_reduction_pct = direct_comp_res.reduction_percent
+    comp_time_ms = direct_comp_res.processing_time_ms
+    comp_ref: Optional[str] = direct_comp_res.restoration_reference
+    comp_validation_passed = direct_comp_res.validation_passed
+    comp_val_status = direct_comp_res.validation_status
 
     if opt_resp.compression:
         comp_applied = opt_resp.compression.enabled
@@ -777,57 +1042,80 @@ async def run_single_workload_run(
         comp_time_ms = opt_resp.compression.processing_time_ms
         comp_ref = opt_resp.compression.restoration_reference
         comp_validation_passed = (opt_resp.compression.validation_status == "passed")
-        comp_reason = opt_resp.compression.fallback_reason or "passed"
+        comp_val_status = opt_resp.compression.validation_status
 
-    # Evaluate prompt preservation
+    # Evaluate prompt preservation on final optimized prompt
     prompt_preservation = evaluate_prompt_preservation(workload["id"], opt_resp.optimized_prompt)
 
-    # Execute genuine downstream task inference using the optimized prompt
-    downstream = await execute_downstream_generation(opt_resp.optimized_prompt)
+    # 3. Downstream Task Model Inference
+    # The prompt delivered to the downstream model is the final optimized prompt produced by Argus
+    downstream_prompt = opt_resp.optimized_prompt
+    downstream = await execute_downstream_generation(downstream_prompt)
     downstream_eval = evaluate_downstream_task_answer(workload["id"], downstream["raw_answer"])
-
-    # Compute genuine character reduction without artificial zero-clamping
-    char_delta = len(prompt) - len(opt_resp.optimized_prompt)
-    char_reduction_percent = round((char_delta / max(1, len(prompt))) * 100.0, 2)
 
     return {
         "workload_id": workload["id"],
         "enable_compression": enable_compression,
-        "input_original_chars": len(prompt),
-        "input_effective_chars": len(opt_resp.optimized_prompt),
-        "char_reduction_percent": char_reduction_percent,
-        "compression_applied": comp_applied,
-        "content_type": comp_content_type,
-        "strategy": comp_strategy,
-        "original_tokens": comp_orig_tokens,
-        "compressed_tokens": comp_final_tokens,
-        "reduction_percent": comp_reduction_pct,
-        "compression_time_ms": comp_time_ms,
-        "compression_reason": comp_reason,
-        "compression_validation_passed": comp_validation_passed,
-        "restoration_reference": comp_ref,
-        "total_opt_latency_ms": round(total_opt_latency_ms, 2),
-        "selected_num_ctx": selected_num_ctx,
-        "prompt_eval_count": native_prompt_eval_count,
-        "prompt_eval_cached_count": native_prompt_eval_cached_count,
-        "cache_hit_ratio": native_cache_hit_ratio,
-        "prompt_eval_duration_ms": native_prompt_eval_duration_ms,
-        "eval_count": native_eval_count,
-        "eval_duration_ms": native_eval_duration_ms,
-        "generation_tokens_per_second": native_gen_tok_per_sec,
-        "done_reason": done_reason,
-        "optimized_prompt_preview": opt_resp.optimized_prompt[:250] + ("..." if len(opt_resp.optimized_prompt) > 250 else ""),
-        "prompt_preservation_evaluation": prompt_preservation,
-        "downstream_task_answer": downstream["raw_answer"],
-        "downstream_task_evaluation": downstream_eval,
-        "downstream_eval_tokens": downstream["eval_count"],
-        "downstream_latency_ms": downstream["latency_ms"],
+        # Section 2: Four equivalent stage measurements
+        "stage_measurements": {
+            "original_workload_prompt_chars": len(prompt),
+            "compression_stage_output_chars": compression_stage_chars,
+            "final_optimized_prompt_chars": len(opt_resp.optimized_prompt),
+            "downstream_model_input_chars": len(downstream_prompt),
+        },
+        # Section 4: Compression stage telemetry
+        "compression_stage": {
+            "applied": comp_applied,
+            "content_type": comp_content_type,
+            "strategy": comp_strategy,
+            "original_tokens": comp_orig_tokens,
+            "compressed_tokens": comp_final_tokens,
+            "tokens_reduced": comp_orig_tokens - comp_final_tokens,
+            "reduction_percent": comp_reduction_pct,
+            "processing_time_ms": comp_time_ms,
+            "validation_status": comp_val_status,
+            "validation_passed": comp_validation_passed,
+            "restoration_reference": comp_ref,
+        },
+        # Section 1: Internal Argus Optimizer Inference Metrics
+        "optimizer_inference": {
+            "total_latency_ms": round(total_opt_latency_ms, 2),
+            "validation_status": opt_resp.validation_status,
+            "call_count": opt_telemetry["call_count"],
+            "telemetry_source": opt_telemetry["telemetry_source"],
+            "has_complete_telemetry": opt_telemetry["has_complete_telemetry"],
+            "selected_num_ctx": selected_num_ctx,
+            "prompt_eval_count": native_prompt_eval_count,
+            "prompt_eval_cached_count": native_prompt_eval_cached_count,
+            "cache_hit_ratio": native_cache_hit_ratio,
+            "prompt_eval_duration_ms": native_prompt_eval_duration_ms,
+            "eval_count": native_eval_count,
+            "eval_duration_ms": native_eval_duration_ms,
+            "generation_tokens_per_second": native_gen_tok_per_sec,
+            "done_reason": done_reason,
+            "first_call_prompt_eval_count": opt_telemetry["first_call_prompt_eval_count"],
+            "first_call_eval_count": opt_telemetry["first_call_eval_count"],
+            "calls": opt_telemetry["calls"],
+            "final_optimized_prompt_preview": opt_resp.optimized_prompt[:250] + ("..." if len(opt_resp.optimized_prompt) > 250 else ""),
+            "prompt_preservation_evaluation": prompt_preservation,
+        },
+        # Section 1 & 3: Downstream Model Inference Metrics (Actual Task Execution)
+        "downstream_inference": {
+            "prompt_eval_count": downstream["prompt_eval_count"],
+            "eval_count": downstream["eval_count"],
+            "prompt_eval_duration_ms": downstream["prompt_eval_duration_ms"],
+            "eval_duration_ms": downstream["eval_duration_ms"],
+            "latency_ms": downstream["latency_ms"],
+            "done_reason": downstream["done_reason"],
+            "raw_answer": downstream["raw_answer"],
+            "task_evaluation": downstream_eval,
+        },
     }
 
 
 def verify_workload_restoration(workload: Dict[str, Any], compressed_run: Dict[str, Any]) -> Dict[str, Any]:
     """Verify exact byte and hash restoration against the actual expected original payload."""
-    ref_key = compressed_run.get("restoration_reference")
+    ref_key = compressed_run["compression_stage"].get("restoration_reference")
     expected_content = workload.get("expected_registered_content")
 
     if not ref_key or expected_content is None:
@@ -890,6 +1178,283 @@ def verify_workload_restoration(workload: Dict[str, Any], compressed_run: Dict[s
     }
 
 
+NEW_SCHEMA_IDENTIFIER_KEYS = {
+    "first_call_prompt_eval_count",
+    "first_call_eval_count",
+    "calls",
+    "call_count",
+    "telemetry_source",
+    "has_complete_telemetry",
+}
+
+
+def is_new_schema_optimizer_record(opt_dict: Dict[str, Any]) -> bool:
+    """Check if an optimizer telemetry record follows the new multi-call telemetry schema.
+
+    Identified by the presence of explicit new-schema keys such as 'first_call_prompt_eval_count',
+    'calls', 'call_count', 'telemetry_source', or 'has_complete_telemetry'.
+    """
+    if not isinstance(opt_dict, dict):
+        return False
+    return any(k in opt_dict for k in NEW_SCHEMA_IDENTIFIER_KEYS)
+
+
+def is_demonstrably_historical_single_call(opt_dict: Dict[str, Any]) -> bool:
+    """Determine whether an optimizer telemetry record demonstrably represents a valid legacy single-call run.
+
+    Historical benchmark records in Argus recorded only the primary (first) call directly in
+    'prompt_eval_count' along with optimizer run metadata ('validation_status', 'total_latency_ms',
+    or 'selected_num_ctx').
+    They never contained new-schema keys ('first_call_prompt_eval_count', 'calls', 'call_count')
+    and never had multi-call indicators ('retry_count' > 0, 'is_multi_call' = True, etc.).
+
+    Returns False for new-schema records, multi-call records, incomplete records, or arbitrary dicts.
+    """
+    if not isinstance(opt_dict, dict):
+        return False
+
+    # 1. Must NOT be a new-schema record
+    if any(k in opt_dict for k in NEW_SCHEMA_IDENTIFIER_KEYS):
+        return False
+
+    # 2. Must NOT indicate multi-call or retries
+    for k in ("retry_count", "retries", "retries_attempted"):
+        v = opt_dict.get(k)
+        if v is True:
+            return False
+        if v is not None and not isinstance(v, bool) and isinstance(v, (int, float)):
+            if math.isnan(v) or math.isinf(v) or v > 0:
+                return False
+
+    for k in ("is_multi_call", "multi_call"):
+        if opt_dict.get(k) is True:
+            return False
+
+    for k in ("total_calls", "call_count"):
+        v = opt_dict.get(k)
+        if v is True:
+            return False
+        if v is not None and not isinstance(v, bool) and isinstance(v, (int, float)):
+            if math.isnan(v) or math.isinf(v) or v > 1:
+                return False
+
+    # 3. Must have a valid non-negative prompt_eval_count
+    pe = validate_token_count(opt_dict.get("prompt_eval_count"))
+    if pe is None:
+        return False
+
+    # 4. Must demonstrably contain authentic Argus historical run context
+    # Historical records contain 'validation_status' (e.g. 'passed', 'fallback')
+    # and at least one execution metadata key ('total_latency_ms' or 'selected_num_ctx')
+    # Or explicitly flagged as historical single call
+    has_historical_context = (
+        ("validation_status" in opt_dict and ("total_latency_ms" in opt_dict or "selected_num_ctx" in opt_dict or "done_reason" in opt_dict))
+        or opt_dict.get("historical_single_call") is True
+    )
+
+    return has_historical_context
+
+
+def extract_primary_rewrite_prompt_tokens(opt_dict: Dict[str, Any]) -> Optional[int]:
+    """Extract primary rewrite prefill token count safely and strictly.
+
+    For new-schema records:
+      - STRICTLY uses 'first_call_prompt_eval_count'.
+      - Validates with validate_token_count (rejects bool, NaN, inf, negative, strings, objects).
+      - NEVER falls back to 'prompt_eval_count' (which may be aggregate across retries).
+      - If first-call telemetry is missing or invalid, returns None.
+
+    For historical records:
+      - ONLY allows fallback to 'prompt_eval_count' if demonstrably a legacy single-call record.
+      - Validates with validate_token_count.
+      - If record has multi-call indicators or lacks historical run context, returns None.
+    """
+    if not isinstance(opt_dict, dict):
+        return None
+
+    if is_new_schema_optimizer_record(opt_dict):
+        raw = opt_dict.get("first_call_prompt_eval_count")
+        return validate_token_count(raw)
+
+    if is_demonstrably_historical_single_call(opt_dict):
+        raw = opt_dict.get("prompt_eval_count")
+        return validate_token_count(raw)
+
+    return None
+
+
+def calculate_primary_rewrite_savings(
+    base_run: Dict[str, Any],
+    comp_run: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Calculate prefill token savings for the primary (initial) rewrite attempt.
+
+    Preserves comparability with historical first-call benchmark measurements.
+    Strictly uses 'first_call_prompt_eval_count' for new-schema records; never substitutes
+    aggregate multi-call telemetry if first-call telemetry is missing.
+    Allows fallback to 'prompt_eval_count' only for demonstrably valid historical single-call records.
+    """
+    base_opt = base_run.get("optimizer_inference", {}) if isinstance(base_run, dict) else {}
+    comp_opt = comp_run.get("optimizer_inference", {}) if isinstance(comp_run, dict) else {}
+
+    base_tok = extract_primary_rewrite_prompt_tokens(base_opt)
+    comp_tok = extract_primary_rewrite_prompt_tokens(comp_opt)
+
+    if base_tok is not None and comp_tok is not None:
+        saved = base_tok - comp_tok
+        pct = round((saved / max(1, base_tok)) * 100.0, 2)
+        status = "evaluated"
+    else:
+        saved = None
+        pct = None
+        status = "unavailable"
+
+    return {
+        "metric_name": "primary_rewrite_call_savings",
+        "measurement_scope": "first_call_only",
+        "status": status,
+        "baseline_prompt_eval_count": base_tok,
+        "compressed_prompt_eval_count": comp_tok,
+        "tokens_saved": saved,
+        "reduction_percent": pct,
+    }
+
+
+def calculate_total_optimizer_cost(
+    base_run: Dict[str, Any],
+    comp_run: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Calculate total optimizer inference cost across all relevant model calls including retries.
+
+    Reports baseline total, compressed total, tokens saved, percentage, call counts,
+    and telemetry completeness.
+
+    - When both baseline and compressed telemetry are complete:
+        Evaluates complete total counts, tokens saved, percentage savings, and status 'evaluated'.
+    - When either side has incomplete telemetry:
+        Marks status 'incomplete_telemetry', sets tokens_saved and reduction_percent to None,
+        does not report partial aggregate counts as complete totals, and preserves raw counts
+        strictly as partial observations with an identifying explanation.
+    - When required telemetry is missing or invalid:
+        Returns status 'unavailable' without fabricating counts.
+    """
+    base_opt = base_run.get("optimizer_inference", {}) if isinstance(base_run, dict) else {}
+    comp_opt = comp_run.get("optimizer_inference", {}) if isinstance(comp_run, dict) else {}
+
+    base_calls = base_opt.get("calls")
+    comp_calls = comp_opt.get("calls")
+    base_call_count = base_opt.get("call_count")
+    comp_call_count = comp_opt.get("call_count")
+    base_complete = base_opt.get("has_complete_telemetry")
+    comp_complete = comp_opt.get("has_complete_telemetry")
+
+    # If neither calls list nor call_count is present, this is historical single-call data
+    base_is_new = is_new_schema_optimizer_record(base_opt)
+    comp_is_new = is_new_schema_optimizer_record(comp_opt)
+
+    if not base_is_new and not comp_is_new:
+        return {
+            "metric_name": "total_optimizer_inference_cost",
+            "measurement_scope": "all_relevant_calls",
+            "status": "unavailable",
+            "baseline_total_prompt_eval_count": None,
+            "compressed_total_prompt_eval_count": None,
+            "tokens_saved": None,
+            "reduction_percent": None,
+            "baseline_call_count": None,
+            "compressed_call_count": None,
+            "has_complete_telemetry": False,
+            "telemetry_source": "unavailable_in_historical_benchmark",
+            "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated.",
+        }
+
+    if not (base_is_new and comp_is_new):
+        return {
+            "metric_name": "total_optimizer_inference_cost",
+            "measurement_scope": "all_relevant_calls",
+            "status": "unavailable",
+            "baseline_total_prompt_eval_count": None,
+            "compressed_total_prompt_eval_count": None,
+            "tokens_saved": None,
+            "reduction_percent": None,
+            "baseline_call_count": None,
+            "compressed_call_count": None,
+            "has_complete_telemetry": False,
+            "telemetry_source": "incompatible_schema",
+            "note": "Mismatched telemetry schema between baseline and compressed runs; cannot compare total cost.",
+        }
+
+    base_tot = validate_token_count(base_opt.get("prompt_eval_count"))
+    comp_tot = validate_token_count(comp_opt.get("prompt_eval_count"))
+    has_complete = base_complete is True and comp_complete is True
+
+    b_calls_count = base_call_count if isinstance(base_call_count, int) and not isinstance(base_call_count, bool) and base_call_count >= 0 else len(base_calls or [])
+    c_calls_count = comp_call_count if isinstance(comp_call_count, int) and not isinstance(comp_call_count, bool) and comp_call_count >= 0 else len(comp_calls or [])
+
+    # If required telemetry is missing or invalid on either side -> unavailable
+    if base_tot is None or comp_tot is None:
+        return {
+            "metric_name": "total_optimizer_inference_cost",
+            "measurement_scope": "all_relevant_calls",
+            "status": "unavailable",
+            "baseline_total_prompt_eval_count": None,
+            "compressed_total_prompt_eval_count": None,
+            "tokens_saved": None,
+            "reduction_percent": None,
+            "baseline_call_count": b_calls_count,
+            "compressed_call_count": c_calls_count,
+            "has_complete_telemetry": False,
+            "telemetry_source": "unavailable",
+            "note": "Required total prompt evaluation tokens are missing or invalid; cannot evaluate total cost.",
+        }
+
+    # If both sides have complete telemetry -> evaluated
+    if has_complete:
+        saved = base_tot - comp_tot
+        pct = round((saved / max(1, base_tot)) * 100.0, 2)
+        return {
+            "metric_name": "total_optimizer_inference_cost",
+            "measurement_scope": "all_relevant_calls",
+            "status": "evaluated",
+            "baseline_total_prompt_eval_count": base_tot,
+            "compressed_total_prompt_eval_count": comp_tot,
+            "tokens_saved": saved,
+            "reduction_percent": pct,
+            "baseline_call_count": b_calls_count,
+            "compressed_call_count": c_calls_count,
+            "has_complete_telemetry": True,
+            "telemetry_source": "complete_all_calls",
+        }
+
+    # If either side has incomplete telemetry -> incomplete_telemetry
+    # Do not present partial aggregate counts as complete total-cost measurements.
+    # Set tokens_saved = None, reduction_percent = None.
+    # Preserve available raw counts strictly as partial observations.
+    reasons: List[str] = []
+    if base_complete is not True:
+        reasons.append("baseline run has incomplete call telemetry (e.g. unmeasured retries)")
+    if comp_complete is not True:
+        reasons.append("compressed run has incomplete call telemetry (e.g. unmeasured retries)")
+    note = f"Incomplete multi-call telemetry: {'; '.join(reasons)}. Actual total cost and savings cannot be determined."
+
+    return {
+        "metric_name": "total_optimizer_inference_cost",
+        "measurement_scope": "all_relevant_calls",
+        "status": "incomplete_telemetry",
+        "baseline_total_prompt_eval_count": None,
+        "compressed_total_prompt_eval_count": None,
+        "tokens_saved": None,
+        "reduction_percent": None,
+        "partial_observed_baseline_tokens": base_tot,
+        "partial_observed_compressed_tokens": comp_tot,
+        "baseline_call_count": b_calls_count,
+        "compressed_call_count": c_calls_count,
+        "has_complete_telemetry": False,
+        "telemetry_source": "incomplete",
+        "note": note,
+    }
+
+
 async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
     """Execute complete benchmark across workloads with warm-up, repetitions, and alternating order."""
     print("=" * 80)
@@ -947,23 +1512,48 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
 
             # Quality comparison statuses
             prompt_preservation_status = determine_comparison_status(
-                base_run["prompt_preservation_evaluation"]["passed"],
-                comp_run["prompt_preservation_evaluation"]["passed"],
+                base_run["optimizer_inference"]["prompt_preservation_evaluation"]["passed"],
+                comp_run["optimizer_inference"]["prompt_preservation_evaluation"]["passed"],
             )
             downstream_answer_status = determine_comparison_status(
-                base_run["downstream_task_evaluation"]["passed"],
-                comp_run["downstream_task_evaluation"]["passed"],
+                base_run["downstream_inference"]["task_evaluation"]["passed"],
+                comp_run["downstream_inference"]["task_evaluation"]["passed"],
             )
 
-            # Token reduction
-            prompt_token_savings: Optional[int] = None
-            if base_run["prompt_eval_count"] is not None and comp_run["prompt_eval_count"] is not None:
-                prompt_token_savings = base_run["prompt_eval_count"] - comp_run["prompt_eval_count"]
+            # Section 2: Stage character comparisons
+            base_stages = base_run["stage_measurements"]
+            comp_stages = comp_run["stage_measurements"]
 
-            base_chars = base_run["input_original_chars"]
-            comp_chars = comp_run["input_effective_chars"]
-            char_reduction = base_chars - comp_chars
-            char_reduction_percent = round((char_reduction / max(1, base_chars)) * 100.0, 2)
+            # Compression-stage character reduction
+            comp_stage_char_reduction = base_stages["original_workload_prompt_chars"] - comp_stages["compression_stage_output_chars"]
+            comp_stage_reduction_pct = round(
+                (comp_stage_char_reduction / max(1, base_stages["original_workload_prompt_chars"])) * 100.0, 2
+            )
+
+            # Final optimized prompt character reduction
+            final_char_reduction = base_stages["final_optimized_prompt_chars"] - comp_stages["final_optimized_prompt_chars"]
+            final_reduction_pct = round(
+                (final_char_reduction / max(1, base_stages["final_optimized_prompt_chars"])) * 100.0, 2
+            )
+
+            # Section 1: Downstream task model token savings
+            base_down_prompt_tok = base_run["downstream_inference"]["prompt_eval_count"]
+            comp_down_prompt_tok = comp_run["downstream_inference"]["prompt_eval_count"]
+            downstream_tokens_saved: Optional[int] = None
+            downstream_tokens_saved_pct: Optional[float] = None
+            if base_down_prompt_tok is not None and comp_down_prompt_tok is not None:
+                saved = int(base_down_prompt_tok) - int(comp_down_prompt_tok)
+                downstream_tokens_saved = saved
+                downstream_tokens_saved_pct = round(
+                    (saved / max(1, int(base_down_prompt_tok))) * 100.0, 2
+                )
+
+            # Section 1: Calculate both distinct optimizer inference metrics:
+            # 1. Primary rewrite call savings (first-call only, historical baseline compatible)
+            primary_rewrite_savings = calculate_primary_rewrite_savings(base_run, comp_run)
+
+            # 2. Total optimizer inference cost (all relevant calls including retries)
+            total_optimizer_cost = calculate_total_optimizer_cost(base_run, comp_run)
 
             trial_result = {
                 "workload_id": workload["id"],
@@ -974,10 +1564,48 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
                 "baseline": base_run,
                 "compressed": comp_run,
                 "comparison": {
-                    "character_reduction": char_reduction,
-                    "character_reduction_percent": char_reduction_percent,
-                    "prompt_eval_token_savings": prompt_token_savings,
-                    "compression_overhead_ms": comp_run["compression_time_ms"],
+                    # Section 2: Four equivalent stage measurements
+                    "stage_measurements_comparison": {
+                        "original_workload_prompt_chars": base_stages["original_workload_prompt_chars"],
+                        "compression_stage": {
+                            "baseline_chars": base_stages["compression_stage_output_chars"],
+                            "compressed_chars": comp_stages["compression_stage_output_chars"],
+                            "reduction_chars": comp_stage_char_reduction,
+                            "reduction_percent": comp_stage_reduction_pct,
+                        },
+                        "final_optimized_prompt": {
+                            "baseline_chars": base_stages["final_optimized_prompt_chars"],
+                            "compressed_chars": comp_stages["final_optimized_prompt_chars"],
+                            "reduction_chars": final_char_reduction,
+                            "reduction_percent": final_reduction_pct,
+                        },
+                        "downstream_model_input": {
+                            "baseline_chars": base_stages["downstream_model_input_chars"],
+                            "compressed_chars": comp_stages["downstream_model_input_chars"],
+                        },
+                    },
+                    # Section 1: Actual Downstream Task Model Token Savings
+                    "downstream_token_savings": {
+                        "baseline_prompt_eval_count": base_down_prompt_tok,
+                        "compressed_prompt_eval_count": comp_down_prompt_tok,
+                        "tokens_saved": downstream_tokens_saved,
+                        "reduction_percent": downstream_tokens_saved_pct,
+                    },
+                    # Section 1: Primary Rewrite Call Token Savings (First-Call Only)
+                    "primary_rewrite_call_savings": primary_rewrite_savings,
+                    # Section 1: Total Optimizer Inference Cost (All Calls Including Retries)
+                    "total_optimizer_inference_cost": total_optimizer_cost,
+                    # Section 1: Internal Optimizer Rewriter Token Savings (Backward-compatible alias)
+                    "internal_optimizer_token_savings": {
+                        "baseline_prompt_eval_count": primary_rewrite_savings["baseline_prompt_eval_count"],
+                        "compressed_prompt_eval_count": primary_rewrite_savings["compressed_prompt_eval_count"],
+                        "tokens_saved": primary_rewrite_savings["tokens_saved"],
+                        "reduction_percent": primary_rewrite_savings["reduction_percent"],
+                        "telemetry_source": primary_rewrite_savings["measurement_scope"],
+                        "baseline_call_count": base_run["optimizer_inference"].get("call_count", 1),
+                        "compressed_call_count": comp_run["optimizer_inference"].get("call_count", 1),
+                    },
+                    "compression_overhead_ms": comp_run["compression_stage"]["processing_time_ms"],
                     "prompt_preservation_status": prompt_preservation_status,
                     "downstream_answer_status": downstream_answer_status,
                     "restoration_verification": restoration,
@@ -985,45 +1613,117 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
             }
 
             print(
-                f"    -> Chars: {comp_run['input_effective_chars']} ({char_reduction_percent:+.2f}%) | "
-                f"Prompt tokens: {comp_run['prompt_eval_count']} (Saved: {prompt_token_savings}) | "
-                f"Engine Latency: {comp_run['compression_time_ms']:.2f} ms | "
-                f"Prompt Preserved: {prompt_preservation_status} | "
+                f"    -> Comp Stage: {comp_stages['compression_stage_output_chars']} chars ({comp_stage_reduction_pct:+.2f}%) | "
+                f"Final Opt: {comp_stages['final_optimized_prompt_chars']} chars ({final_reduction_pct:+.2f}%) | "
+                f"Downstream tokens saved: {downstream_tokens_saved} | "
                 f"Downstream Answer: {downstream_answer_status}"
             )
             all_trials.append(trial_result)
 
-    # Compute statistically rigorous aggregates without zero-substitution for missing data
-    char_reductions = [t["comparison"]["character_reduction_percent"] for t in all_trials]
-    token_savings_list = [
-        t["comparison"]["prompt_eval_token_savings"]
-        for t in all_trials
-        if t["comparison"]["prompt_eval_token_savings"] is not None
-    ]
-    engine_latencies = [t["compressed"]["compression_time_ms"] for t in all_trials]
-
-    total_base_chars = sum(t["baseline"]["input_original_chars"] for t in all_trials)
-    total_comp_chars = sum(t["compressed"]["input_effective_chars"] for t in all_trials)
-    agg_char_reduction_pct = round(((total_base_chars - total_comp_chars) / max(1, total_base_chars)) * 100.0, 2)
-
-    # Token totals only across trials with valid measurements
-    valid_token_trials = [
+    # 1. Downstream token savings aggregation
+    valid_down_token_trials = [
         t for t in all_trials
-        if t["baseline"]["prompt_eval_count"] is not None and t["compressed"]["prompt_eval_count"] is not None
+        if t["comparison"]["downstream_token_savings"]["tokens_saved"] is not None
     ]
-    if valid_token_trials:
-        total_base_prompt_tokens = sum(t["baseline"]["prompt_eval_count"] for t in valid_token_trials)
-        total_comp_prompt_tokens = sum(t["compressed"]["prompt_eval_count"] for t in valid_token_trials)
-        agg_token_reduction_pct = (
-            round(((total_base_prompt_tokens - total_comp_prompt_tokens) / max(1, total_base_prompt_tokens)) * 100.0, 2)
-            if total_base_prompt_tokens > 0
-            else 0.0
-        )
+    if valid_down_token_trials:
+        total_base_down_tokens = sum(t["comparison"]["downstream_token_savings"]["baseline_prompt_eval_count"] for t in valid_down_token_trials)
+        total_comp_down_tokens = sum(t["comparison"]["downstream_token_savings"]["compressed_prompt_eval_count"] for t in valid_down_token_trials)
+        total_down_saved = total_base_down_tokens - total_comp_down_tokens
+        agg_down_token_pct = round((total_down_saved / max(1, total_base_down_tokens)) * 100.0, 2)
+        down_tokens_saved_list = [t["comparison"]["downstream_token_savings"]["tokens_saved"] for t in valid_down_token_trials]
+        mean_down_saved = round(statistics.mean(down_tokens_saved_list), 2)
+        median_down_saved = round(statistics.median(down_tokens_saved_list), 2)
+        stdev_down_saved = round(statistics.stdev(down_tokens_saved_list), 2) if len(down_tokens_saved_list) > 1 else 0.0
     else:
-        total_base_prompt_tokens = None
-        total_comp_prompt_tokens = None
-        agg_token_reduction_pct = None
+        total_base_down_tokens = None
+        total_comp_down_tokens = None
+        total_down_saved = None
+        agg_down_token_pct = None
+        mean_down_saved = None
+        median_down_saved = None
+        stdev_down_saved = None
 
+    # 2. Internal optimizer token savings aggregation (Primary Rewrite Call)
+    valid_opt_token_trials = [
+        t for t in all_trials
+        if t["comparison"]["internal_optimizer_token_savings"]["tokens_saved"] is not None
+    ]
+    if valid_opt_token_trials:
+        total_base_opt_tokens = sum(t["comparison"]["internal_optimizer_token_savings"]["baseline_prompt_eval_count"] for t in valid_opt_token_trials)
+        total_comp_opt_tokens = sum(t["comparison"]["internal_optimizer_token_savings"]["compressed_prompt_eval_count"] for t in valid_opt_token_trials)
+        total_opt_saved = total_base_opt_tokens - total_comp_opt_tokens
+        agg_opt_token_pct = round((total_opt_saved / max(1, total_base_opt_tokens)) * 100.0, 2)
+        opt_tokens_saved_list = [t["comparison"]["internal_optimizer_token_savings"]["tokens_saved"] for t in valid_opt_token_trials]
+        mean_opt_saved = round(statistics.mean(opt_tokens_saved_list), 2)
+        median_opt_saved = round(statistics.median(opt_tokens_saved_list), 2)
+        stdev_opt_saved = round(statistics.stdev(opt_tokens_saved_list), 2) if len(opt_tokens_saved_list) > 1 else 0.0
+    else:
+        total_base_opt_tokens = None
+        total_comp_opt_tokens = None
+        total_opt_saved = None
+        agg_opt_token_pct = None
+        mean_opt_saved = None
+        median_opt_saved = None
+        stdev_opt_saved = None
+
+    # Total optimizer inference cost aggregation (All Calls Including Retries)
+    valid_tot_cost_trials = [
+        t for t in all_trials
+        if t["comparison"].get("total_optimizer_inference_cost", {}).get("tokens_saved") is not None
+    ]
+    if valid_tot_cost_trials:
+        tot_base = sum(t["comparison"]["total_optimizer_inference_cost"]["baseline_total_prompt_eval_count"] for t in valid_tot_cost_trials)
+        tot_comp = sum(t["comparison"]["total_optimizer_inference_cost"]["compressed_total_prompt_eval_count"] for t in valid_tot_cost_trials)
+        tot_saved = tot_base - tot_comp
+        tot_pct = round((tot_saved / max(1, tot_base)) * 100.0, 2)
+        saved_list = [t["comparison"]["total_optimizer_inference_cost"]["tokens_saved"] for t in valid_tot_cost_trials]
+        mean_tot_saved = round(statistics.mean(saved_list), 2)
+        median_tot_saved = round(statistics.median(saved_list), 2)
+        stdev_tot_saved = round(statistics.stdev(saved_list), 2) if len(saved_list) > 1 else 0.0
+        all_complete = all(t["comparison"]["total_optimizer_inference_cost"].get("has_complete_telemetry", False) for t in valid_tot_cost_trials)
+        total_optimizer_cost_summary: Dict[str, Any] = {
+            "status": "evaluated",
+            "total_baseline_tokens": tot_base,
+            "total_compressed_tokens": tot_comp,
+            "total_tokens_saved": tot_saved,
+            "aggregate_percent": tot_pct,
+            "mean_tokens_saved": mean_tot_saved,
+            "median_tokens_saved": median_tot_saved,
+            "stdev_tokens_saved": stdev_tot_saved,
+            "has_complete_telemetry": all_complete,
+            "measurement_scope": "all_relevant_calls",
+        }
+    else:
+        total_optimizer_cost_summary = {
+            "status": "unavailable_in_historical_run",
+            "total_baseline_tokens": None,
+            "total_compressed_tokens": None,
+            "total_tokens_saved": None,
+            "aggregate_percent": None,
+            "mean_tokens_saved": None,
+            "median_tokens_saved": None,
+            "stdev_tokens_saved": None,
+            "has_complete_telemetry": False,
+            "measurement_scope": "all_relevant_calls",
+            "note": "Multi-call retry telemetry was not preserved in historical first-call benchmark; not fabricated.",
+        }
+
+    # 3. Compression-stage character reduction aggregation
+    comp_stage_pcts = [t["comparison"]["stage_measurements_comparison"]["compression_stage"]["reduction_percent"] for t in all_trials]
+    total_base_orig_chars = sum(t["comparison"]["stage_measurements_comparison"]["original_workload_prompt_chars"] for t in all_trials)
+    total_comp_stage_chars = sum(t["comparison"]["stage_measurements_comparison"]["compression_stage"]["compressed_chars"] for t in all_trials)
+    agg_comp_stage_pct = round(((total_base_orig_chars - total_comp_stage_chars) / max(1, total_base_orig_chars)) * 100.0, 2)
+
+    # 4. Final optimized prompt character reduction aggregation
+    final_opt_pcts = [t["comparison"]["stage_measurements_comparison"]["final_optimized_prompt"]["reduction_percent"] for t in all_trials]
+    total_base_final_chars = sum(t["comparison"]["stage_measurements_comparison"]["final_optimized_prompt"]["baseline_chars"] for t in all_trials)
+    total_comp_final_chars = sum(t["comparison"]["stage_measurements_comparison"]["final_optimized_prompt"]["compressed_chars"] for t in all_trials)
+    agg_final_opt_pct = round(((total_base_final_chars - total_comp_final_chars) / max(1, total_base_final_chars)) * 100.0, 2)
+
+    # 5. Latency aggregation
+    engine_latencies = [t["compressed"]["compression_stage"]["processing_time_ms"] for t in all_trials]
+
+    # 6. Quality and Restoration Summaries
     tested_restorations = [
         t["comparison"]["restoration_verification"]
         for t in all_trials
@@ -1035,6 +1735,7 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
     downstream_regressions = sum(1 for t in all_trials if t["comparison"]["downstream_answer_status"] == "regression")
     downstream_improvements = sum(1 for t in all_trials if t["comparison"]["downstream_answer_status"] == "improvement")
     downstream_both_failed = sum(1 for t in all_trials if t["comparison"]["downstream_answer_status"] == "inconclusive_or_both_failed")
+    downstream_not_evaluated = sum(1 for t in all_trials if t["comparison"]["downstream_answer_status"] == "not_evaluated")
 
     summary_payload: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1048,7 +1749,7 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
             "downstream_inference_parameters": {
                 "temperature": 0.0,
                 "top_p": 0.9,
-                "num_predict": 256,
+                "num_predict": 384,
                 "num_ctx": 4096,
             },
             "quality_evaluation_note": (
@@ -1059,41 +1760,80 @@ async def run_full_benchmark(warmup: int = 1, reps: int = 2) -> Dict[str, Any]:
                 "Reversible restoration compares retrieved content against the actual expected original payload, "
                 "verifying byte-for-byte equality, SHA-256 hash match, and negative test verification."
             ),
-            "ollama_telemetry_semantics_note": (
-                "prompt_eval_count represents total input tokens prefilled by Ollama. "
-                "prompt_eval_cached_count represents tokens found in Ollama's local KV prefix cache. "
-                "eval_count represents tokens generated during output decoding. "
-                "All metrics are native counters reported directly by Ollama."
+            "inference_separation_note": (
+                "Internal optimizer inference metrics represent the prompt rewriting call (Stage C). "
+                "Downstream model inference metrics represent actual task execution using the optimized prompt."
             ),
         },
         "aggregate_statistics": {
-            "character_reduction": {
-                "aggregate_percent": agg_char_reduction_pct,
-                "mean_percent": round(statistics.mean(char_reductions), 2) if char_reductions else 0.0,
-                "median_percent": round(statistics.median(char_reductions), 2) if char_reductions else 0.0,
-                "stdev_percent": round(statistics.stdev(char_reductions), 2) if len(char_reductions) > 1 else 0.0,
+            # Section 1: Actual Downstream Task Model Token Savings
+            "downstream_prompt_token_savings": {
+                "total_baseline_tokens": total_base_down_tokens,
+                "total_compressed_tokens": total_comp_down_tokens,
+                "total_tokens_saved": total_down_saved,
+                "aggregate_percent": agg_down_token_pct,
+                "mean_tokens_saved": mean_down_saved,
+                "median_tokens_saved": median_down_saved,
+                "stdev_tokens_saved": stdev_down_saved,
             },
-            "prompt_eval_token_reduction": {
-                "total_baseline_tokens": total_base_prompt_tokens,
-                "total_compressed_tokens": total_comp_prompt_tokens,
-                "aggregate_percent": agg_token_reduction_pct,
-                "mean_tokens_saved": round(statistics.mean(token_savings_list), 2) if token_savings_list else None,
-                "median_tokens_saved": round(statistics.median(token_savings_list), 2) if token_savings_list else None,
-                "stdev_tokens_saved": round(statistics.stdev(token_savings_list), 2) if len(token_savings_list) > 1 else (0.0 if token_savings_list else None),
+            # Section 1: Primary Rewrite Call Token Savings (First-Call Only)
+            "primary_rewrite_call_prompt_token_savings": {
+                "total_baseline_tokens": total_base_opt_tokens,
+                "total_compressed_tokens": total_comp_opt_tokens,
+                "total_tokens_saved": total_opt_saved,
+                "aggregate_percent": agg_opt_token_pct,
+                "mean_tokens_saved": mean_opt_saved,
+                "median_tokens_saved": median_opt_saved,
+                "stdev_tokens_saved": stdev_opt_saved,
+                "measurement_scope": "first_call_primary_rewrite",
             },
+            # Section 1: Internal Argus Rewriter Token Savings (Backward-compatible alias)
+            "internal_optimizer_prompt_token_savings": {
+                "total_baseline_tokens": total_base_opt_tokens,
+                "total_compressed_tokens": total_comp_opt_tokens,
+                "total_tokens_saved": total_opt_saved,
+                "aggregate_percent": agg_opt_token_pct,
+                "mean_tokens_saved": mean_opt_saved,
+                "median_tokens_saved": median_opt_saved,
+                "stdev_tokens_saved": stdev_opt_saved,
+            },
+            # Section 1: Total Optimizer Inference Token Cost (All Relevant Calls Including Retries)
+            "total_optimizer_inference_token_cost": total_optimizer_cost_summary,
+            # Section 2: Compression-Stage Character Reduction
+            "compression_stage_character_reduction": {
+                "total_baseline_chars": total_base_orig_chars,
+                "total_compressed_chars": total_comp_stage_chars,
+                "aggregate_percent": agg_comp_stage_pct,
+                "mean_percent": round(statistics.mean(comp_stage_pcts), 2) if comp_stage_pcts else 0.0,
+                "median_percent": round(statistics.median(comp_stage_pcts), 2) if comp_stage_pcts else 0.0,
+                "stdev_percent": round(statistics.stdev(comp_stage_pcts), 2) if len(comp_stage_pcts) > 1 else 0.0,
+            },
+            # Section 2: Final Optimized Prompt Character Reduction
+            "final_optimized_prompt_character_reduction": {
+                "total_baseline_chars": total_base_final_chars,
+                "total_compressed_chars": total_comp_final_chars,
+                "aggregate_percent": agg_final_opt_pct,
+                "mean_percent": round(statistics.mean(final_opt_pcts), 2) if final_opt_pcts else 0.0,
+                "median_percent": round(statistics.median(final_opt_pcts), 2) if final_opt_pcts else 0.0,
+                "stdev_percent": round(statistics.stdev(final_opt_pcts), 2) if len(final_opt_pcts) > 1 else 0.0,
+            },
+            # Section 4: Compression Engine Latency Overhead
             "compression_engine_latency_ms": {
                 "mean_ms": round(statistics.mean(engine_latencies), 3) if engine_latencies else 0.0,
                 "median_ms": round(statistics.median(engine_latencies), 3) if engine_latencies else 0.0,
                 "stdev_ms": round(statistics.stdev(engine_latencies), 3) if len(engine_latencies) > 1 else 0.0,
             },
+            # Section 3: Downstream Task Answer Quality Preservation
             "downstream_task_quality_summary": {
                 "total_trials": len(all_trials),
                 "preserved_count": downstream_preserved_count,
                 "regression_count": downstream_regressions,
                 "improvement_count": downstream_improvements,
                 "both_failed_count": downstream_both_failed,
+                "not_evaluated_count": downstream_not_evaluated,
                 "preservation_rate_percent": round((downstream_preserved_count / len(all_trials)) * 100.0, 1),
             },
+            # Reversible Restoration
             "reversible_restoration_summary": {
                 "total_tested": len(tested_restorations),
                 "verified_byte_exact": restoration_pass_count,
@@ -1129,8 +1869,10 @@ def main() -> None:
     print("\n" + "=" * 80)
     print("BENCHMARK EXECUTION COMPLETE")
     print("Summary:")
-    print(f"  Character Reduction: {stats['character_reduction']['aggregate_percent']:+.2f}% (mean: {stats['character_reduction']['mean_percent']:+.2f}%)")
-    print(f"  Native Prompt Token Reduction: -{stats['prompt_eval_token_reduction']['aggregate_percent']}% (mean saved: {stats['prompt_eval_token_reduction']['mean_tokens_saved']} tokens)")
+    print(f"  Downstream Prompt Token Reduction: {stats['downstream_prompt_token_savings']['aggregate_percent']}% (saved: {stats['downstream_prompt_token_savings']['total_tokens_saved']} tokens)")
+    print(f"  Internal Optimizer Token Reduction: {stats['internal_optimizer_prompt_token_savings']['aggregate_percent']}% (saved: {stats['internal_optimizer_prompt_token_savings']['total_tokens_saved']} tokens)")
+    print(f"  Compression-Stage Char Reduction: {stats['compression_stage_character_reduction']['aggregate_percent']:+.2f}% (mean: {stats['compression_stage_character_reduction']['mean_percent']:+.2f}%)")
+    print(f"  Final Optimized Prompt Char Reduction: {stats['final_optimized_prompt_character_reduction']['aggregate_percent']:+.2f}% (mean: {stats['final_optimized_prompt_character_reduction']['mean_percent']:+.2f}%)")
     print(f"  Engine Latency: mean {stats['compression_engine_latency_ms']['mean_ms']} ms (median: {stats['compression_engine_latency_ms']['median_ms']} ms)")
     print(f"  Downstream Quality Status: {stats['downstream_task_quality_summary']['preserved_count']} preserved / {stats['downstream_task_quality_summary']['total_trials']} trials ({stats['downstream_task_quality_summary']['preservation_rate_percent']}%)")
     print(f"  Reversible Restoration: {stats['reversible_restoration_summary']['verified_byte_exact']} / {stats['reversible_restoration_summary']['total_tested']} verified byte-exact")
