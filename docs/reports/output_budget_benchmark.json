@@ -1,0 +1,386 @@
+{
+  "benchmark_metadata": {
+    "title": "Argus Output Budget Control Empirical Benchmark",
+    "timestamp": "2026-11-04T16:39:41.600167+00:00",
+    "model": "qwen2.5:1.5b",
+    "runtime_endpoint": "http://127.0.0.1:11434",
+    "kv_cache_type": "q8_0",
+    "flash_attention": true,
+    "hardware": {
+      "os": "Windows 10 (64bit)",
+      "cpu": "AMD64 Family 25 Model 68 Stepping 1, AuthenticAMD",
+      "gpu": {
+        "name": "NVIDIA GeForce RTX 4050 Laptop GPU",
+        "total_vram_mib": 6141,
+        "driver": "617.42",
+        "source": "nvidia_smi"
+      },
+      "total_system_ram_mb": 15556.5
+    },
+    "total_test_prompts": 5
+  },
+  "aggregate_summary": {
+    "total_baseline_ceiling_tokens": 2560,
+    "total_adaptive_ceiling_tokens": 1665,
+    "budget_ceiling_difference_tokens": 895,
+    "budget_ceiling_reduction_percent": 35.0,
+    "total_baseline_generated_tokens": 143,
+    "total_adaptive_generated_tokens": 145,
+    "actual_generation_difference_tokens": -2,
+    "actual_generation_difference_percent": -1.4,
+    "quality_evaluation_summary": {
+      "total_prompts_evaluated": 2,
+      "adaptive_prompts_passed": 2,
+      "baseline_prompts_passed": 2,
+      "all_adaptive_evaluations_passed": true
+    },
+    "all_prompt_preservations_passed": false
+  },
+  "detailed_results": [
+    {
+      "test_id": "word_limit_summary",
+      "name": "Explicit Word Limit Summarization",
+      "prompt": "Summarize the key differences between synchronous and asynchronous programming in Python in under 50 words.",
+      "mode": "balanced",
+      "description": "Short answer with explicit 'under 50 words' constraint.",
+      "baseline": {
+        "allocated_budget_ceiling": 512,
+        "actual_tokens_generated": 21,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 175.41,
+        "prompt_eval_count": 481,
+        "prompt_eval_cached_count": 421,
+        "generation_tokens_per_second": 119.72,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 4.1,
+        "execution_time_ms": 238,
+        "wall_time_ms": 465.45,
+        "output_text": "Summarize the key differences between synchronous and asynchronous programming in Python in under 50 words."
+      },
+      "adaptive": {
+        "allocated_budget_ceiling": 131,
+        "actual_tokens_generated": 21,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 163.23,
+        "prompt_eval_count": 481,
+        "prompt_eval_cached_count": 480,
+        "generation_tokens_per_second": 128.65,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 16.0,
+        "allocation_reason": "Adaptive constraint: Explicit word limit 'under 50 words' -> ~131 tokens",
+        "task_category": "coding",
+        "task_confidence": 0.5,
+        "execution_time_ms": 206,
+        "wall_time_ms": 494.24,
+        "output_text": "Summarize the key differences between synchronous and asynchronous programming in Python in under 50 words."
+      },
+      "comparison": {
+        "budget_ceiling_difference": 381,
+        "budget_ceiling_reduction_percent": 74.4,
+        "actual_generation_difference": 0,
+        "actual_generation_difference_percent": 0.0,
+        "prompt_validation_status": "passed",
+        "prompt_validation_outcome": "unchanged_original",
+        "task_quality_preserved": true,
+        "baseline_task_evaluation": {
+          "evaluated": true,
+          "passed": true,
+          "reason": "evaluated_against_word_limit_and_concepts",
+          "details": {
+            "word_count": 15,
+            "ceiling_words": 50,
+            "within_limit": true,
+            "covers_sync": true,
+            "covers_async": true
+          }
+        },
+        "adaptive_task_evaluation": {
+          "evaluated": true,
+          "passed": true,
+          "reason": "evaluated_against_word_limit_and_concepts",
+          "details": {
+            "word_count": 15,
+            "ceiling_words": 50,
+            "within_limit": true,
+            "covers_sync": true,
+            "covers_async": true
+          }
+        }
+      }
+    },
+    {
+      "test_id": "single_sentence_qa",
+      "name": "Single Sentence Direct Explanation",
+      "prompt": "Explain why database indexes improve query performance in one sentence.",
+      "mode": "concise",
+      "description": "Ultra-concise answer with explicit 'in one sentence' constraint and concise mode.",
+      "baseline": {
+        "allocated_budget_ceiling": 512,
+        "actual_tokens_generated": 19,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 155.7,
+        "prompt_eval_count": 474,
+        "prompt_eval_cached_count": 393,
+        "generation_tokens_per_second": 122.03,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 3.7,
+        "execution_time_ms": 231,
+        "wall_time_ms": 527.28,
+        "output_text": "Explain why database indexes speed up query performance by allowing faster access to frequently used data."
+      },
+      "adaptive": {
+        "allocated_budget_ceiling": 99,
+        "actual_tokens_generated": 21,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 162.35,
+        "prompt_eval_count": 474,
+        "prompt_eval_cached_count": 473,
+        "generation_tokens_per_second": 129.35,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 21.2,
+        "allocation_reason": "Adaptive constraint: Explicit sentence limit 'in one sentence' -> ~99 tokens",
+        "task_category": "coding",
+        "task_confidence": 1.0,
+        "execution_time_ms": 232,
+        "wall_time_ms": 567.71,
+        "output_text": "Explain why database indexes speed up query performance by allowing the database to quickly locate and retrieve data."
+      },
+      "comparison": {
+        "budget_ceiling_difference": 413,
+        "budget_ceiling_reduction_percent": 80.7,
+        "actual_generation_difference": -2,
+        "actual_generation_difference_percent": -10.5,
+        "prompt_validation_status": "passed",
+        "prompt_validation_outcome": "validated_rewrite",
+        "task_quality_preserved": true,
+        "baseline_task_evaluation": {
+          "evaluated": true,
+          "passed": true,
+          "reason": "evaluated_against_sentence_count_and_content",
+          "details": {
+            "sentence_count": 1,
+            "single_sentence": true,
+            "mentions_index": true,
+            "mentions_performance": true,
+            "sentences": [
+              "Explain why database indexes speed up query performance by allowing faster access to frequently used data."
+            ]
+          }
+        },
+        "adaptive_task_evaluation": {
+          "evaluated": true,
+          "passed": true,
+          "reason": "evaluated_against_sentence_count_and_content",
+          "details": {
+            "sentence_count": 1,
+            "single_sentence": true,
+            "mentions_index": true,
+            "mentions_performance": true,
+            "sentences": [
+              "Explain why database indexes speed up query performance by allowing the database to quickly locate and retrieve data."
+            ]
+          }
+        }
+      }
+    },
+    {
+      "test_id": "json_entity_extraction",
+      "name": "Structured JSON Entity Extraction",
+      "prompt": "Extract the customer name, order ID, product list, and grand total into a compact JSON schema from: Receipt #8491 for customer Alice Smith purchasing Widget A ($10) and Widget B ($25). Total: $35.00.",
+      "mode": "balanced",
+      "description": "Extraction task requesting structured JSON deliverable.",
+      "baseline": {
+        "allocated_budget_ceiling": 512,
+        "actual_tokens_generated": 54,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 427.26,
+        "prompt_eval_count": 559,
+        "prompt_eval_cached_count": 393,
+        "generation_tokens_per_second": 126.39,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 10.5,
+        "execution_time_ms": 1020,
+        "wall_time_ms": 1335.17,
+        "output_text": "Extract the customer name, order ID, product list, and grand total into a compact JSON schema from: Receipt #8491 for customer Alice Smith purchasing Widget A ($10) and Widget B ($25). Total: $35.00."
+      },
+      "adaptive": {
+        "allocated_budget_ceiling": 308,
+        "actual_tokens_generated": 54,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 438.91,
+        "prompt_eval_count": 559,
+        "prompt_eval_cached_count": 489,
+        "generation_tokens_per_second": 123.03,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 17.5,
+        "allocation_reason": "Adaptive baseline for 'extraction' task (256 tokens scaled x1.0 for balanced mode, scaled for complexity score 3 (4 operations))",
+        "task_category": "extraction",
+        "task_confidence": 0.8,
+        "execution_time_ms": 1037,
+        "wall_time_ms": 1350.33,
+        "output_text": "Extract the customer name, order ID, product list, and grand total into a compact JSON schema from: Receipt #8491 for customer Alice Smith purchasing Widget A ($10) and Widget B ($25). Total: $35.00."
+      },
+      "comparison": {
+        "budget_ceiling_difference": 204,
+        "budget_ceiling_reduction_percent": 39.8,
+        "actual_generation_difference": 0,
+        "actual_generation_difference_percent": 0.0,
+        "prompt_validation_status": "fallback",
+        "prompt_validation_outcome": "fallback",
+        "task_quality_preserved": null,
+        "baseline_task_evaluation": {
+          "evaluated": false,
+          "passed": false,
+          "reason": "not_evaluated: output is prompt directive, no json block generated",
+          "details": {
+            "raw_output_snippet": "Extract the customer name, order ID, product list, and grand total into a compact JSON schema from: Receipt #8491 for cu"
+          }
+        },
+        "adaptive_task_evaluation": {
+          "evaluated": false,
+          "passed": false,
+          "reason": "not_evaluated: output is prompt directive, no json block generated",
+          "details": {
+            "raw_output_snippet": "Extract the customer name, order ID, product list, and grand total into a compact JSON schema from: Receipt #8491 for cu"
+          }
+        }
+      }
+    },
+    {
+      "test_id": "code_generation",
+      "name": "Python Code Implementation",
+      "prompt": "Write a Python generator function to stream Fibonacci numbers up to n with docstrings and type hints.",
+      "mode": "balanced",
+      "description": "Coding task requiring complete functional code deliverable.",
+      "baseline": {
+        "allocated_budget_ceiling": 512,
+        "actual_tokens_generated": 21,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 183.69,
+        "prompt_eval_count": 496,
+        "prompt_eval_cached_count": 441,
+        "generation_tokens_per_second": 114.32,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 4.1,
+        "execution_time_ms": 261,
+        "wall_time_ms": 594.82,
+        "output_text": "Write a Python generator function to stream Fibonacci numbers up to n, including docstrings and type hints."
+      },
+      "adaptive": {
+        "allocated_budget_ceiling": 512,
+        "actual_tokens_generated": 21,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 173.22,
+        "prompt_eval_count": 496,
+        "prompt_eval_cached_count": 495,
+        "generation_tokens_per_second": 121.23,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 4.1,
+        "allocation_reason": "Adaptive baseline for 'coding' task (512 tokens scaled x1.0 for balanced mode)",
+        "task_category": "coding",
+        "task_confidence": 1.0,
+        "execution_time_ms": 254,
+        "wall_time_ms": 573.25,
+        "output_text": "Write a Python generator function to stream Fibonacci numbers up to n, including docstrings and type hints."
+      },
+      "comparison": {
+        "budget_ceiling_difference": 0,
+        "budget_ceiling_reduction_percent": 0.0,
+        "actual_generation_difference": 0,
+        "actual_generation_difference_percent": 0.0,
+        "prompt_validation_status": "passed",
+        "prompt_validation_outcome": "validated_rewrite",
+        "task_quality_preserved": null,
+        "baseline_task_evaluation": {
+          "evaluated": false,
+          "passed": false,
+          "reason": "not_evaluated: output is prompt directive, no python syntax found",
+          "details": {
+            "code_snippet": "Write a Python generator function to stream Fibonacci numbers up to n, including docstrings and type hints."
+          }
+        },
+        "adaptive_task_evaluation": {
+          "evaluated": false,
+          "passed": false,
+          "reason": "not_evaluated: output is prompt directive, no python syntax found",
+          "details": {
+            "code_snippet": "Write a Python generator function to stream Fibonacci numbers up to n, including docstrings and type hints."
+          }
+        }
+      }
+    },
+    {
+      "test_id": "structured_tradeoff_analysis",
+      "name": "Structured Technical Comparison",
+      "prompt": "Analyze the latency, memory, and persistence trade-offs between Redis and Memcached, formatted with clear markdown headings and a comparison checklist.",
+      "mode": "structure",
+      "description": "Analysis task in structure mode requiring Markdown hierarchy and multi-point comparison.",
+      "baseline": {
+        "allocated_budget_ceiling": 512,
+        "actual_tokens_generated": 28,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 240.22,
+        "prompt_eval_count": 491,
+        "prompt_eval_cached_count": 342,
+        "generation_tokens_per_second": 116.56,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 5.5,
+        "execution_time_ms": 321,
+        "wall_time_ms": 626.43,
+        "output_text": "Analyze the latency, memory, and persistence trade-offs between Redis and Memcached, formatted with clear markdown headings and a comparison checklist."
+      },
+      "adaptive": {
+        "allocated_budget_ceiling": 615,
+        "actual_tokens_generated": 28,
+        "selected_num_ctx": 4096,
+        "eval_duration_ms": 224.81,
+        "prompt_eval_count": 491,
+        "prompt_eval_cached_count": 490,
+        "generation_tokens_per_second": 124.55,
+        "done_reason": "stop",
+        "hit_budget_limit": false,
+        "budget_utilization_percent": 4.6,
+        "allocation_reason": "Adaptive baseline for 'planning' task (512 tokens scaled x1.2 for structure mode)",
+        "task_category": "planning",
+        "task_confidence": 1.0,
+        "execution_time_ms": 296,
+        "wall_time_ms": 611.38,
+        "output_text": "Analyze the latency, memory, and persistence trade-offs between Redis and Memcached, formatted with clear markdown headings and a comparison checklist."
+      },
+      "comparison": {
+        "budget_ceiling_difference": -103,
+        "budget_ceiling_reduction_percent": -20.1,
+        "actual_generation_difference": 0,
+        "actual_generation_difference_percent": 0.0,
+        "prompt_validation_status": "passed",
+        "prompt_validation_outcome": "unchanged_original",
+        "task_quality_preserved": null,
+        "baseline_task_evaluation": {
+          "evaluated": false,
+          "passed": false,
+          "reason": "not_evaluated: output is prompt directive, no markdown headings generated",
+          "details": {
+            "output_snippet": "Analyze the latency, memory, and persistence trade-offs between Redis and Memcached, formatted with clear markdown headi"
+          }
+        },
+        "adaptive_task_evaluation": {
+          "evaluated": false,
+          "passed": false,
+          "reason": "not_evaluated: output is prompt directive, no markdown headings generated",
+          "details": {
+            "output_snippet": "Analyze the latency, memory, and persistence trade-offs between Redis and Memcached, formatted with clear markdown headi"
+          }
+        }
+      }
+    }
+  ]
+}

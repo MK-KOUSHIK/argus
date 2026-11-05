@@ -24,7 +24,7 @@ For reproducible development with **Q8_0 KV-cache quantization** and **Flash Att
 
 ```powershell
 # Start Ollama with Q8_0 KV cache and Flash Attention:
-.\scripts\launch_ollama.ps1 -Action start -KvCacheType q8_0 -FlashAttention
+.\scripts\launch_ollama.ps1 -Action start -KvType q8_0 -FlashAttention
 
 # Check running status and port bindings:
 .\scripts\launch_ollama.ps1 -Action status
@@ -41,61 +41,41 @@ $env:OLLAMA_DEBUG="1"
 ollama serve
 ```
 
-### 2.1 Verify or Start Ollama
+### 2.2 Verify or Pull Model
 1. **Check Ollama version**:
    ```bash
    ollama --version
    ```
 
-2. **Start the Ollama daemon** (if not already running as a background service):
-   ```bash
-   ollama serve
-   ```
-
-3. **Pull the required model**:
+2. **Pull the required model**:
    ```bash
    ollama pull qwen2.5:1.5b
    ```
 
-4. **Verify model presence**:
+3. **Verify model presence**:
    ```bash
    ollama list
-   ```
-   Confirm that `qwen2.5:1.5b` appears in the list.
-
-5. **Verify Ollama HTTP service**:
-   Ensure Ollama's local HTTP API responds at `http://127.0.0.1:11434`:
-   ```powershell
-   Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -Method Get
    ```
 
 ---
 
-## 3. Quickstart: Local Environment Setup
+## 3. Local Installation & Development
 
-### 3.1 Backend Setup
-
+### 3.1 Backend Setup (FastAPI)
 1. **Navigate to the backend directory**:
    ```bash
    cd backend
    ```
 
-2. **Create and activate a Python virtual environment**:
-   - **Windows (PowerShell)**:
-     ```powershell
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
-     ```
-   - **Linux / macOS (Bash)**:
-     ```bash
-     python3 -m venv .venv
-     source .venv/bin/activate
-     ```
+2. **Create and activate a virtual environment**:
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\activate
+   ```
 
 3. **Install dependencies**:
    ```bash
-   pip install --upgrade pip
-   pip install -r requirements-dev.txt
+   pip install -r requirements.txt
    ```
 
 4. **Configure environment**:
@@ -103,20 +83,12 @@ ollama serve
    cp .env.example .env
    ```
 
-5. **Start the FastAPI development server**:
+5. **Start FastAPI development server**:
    ```bash
    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
    ```
 
-6. **Verify the backend**:
-   - Health check: [http://localhost:8000/api/health](http://localhost:8000/api/health)
-   - Ollama status check: [http://localhost:8000/api/ollama/status](http://localhost:8000/api/ollama/status)
-   - Interactive OpenAPI documentation: [http://localhost:8000/api/docs](http://localhost:8000/api/docs)
-
----
-
-### 3.2 Frontend Setup
-
+### 3.2 Frontend Setup (React 19 + Vite)
 1. **Navigate to the frontend directory**:
    ```bash
    cd frontend
@@ -138,7 +110,7 @@ ollama serve
    ```
 
 5. **Access the application**:
-   Open [http://localhost:5173](http://localhost:5173) in your browser. The Header indicates real-time backend and Ollama connectivity.
+   Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ---
 
@@ -159,153 +131,83 @@ Backend settings are managed through `pydantic-settings` in [`backend/app/core/c
 | `OLLAMA_MODEL` | `str` | `qwen2.5:1.5b` | Ollama model identifier used for prompt optimization. |
 | `OLLAMA_TIMEOUT_SECONDS` | `float` | `60.0` | Maximum timeout for local neural inference generation. |
 | `OLLAMA_STATUS_TIMEOUT_SECONDS` | `float` | `4.0` | Fast timeout for health checking Ollama availability. |
-| `OLLAMA_TEMPERATURE` | `float` | `0.2` | Generation temperature for deterministic rewriting. |
-| `OLLAMA_TOP_P` | `float` | `0.9` | Generation top-p sampling parameter. |
-| `CHARS_PER_TOKEN_HEURISTIC` | `float` | `4.0` | Standard character-to-token heuristic ratio (~4 chars/token). |
-| `MAX_VALIDATION_RETRY_ATTEMPTS` | `int` | `1` | Number of corrective retry attempts when candidate validation fails. |
+| `OLLAMA_NUM_CTX` | `int` | `4096` | Baseline per-request context window size. |
+| `OLLAMA_MAX_NUM_CTX` | `int` | `8192` | Hard upper bound for context tier derivation. |
+| `OLLAMA_NUM_PREDICT` | `int` | `512` | Fallback generation token limit. |
+| `OLLAMA_CONTEXT_RESERVE_TOKENS` | `int` | `256` | Context headroom reserved beyond input and output. |
+| `OUTPUT_BUDGET_ENABLED` | `bool` | `True` | Enable intelligent dynamic output budget control (Phase 4.1). |
+| `OUTPUT_BUDGET_POLICY` | `str` | `adaptive` | Budget policy (`adaptive`, `fixed`, `conservative`). |
+| `OUTPUT_BUDGET_MIN_TOKENS` | `int` | `64` | Minimum allowable generation tokens. |
+| `OUTPUT_BUDGET_MAX_TOKENS` | `int` | `2048` | Maximum allowable generation tokens. |
+| `OUTPUT_BUDGET_SAFETY_HEADROOM`| `int` | `64` | Safety padding added to word/sentence constraint estimates. |
 
 ---
 
 ## 5. API Reference
 
-All routes are mounted under the `/api` prefix via [`backend/app/api/router.py`](file:///d:/Argus/backend/app/api/router.py).
+### 5.1 Prompt Optimization (`POST /api/optimize`)
+Optimizes an input prompt using the modular pipeline with Output Budget Control:
 
-### 5.1 System Health (`GET /api/health`)
-Returns the operational status, application version, environment, and current UTC timestamp.
-
-- **Status Code**: `200 OK`
-- **Response Example**:
-  ```json
-  {
-    "status": "ok",
-    "app_name": "Argus",
-    "version": "0.1.0",
-    "environment": "development",
-    "timestamp": "2026-10-31T04:22:04.582179+00:00",
-    "message": "Argus API is operational"
-  }
-  ```
-
----
-
-### 5.2 Ollama Service Status (`GET /api/ollama/status`)
-Inspects whether the local Ollama daemon is reachable and confirms that the required optimization model is installed.
-
-- **Status Code**: `200 OK`
-- **Response Example (Connected & Ready)**:
-  ```json
-  {
-    "connected": true,
-    "base_url": "http://127.0.0.1:11434",
-    "model": "qwen2.5:1.5b",
-    "model_installed": true,
-    "available_models": [
-      "qwen2.5:1.5b",
-      "qwen2.5:7b"
-    ],
-    "error": null
-  }
-  ```
-- **Response Example (Ollama Offline)**:
-  ```json
-  {
-    "connected": false,
-    "base_url": "http://127.0.0.1:11434",
-    "model": "qwen2.5:1.5b",
-    "model_installed": false,
-    "available_models": [],
-    "error": "Cannot connect to Ollama at http://127.0.0.1:11434. Ensure Ollama is running ('ollama serve')."
-  }
-  ```
-
----
-
-### 5.3 Prompt Optimization (`POST /api/optimize`)
-Optimizes an input prompt using the 4-stage modular pipeline (`TaskAnalyzer` &rarr; `StrategySelector` &rarr; `PromptRewriter` &rarr; `CandidateValidator`).
-
-- **Request Headers**: `Content-Type: application/json`
 - **Request Body**:
   ```json
   {
-    "prompt": "Write a python function to compute fibonacci numbers",
+    "prompt": "Summarize the key differences between synchronous and asynchronous programming in Python in under 50 words.",
     "mode": "balanced",
-    "target_model": "qwen2.5:1.5b"
+    "target_model": "gpt-4o",
+    "requested_output_budget": null
   }
   ```
-  - `prompt` (`str`, required): The raw prompt text. Must contain at least one non-whitespace character.
-  - `mode` (`str`, optional): Optimization profile. Allowed values: `"balanced"`, `"concise"`, `"structure"`. Defaults to `"balanced"`.
-  - `target_model` (`str`, optional): Target destination model profile. Defaults to `"gpt-4o"`.
+  - `prompt` (`str`, required): The raw prompt text.
+  - `mode` (`str`, optional): Optimization profile (`"balanced"`, `"concise"`, `"structure"`).
+  - `target_model` (`str`, optional): Target destination model profile.
+  - `requested_output_budget` (`int`, optional): Explicit output token override ($1 \le x \le 8192$).
 
 - **Response Body (`200 OK`)**:
   ```json
   {
-    "original_prompt": "Write a python function to compute fibonacci numbers",
-    "optimized_prompt": "Write a Python function to calculate Fibonacci numbers.",
+    "original_prompt": "Summarize the key differences between synchronous and asynchronous programming in Python in under 50 words.",
+    "optimized_prompt": "Summarize the key differences between synchronous and asynchronous programming in Python in under 50 words.",
     "mode": "balanced",
-    "target_model": "qwen2.5:1.5b",
+    "target_model": "gpt-4o",
     "task_category": "coding",
-    "strategy": "clarify",
-    "applied_strategy": "clarify",
-    "outcome": "validated_rewrite",
-    "length_result": "expanded",
+    "strategy": "preserve",
+    "applied_strategy": "preserve",
+    "outcome": "unchanged_original",
+    "length_result": "unchanged",
     "validation_status": "passed",
-    "is_preserved": false,
-    "primary_action": "write",
-    "primary_deliverable": "function",
-    "explicit_constraints": [
-      "Deliverable: Function",
-      "Operation: Save python function",
-      "Operation: Calculate fibonacci numbers"
-    ],
-    "required_operations": [
-      "save python function",
-      "calculate fibonacci numbers"
-    ],
-    "original_metrics": {
-      "char_count": 52,
-      "estimated_tokens": 13
-    },
-    "optimized_metrics": {
-      "char_count": 55,
-      "estimated_tokens": 14
-    },
-    "token_reduction_percent": 0,
-    "token_change_percent": 8,
-    "token_savings": 0,
-    "char_delta": 3,
-    "preserved_constraints": [
-      "Core query intent & technical details"
-    ],
-    "execution_time_ms": 4089,
+    "is_preserved": true,
+    "original_metrics": { "char_count": 108, "estimated_tokens": 27 },
+    "optimized_metrics": { "char_count": 108, "estimated_tokens": 27 },
+    "execution_time_ms": 186,
     "model": "qwen2.5:1.5b",
-    "timestamp": "2026-10-31T04:22:45.643316+00:00"
+    "output_budget": {
+      "requested_budget": null,
+      "allocated_budget": 131,
+      "policy": "adaptive",
+      "reason": "Adaptive constraint: Explicit word limit 'under 50 words' -> ~131 tokens",
+      "task_category": "coding",
+      "actual_generated_tokens": 21,
+      "generation_duration_ms": 151.52,
+      "generation_tokens_per_second": 138.59,
+      "done_reason": "stop",
+      "hit_budget_limit": false,
+      "budget_utilization_percent": 16.0
+    }
   }
   ```
-
-- **Important Note on Token Estimation**:
-  Token counts in `original_metrics` and `optimized_metrics` are **estimates** calculated using a standard character heuristic ($\text{estimated\_tokens} = \lceil \text{length} / 4.0 \rceil$). They provide an immediate local indicator of text volume changes and are not exact tokenizer counts.
-
-- **Error Responses**:
-  - `413 Payload Too Large`: Total prompt and safety budget exceeds `OLLAMA_MAX_NUM_CTX` (or exceeds safe baseline tier under low VRAM <1,000 MiB). Rejection happens cleanly without truncation.
-  - `422 Unprocessable Content`: Prompt is empty, whitespace-only, or JSON payload is malformed.
-  - `502 Bad Gateway`: Ollama returned an invalid or unparseable response.
-  - `503 Service Unavailable`: Local Ollama service is unreachable or GPU memory is below critical threshold (<150 MiB).
-  - `504 Gateway Timeout`: Local inference took longer than `OLLAMA_TIMEOUT_SECONDS`.
 
 ---
 
 ## 6. Running Automated Tests & Builds
 
 ### 6.1 Backend Tests (Pytest)
-Backend tests run without requiring a live Ollama instance because HTTP calls are mocked in the test fixtures.
 ```bash
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 ```
-*Expected result: 65 passed across 3 test files (test_health.py, test_kv_cache_adaptive.py, test_optimizer.py).*
+*Expected result: 79 passed across 4 test files (`test_health.py`, `test_kv_cache_adaptive.py`, `test_optimizer.py`, `test_output_budget.py`).*
 
 ### 6.2 Frontend Tests (Vitest)
-Unit and integration tests for React components, Workspace interactions, and state management.
 ```bash
 cd frontend
 npm.cmd test -- --run
@@ -313,7 +215,6 @@ npm.cmd test -- --run
 *Expected result: 19 passed across 4 test files.*
 
 ### 6.3 Frontend Production Build
-Validates TypeScript compilation (`tsc -b`) and bundles production assets with Vite.
 ```bash
 cd frontend
 npm.cmd run build
@@ -326,41 +227,8 @@ npm.cmd run build
 
 | Symptom | Cause | Solution |
 | :--- | :--- | :--- |
-| **HTTP 503 "Cannot connect to Ollama"** | The Ollama server daemon is not running. | Run `ollama serve` in a terminal or start the Ollama desktop app. |
+| **HTTP 503 "Cannot connect to Ollama"** | The Ollama server daemon is not running. | Run `powershell .\scripts\launch_ollama.ps1 -Action start` or `ollama serve`. |
 | **HTTP 503 "Model 'qwen2.5:1.5b' not found"** | The default optimization model has not been downloaded yet. | Run `ollama pull qwen2.5:1.5b` in terminal. |
+| **HTTP 413 "Prompt footprint exceeds context"** | Available context headroom is insufficient for minimal generation (<64 tokens). | Increase `OLLAMA_MAX_NUM_CTX` or shorten prompt. |
 | **HTTP 504 "Ollama request timed out"** | The local host is under high CPU/GPU load, or generation took longer than 60 seconds. | Increase `OLLAMA_TIMEOUT_SECONDS=120.0` in `backend/.env`. |
 | **HTTP 422 "Validation error"** | Request body is missing the `prompt` field, or the prompt contains only whitespace. | Submit a valid JSON payload containing a non-empty `prompt` string. |
-| **Frontend displays "Offline" status** | FastAPI backend is not running on port 8000. | Start the backend via `uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`. |
-| **CORS error in browser console** | Frontend origin is not listed in backend `CORS_ORIGINS`. | Ensure `backend/.env` contains `CORS_ORIGINS=["http://localhost:5173", "http://127.0.0.1:5173"]`. |
-
----
-
-## 8. Coding Standards & Architectural Guardrails
-
-1. **Separation of Concerns**:
-   - The React frontend does not contain prompt compression heuristics or model generation calls.
-   - The FastAPI API router layer does not perform raw business logic; it delegates to the services layer.
-   - All environment variables are centralized in `backend/app/core/config.py`.
-
-2. **Zero-Hardcoding Standard**:
-   - Extraction patterns and validation rules use generalized taxonomies rather than hardcoded prompt text or test-specific strings.
-
-3. **Git Hygiene**:
-   - Never commit `.env` files, model weights, virtual environments (`.venv`), or build artifacts (`dist/`).
-
-
-## Ollama KV Cache and Request Budget Settings
-
-The backend environment example documents these controls:
-
-| Setting | Purpose |
-|---|---|
-| `OLLAMA_KV_CACHE_TYPE` | Desired Ollama server KV-cache type (for example, `q8_0`); configure in the Ollama server environment |
-| `OLLAMA_FLASH_ATTENTION` | Desired Flash Attention server setting; configure in the Ollama server environment |
-| `OLLAMA_NUM_CTX` | Baseline per-request context size |
-| `OLLAMA_MAX_NUM_CTX` | Hard upper bound for Argus's estimated context budget |
-| `OLLAMA_NUM_PREDICT` | Per-request output-token limit |
-| `OLLAMA_CONTEXT_RESERVE_TOKENS` | Context headroom reserved beyond estimated input and output |
-| `OLLAMA_MAX_CONCURRENT_REQUESTS` | Maximum concurrent inference calls admitted by this backend process |
-
-Changing KV cache type or Flash Attention requires configuring and restarting the Ollama server. The backend cannot mutate an already-running Ollama process. See [KV cache optimization audit](kv-cache-optimization-audit.md).

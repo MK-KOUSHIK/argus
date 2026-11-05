@@ -29,6 +29,7 @@ class TaskAnalysisResult:
     """Structured analysis of prompt intent, domain, and constraint guardrails."""
 
     task_category: str
+    task_confidence: Optional[float] = None
     primary_action: Optional[str] = None
     primary_deliverable: Optional[str] = None
     action_family: Optional[str] = None
@@ -347,8 +348,8 @@ class TaskAnalyzer:
         text = prompt.strip()
         lower = text.lower()
 
-        # 1. Detect Category
-        category = cls._detect_category(lower)
+        # 1. Detect Category & Derived Confidence
+        category, category_confidence = cls._detect_category(lower)
 
         # 2. Detect Action & Deliverable Intent (Phase 3.2 Semantic Preservation)
         action, deliverable, action_fam, deliv_fam = cls._detect_action_and_deliverable(lower)
@@ -411,6 +412,7 @@ class TaskAnalyzer:
 
         return TaskAnalysisResult(
             task_category=category,
+            task_confidence=category_confidence,
             primary_action=action,
             primary_deliverable=deliverable,
             action_family=action_fam,
@@ -470,8 +472,12 @@ class TaskAnalyzer:
         return action, deliverable, action_family, deliverable_family
 
     @classmethod
-    def _detect_category(cls, lower: str) -> str:
-        """Detect task domain using weighted keyword analysis."""
+    def _detect_category(cls, lower: str) -> Tuple[str, Optional[float]]:
+        """Detect task domain using weighted keyword analysis.
+
+        Returns:
+            Tuple of (detected_category, derived_confidence_or_None).
+        """
         words = set(re.findall(r"\b[a-z_0-9\-]+\b", lower))
 
         scores = {
@@ -484,17 +490,24 @@ class TaskAnalyzer:
             "planning": sum(1 for phrase in cls.PLANNING_KEYWORDS if phrase in lower),
         }
 
+        total_score = sum(scores.values())
+
         # Handle specific combinations
         if scores["coding"] > 0 and scores["data_analysis"] > 0:
             if any(term in lower for term in ["csv", "revenue", "dataset", "monthly_report"]):
-                return "data_analysis"
-            return "coding"
+                cat = "data_analysis"
+            else:
+                cat = "coding"
+            confidence = round(scores[cat] / total_score, 2) if total_score > 0 else None
+            return cat, confidence
 
-        best_category = max(scores, key=scores.get)
+        best_category = max(scores.keys(), key=lambda k: scores[k])
         if scores[best_category] > 0:
-            return best_category
+            confidence = round(scores[best_category] / total_score, 2) if total_score > 0 else None
+            return best_category, confidence
 
-        return "general"
+        # No keyword matches: general fallback, unmeasured confidence
+        return "general", None
 
     @classmethod
     def _extract_prohibitions(cls, text: str) -> List[str]:
@@ -686,7 +699,7 @@ class TaskAnalyzer:
                     found_verb_idx = i
                     break
 
-            if found_verb_idx == -1 or canonical_verb is None:
+            if found_verb_idx == -1 or canonical_verb is None or op_family is None:
                 continue
 
             # Extract target phrase: everything after the verb word in this segment

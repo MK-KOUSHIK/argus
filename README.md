@@ -26,6 +26,7 @@
 - [Semantic Preservation & Zero-Hardcoding](#-semantic-preservation--zero-hardcoding)
 - [Token Estimation & Honest Metrics Standard](#-token-estimation--honest-metrics-standard)
 - [Testing & Verification](#testing--verification)
+- [Adaptive KV-Cache & Output Budget Runtime Optimization](#-adaptive-kv-cache--output-budget-runtime-optimization)
 - [Roadmap & Implementation Phases](#roadmap--implementation-phases)
 - [Contributing & Development Guide](#contributing--development-guide)
 - [License](#license)
@@ -39,9 +40,10 @@ Large Language Models (LLMs) incur significant processing latency and inference 
 **Argus** functions as an intelligent, local prompt optimization middleware:
 1. **Analyzes Intent & Constraints**: Performs deterministic task inspection to extract domain categories, primary action verbs, deliverables, required functional operations, and explicit constraints (e.g., negative prohibitions, filenames, requested keys).
 2. **Selects Optimization Strategy**: Chooses an appropriate strategy (`compress`, `clarify`, `structure`, `enrich`, or `preserve`) based on prompt characteristics and the user's selected profile.
-3. **Optimizes Locally via Neural Model**: Rewrites the prompt using a local lightweight LLM (**Qwen2.5-1.5B-Instruct** running via **Ollama**) without external API calls or token costs.
-4. **Validates Semantic Fidelity**: Employs deterministic validation guardrails to ensure deliverables are maintained, interactive turn-reversals are prevented, and all required operations and prohibitions remain intact.
-5. **Provides Honest Telemetry**: Displays side-by-side prompt diffs, character deltas, heuristic token estimates, and constraint preservation tags in a modern React workspace.
+3. **Controls Output Generation Budget**: Dynamically calculates generation ceilings (`num_predict`) based on explicit prompt directives (word/sentence limits) and task requirements, saving 35%+ unneeded headroom while coordinating with context tier snapping.
+4. **Optimizes Locally via Neural Model**: Rewrites the prompt using a local lightweight LLM (**Qwen2.5-1.5B-Instruct** running via **Ollama**) without external API calls or token costs.
+5. **Validates Semantic Fidelity**: Employs deterministic validation guardrails to ensure deliverables are maintained, interactive turn-reversals are prevented, and all required operations and prohibitions remain intact.
+6. **Provides Honest Telemetry**: Displays side-by-side prompt diffs, character deltas, heuristic token estimates, output budget utilization, and native Ollama completion reasons (`done_reason: stop` vs `length`) in a modern React workspace.
 
 ---
 
@@ -55,15 +57,16 @@ Large Language Models (LLMs) incur significant processing latency and inference 
                     │  (Schema validation via Pydantic)
                     ▼
 [ Orchestration: OllamaService ]
-       ├──▶ [ Stage A: TaskAnalyzer (Domain, Deliverables, Constraints) ]
-       ├──▶ [ Stage B: StrategySelector (Compress / Clarify / Structure / Preserve) ]
-       ├──▶ [ Stage C: PromptRewriter (System Instructions & Guardrails) ]
-       ├──▶ [ Local Inference Tier: Ollama Daemon (qwen2.5:1.5b via HTTP 11434) ]
-       └──▶ [ Stage D: CandidateValidator (Constraint & Intent Guardrails) ]
+        ├──▶ [ Stage A: TaskAnalyzer (Domain, Deliverables, Constraints) ]
+        ├──▶ [ Stage B: StrategySelector & OutputBudgetController ]
+        ├──▶ [ AdaptiveContextManager (Dynamic Tier Snapping with Output Headroom) ]
+        ├──▶ [ Stage C: PromptRewriter (System Instructions & Guardrails) ]
+        ├──▶ [ Local Inference Tier: Ollama Daemon (qwen2.5:1.5b via HTTP 11434) ]
+        └──▶ [ Stage D: CandidateValidator (Constraint & Intent Guardrails) ]
 ```
 
 - **Frontend Isolation**: Frontend components serve strictly as presentation, editing, and status monitoring interfaces. They contain **no** prompt compression heuristics or local LLM execution logic.
-- **Backend Service Layer**: Handles prompt analysis, strategy determination, prompt instruction engineering, Ollama HTTP communication, and validation retries/fallbacks.
+- **Backend Service Layer**: Handles prompt analysis, strategy determination, output budget control, prompt instruction engineering, Ollama HTTP communication, and validation retries/fallbacks.
 - **Local Network Privacy**: The optimization pipeline executes 100% locally on your machine with zero external cloud dependencies or third-party credential exposure.
 
 For detailed architecture diagrams and sequence flows, see [`docs/architecture.md`](docs/architecture.md).
@@ -98,72 +101,50 @@ Argus/
 │   │   │   └── router.py              # Centralized router mount
 │   │   ├── core/                      # Centralized configuration
 │   │   │   └── config.py              # Pydantic BaseSettings driven by .env
-│   │   ├── schemas/                   # Pydantic validation and response schemas
-│   │   │   ├── health.py              # HealthResponse schema
-│   │   │   └── optimizer.py           # OptimizeRequest, OptimizeResponse, OllamaStatusResponse
-│   │   ├── services/                  # Business logic and optimization pipeline
-│   │   │   ├── candidate_validator.py # Stage D: Semantic retention guardrails & turn-reversal check
-│   │   │   ├── health_service.py      # Health service implementation
-│   │   │   ├── ollama_service.py      # Ollama HTTP client & pipeline orchestrator
-│   │   │   ├── prompt_rewriter.py     # Stage C: Instruction engineering for qwen2.5:1.5b
-│   │   │   ├── strategy_selector.py   # Stage B: Strategy selection (compress, clarify, structure, preserve)
-│   │   │   └── task_analyzer.py       # Stage A: Task classification & constraint extraction
-│   │   └── main.py                    # FastAPI application factory, CORS, and error handlers
-│   ├── tests/                         # Pytest test suite (mocked Ollama client)
-│   │   ├── conftest.py                # Test fixtures and async client configuration
-│   │   ├── test_health.py             # Health endpoint tests
-│   │   ├── test_kv_cache_adaptive.py  # 23 adaptive KV cache, concurrency & process tests
-│   │   └── test_optimizer.py          # 40 prompt optimization and validation tests
-│   ├── .env.example                   # Backend environment configuration template
-│   ├── pyproject.toml                 # Backend project metadata and tools
-│   ├── requirements.txt               # Production dependencies
-│   └── requirements-dev.txt           # Development and testing dependencies
+│   │   ├── schemas/                   # Pydantic contract definitions
+│   │   │   ├── health.py              # Health response schema
+│   │   │   └── optimizer.py           # OptimizeRequest, OptimizeResponse, OutputBudgetTelemetry
+│   │   ├── services/                  # Business logic & local inference client
+│   │   │   ├── adaptive_context_manager.py # Dynamic tier derivation & context budgeting
+│   │   │   ├── candidate_validator.py # Semantic guardrail & hallucination validation
+│   │   │   ├── concurrency_controller.py   # Runtime-aware admission & capacity enforcement
+│   │   │   ├── hardware_telemetry.py  # Real-time GPU VRAM & host RAM telemetry
+│   │   │   ├── ollama_process_manager.py   # Managed process inspection & log verification
+│   │   │   ├── ollama_service.py      # Core Ollama client & optimization pipeline
+│   │   │   ├── output_budget_controller.py # Dynamic generation budget controller
+│   │   │   ├── prompt_rewriter.py     # System prompt engineering
+│   │   │   ├── strategy_selector.py   # Strategy selection heuristic
+│   │   │   └── task_analyzer.py       # Deterministic intent & constraint extraction
+│   │   └── main.py                    # FastAPI application factory
+│   ├── data/                          # Runtime process logs and metadata manifests
+│   └── tests/                         # Pytest automated test suite (79 tests)
 ├── frontend/
-│   ├── public/                        # Static brand assets
 │   ├── src/
-│   │   ├── components/                # Reusable UI components
-│   │   │   ├── Button.tsx             # Accessible button component
-│   │   │   ├── Card.tsx               # Container panel component
-│   │   │   ├── ComparisonView.tsx     # Side-by-side prompt diff and telemetry view
-│   │   │   ├── Header.tsx             # Brand header with backend & Ollama status pills
-│   │   │   ├── MetricsPanel.tsx       # Estimated token metrics, character deltas, footprint bars
-│   │   │   ├── OptimizationControls.tsx # Mode selector (balanced, concise, structure)
-│   │   │   ├── PromptEditor.tsx       # Prompt input editor with character & token counters
-│   │   │   └── StatusBadge.tsx        # Outcome and validation status badges
-│   │   ├── hooks/                     # Custom React hooks (useHealth, useOllamaStatus)
-│   │   ├── pages/                     # Application pages (WorkspacePage, HomePage)
-│   │   ├── services/                  # API client layer (api.ts) & offline mock (mockOptimizer.ts)
-│   │   ├── styles/                    # Tailwind CSS v4 styling & tokens
-│   │   ├── types/                     # TypeScript domain models and interfaces
-│   │   ├── App.tsx                    # Root layout with tab navigation (Workspace & System Status)
-│   │   └── main.tsx                   # DOM entry point
-│   ├── tests/                         # Vitest unit and component tests
-│   │   ├── setup.ts                   # Testing Library setup
-│   │   ├── App.test.tsx               # Navigation and layout smoke tests
-│   │   └── Workspace.test.tsx         # Workspace interactions and optimization flow tests
-│   ├── .env.example                   # Frontend environment configuration template
-│   ├── package.json                   # NPM dependencies and scripts
-│   ├── tsconfig.json                  # TypeScript compiler options
-│   └── vite.config.ts                 # Vite bundler configuration
-├── docs/
-│   ├── architecture.md                # System architecture, boundaries, and sequence diagrams
-│   └── development-guide.md           # Local setup, environment reference, testing, and troubleshooting
+│   │   ├── components/                # Modular React presentation components
+│   │   ├── pages/                     # Routed pages (WorkspacePage, StatusPage)
+│   │   ├── services/                  # Typed API network client
+│   │   └── types/                     # TypeScript API & domain contracts
+│   └── tests/                         # Vitest automated test suite (19 tests)
 ├── scripts/
-│   ├── dev-backend.ps1 / .sh          # Convenience script: Launch backend
-│   └── dev-frontend.ps1 / .sh         # Convenience script: Launch frontend
-├── .gitignore                         # Comprehensive source control exclusions
-├── LICENSE                            # MIT License
-└── README.md                          # Project overview and documentation
+│   ├── benchmark_kv_cache.py          # F16 vs Q8_0 KV cache empirical evaluation
+│   ├── benchmark_output_budget.py     # Output budget empirical validation
+│   ├── experiment_prefix_reuse.py     # Llama.cpp prefix cache verification
+│   └── launch_ollama.ps1              # Managed Ollama Windows process controller
+└── docs/
+    ├── architecture.md                # System architecture and request flow diagrams
+    ├── development-guide.md           # Local setup and developer documentation
+    ├── kv-cache-optimization-audit.md # KV cache audit and acceptance matrix
+    └── reports/                       # Empirical benchmark reports and JSON data
 ```
 
 ---
 
 ## Prerequisites
 
-- **Node.js**: `v20.x` or `v22.x LTS`
+- **Node.js**: `v20.x` or `v22.x LTS` (includes `npm`)
 - **Python**: `3.10`, `3.11`, `3.12`, or `3.13`
 - **Git**: `v2.40+`
-- **Ollama**: Installed locally on `http://127.0.0.1:11434`
+- **Ollama**: Installed locally on your workstation
 
 ---
 
@@ -173,66 +154,48 @@ Argus/
    ```bash
    ollama --version
    ```
-2. **Start the Ollama daemon** (if not already running):
-   ```bash
-   ollama serve
+
+2. **Launch Ollama with Q8_0 KV Cache and Flash Attention (Windows PowerShell)**:
+   ```powershell
+   .\scripts\launch_ollama.ps1 -Action start -KvType q8_0 -FlashAttention
    ```
-3. **Pull the Qwen2.5 1.5B Instruct model**:
+
+3. **Pull the configured model**:
    ```bash
    ollama pull qwen2.5:1.5b
-   ```
-4. **Confirm model presence**:
-   ```bash
-   ollama list
    ```
 
 ---
 
 ## Installation & Local Run Instructions
 
-### 1. Clone the Repository
+### 1. Clone Repository
 ```bash
 git clone https://github.com/MK-KOUSHIK/argus.git
 cd argus
 ```
 
 ### 2. Backend Setup
-```powershell
+```bash
 cd backend
-
-# Create and activate virtual environment
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1    # On Linux/macOS: source .venv/bin/activate
+.\.venv\Scripts\activate      # Windows
+# source .venv/bin/activate    # Linux / macOS
 
-# Install dependencies
-pip install --upgrade pip
-pip install -r requirements-dev.txt
-
-# Create environment configuration
+pip install -r requirements.txt
 cp .env.example .env
-
-# Run FastAPI dev server
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --reload --port 8000
 ```
-The backend API is now running at **`http://localhost:8000`**.  
-Interactive OpenAPI documentation: **`http://localhost:8000/api/docs`**  
-Ollama status check: **`http://localhost:8000/api/ollama/status`**
+Backend is now running at **`http://127.0.0.1:8000`**.
 
 ### 3. Frontend Setup
-```powershell
-# In a separate terminal, navigate to frontend
+```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Create environment configuration
 cp .env.example .env
-
-# Start Vite dev server
 npm run dev
 ```
-The frontend is now accessible at **`http://localhost:5173`**.
+Frontend workspace is live at **`http://localhost:5173`**.
 
 ---
 
@@ -243,52 +206,50 @@ Submits a raw prompt for task-aware local optimization:
 
 ```json
 {
-  "prompt": "Write a Python script that reads sales.csv, calculates monthly revenue, saves monthly_report.csv, and does not use pandas.",
+  "prompt": "Summarize the key differences between synchronous and asynchronous programming in Python in under 50 words.",
   "mode": "balanced",
-  "target_model": "qwen2.5:1.5b"
+  "target_model": "gpt-4o",
+  "requested_output_budget": null
 }
 ```
 
 **Response (`200 OK`)**:
 ```json
 {
-  "original_prompt": "Write a Python script that reads sales.csv, calculates monthly revenue, saves monthly_report.csv, and does not use pandas.",
-  "optimized_prompt": "Write a Python script to read sales.csv, calculate monthly revenue, and save the result to monthly_report.csv without using pandas.",
+  "original_prompt": "Summarize the key differences between synchronous and asynchronous programming in Python in under 50 words.",
+  "optimized_prompt": "Summarize the key differences between synchronous and asynchronous programming in Python in under 50 words.",
   "mode": "balanced",
-  "target_model": "qwen2.5:1.5b",
+  "target_model": "gpt-4o",
   "task_category": "coding",
-  "strategy": "compress",
-  "applied_strategy": "compress",
-  "outcome": "validated_rewrite",
-  "length_result": "compressed",
+  "strategy": "preserve",
+  "applied_strategy": "preserve",
+  "outcome": "unchanged_original",
+  "length_result": "unchanged",
   "validation_status": "passed",
-  "is_preserved": false,
-  "primary_action": "write",
-  "primary_deliverable": "script",
-  "explicit_constraints": [
-    "Deliverable: Script",
-    "Operation: Save python script",
-    "Operation: Read sales csv",
-    "Operation: Calculate monthly revenue",
-    "Operation: Save monthly report csv",
-    "Prohibition: Do not use pandas"
-  ],
-  "required_operations": [
-    "save python script",
-    "read sales csv",
-    "calculate monthly revenue",
-    "save monthly report csv"
-  ],
-  "original_metrics": { "char_count": 126, "estimated_tokens": 32 },
-  "optimized_metrics": { "char_count": 133, "estimated_tokens": 34 },
+  "is_preserved": true,
+  "original_metrics": { "char_count": 108, "estimated_tokens": 27 },
+  "optimized_metrics": { "char_count": 108, "estimated_tokens": 27 },
   "token_reduction_percent": 0,
-  "token_change_percent": 6,
+  "token_change_percent": 0,
   "token_savings": 0,
-  "char_delta": 7,
+  "char_delta": 0,
   "preserved_constraints": ["Core query intent & technical details"],
-  "execution_time_ms": 3215,
+  "execution_time_ms": 186,
   "model": "qwen2.5:1.5b",
-  "timestamp": "2026-10-31T04:22:18Z"
+  "timestamp": "2026-11-04T15:21:38Z",
+  "output_budget": {
+    "requested_budget": null,
+    "allocated_budget": 131,
+    "policy": "adaptive",
+    "reason": "Adaptive constraint: Explicit word limit 'under 50 words' -> ~131 tokens",
+    "task_category": "coding",
+    "actual_generated_tokens": 21,
+    "generation_duration_ms": 151.52,
+    "generation_tokens_per_second": 138.59,
+    "done_reason": "stop",
+    "hit_budget_limit": false,
+    "budget_utilization_percent": 16.0
+  }
 }
 ```
 
@@ -301,20 +262,11 @@ Checks whether the local Ollama instance is running and verifies model availabil
   "model": "qwen2.5:1.5b",
   "model_installed": true,
   "available_models": ["qwen2.5:1.5b", "qwen2.5:7b"],
-  "error": null
-}
-```
-
-### 3. System Health (`GET /api/health`)
-Returns backend operational status, version, and environment:
-```json
-{
-  "status": "ok",
-  "app_name": "Argus",
-  "version": "0.1.0",
-  "environment": "development",
-  "timestamp": "2026-10-31T04:22:04.582179+00:00",
-  "message": "Argus API is operational"
+  "runtime_process": {
+    "server_process_verified": true,
+    "configured_kv_cache_type": "q8_0",
+    "configured_flash_attention": true
+  }
 }
 ```
 
@@ -331,7 +283,7 @@ Argus implements a modular 4-stage optimization pipeline:
 [ Stage A: TaskAnalyzer ] ──────▶ Detects domain, action verbs, deliverables, operations, prohibitions
       │
       ▼
-[ Stage B: StrategySelector ] ───▶ Selects compress, clarify, structure, enrich, or preserve
+[ Stage B: StrategySelector & OutputBudgetController ] ───▶ Selects strategy & calculates generation budget
       │
       ▼
 [ Stage C: PromptRewriter ] ────▶ Builds targeted instructions for local Qwen2.5:1.5b model
@@ -343,67 +295,16 @@ Argus implements a modular 4-stage optimization pipeline:
 [ Final Validated Output ] ─────▶ Honest telemetry, character delta, and token estimations
 ```
 
-1. **Stage A — Understand Prompt (`TaskAnalyzer`)**:
-   - Classifies task domain (`coding`, `data_analysis`, `writing`, `extraction`, `summarization`, `research`, `planning`, or `general`).
-   - Extracts primary action verb and deliverable (e.g. `write script`, `create function`).
-   - Segments multi-clause required functional operations (e.g. data ingestion, computation, output formatting).
-   - Identifies explicit constraints (e.g. negative prohibitions like `"do not use pandas"`, filenames like `"sales.csv"`, and output schemas).
-   - Detects quality signals (circular redundancy, conversational pleasantries, underspecification).
-
-2. **Stage B — Select Strategy (`StrategySelector`)**:
-   - Assigns `preserve` if the prompt is already concise and actionable.
-   - Assigns `clarify` if the prompt is vague or underspecified.
-   - Assigns `compress` if the prompt contains filler or repetitive phrasing.
-   - Assigns `structure` if the prompt contains multi-step operations or complex constraints.
-   - Modulates formatting according to the user's profile (`balanced`, `concise`, `structure`).
-
-3. **Stage C — Rewrite Prompt (`PromptRewriter`)**:
-   - Formulates task-aware system instructions for `qwen2.5:1.5b`.
-   - Strictly enforces deliverable retention and forbids interactive turn-reversals.
-   - Provides targeted corrective instructions during retry attempts.
-
-4. **Stage D — Validate Candidate (`CandidateValidator`)**:
-   - Verifies primary deliverable and action verb retention.
-   - Detects turn-reversal anti-patterns (rejects responses asking the user to provide data).
-   - Confirms negative prohibitions are not dropped or inverted.
-   - Ensures filenames, technical keys, and identifiers are strictly retained.
-   - Rejects unrequested mandatory JSON schemas and instruction leaks.
-   - Executes a single corrective retry upon failure; if the retry also fails, safely falls back to the original prompt (`outcome: fallback`).
-
 ---
 
-## 🛡️ Semantic Preservation & Zero-Hardcoding
-
-Argus adheres to strict architectural guardrails:
-- **Anti-Turn-Reversal Guardrail**: Prevents small local models from misinterpreting a prompt as a conversational inquiry (e.g., transforming `"Build a Python program to analyze student grades"` into `"Please upload the student grades file"`).
-- **Required-Operation Preservation**: Ensures multi-clause operations (calculating averages, identifying extremes, writing files) are not pruned during structural simplification.
-- **Zero-Hardcoding Standard**: Extraction and validation logic relies on generalized taxonomies and structural patterns rather than hardcoded prompts or test-specific strings. Centralized configuration in `backend/app/core/config.py` drives all parameters.
-
----
-
-## 📊 Token Estimation & Honest Metrics Standard
-
-### Character-Based Heuristic Notice
-Token counts reported in Argus use a standard character-to-token heuristic:
-
-$$\text{estimated\_tokens} = \max\left(1, \left\lceil \frac{\text{len}(\text{trimmed\_text})}{4.0} \right\rceil\right)$$
-
-- **Estimations, Not Exact BPE Counts**: Character heuristics provide fast, local approximations of text footprint. They are **estimates** and do not represent exact Byte-Pair Encoding (BPE) counts from proprietary cloud tokenizers.
-- **Honest Character Deltas**: Defined as $\text{length}(\text{optimized}) - \text{length}(\text{original})$. A negative number indicates compression; a positive number indicates expansion.
-- **Valid Prompt Expansion**: Prompts that are vague or missing critical technical details may expand to ensure downstream LLMs generate accurate results. In such cases, Argus reports honest telemetry: token savings are reported as `0` (never negative or fabricated), and the status badge indicates `Validated Rewrite — Expanded`.
-- **Accurate Applied Strategy**: If a user selects `structure` mode but the rewrite produces plain text or falls back to the original prompt, the backend records `compress` or `preserve`, never misrepresenting structural changes.
-
----
-
-## Testing & Verification
+## 🧪 Testing & Verification
 
 ### 1. Backend Tests (Pytest)
 ```bash
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 ```
-- **65 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, dynamic context tier derivation, 413 overflow safeguards, hardware telemetry, independent process verification, and dynamic concurrency capacity enforcement.
-- HTTP calls to Ollama are mocked in automated unit tests, allowing the suite to run offline.
+- **87 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, dynamic context tier derivation, 413 overflow safeguards, hardware telemetry, independent process verification, dynamic concurrency capacity enforcement, and **Output Budget Control** (task baselines, explicit word/sentence directives, policy semantics, bounds enforcement, centralized headroom clamping, and native telemetry extraction).
 
 ### 2. Frontend Tests (Vitest)
 ```bash
@@ -421,7 +322,7 @@ npm.cmd run build
 
 ---
 
-## ⚡ Adaptive KV-Cache & Inference Runtime Optimization
+## ⚡ Adaptive KV-Cache & Output Budget Runtime Optimization
 
 Argus includes a production-grade KV-cache runtime optimization and telemetry engine engineered for local Ollama execution on consumer GPUs (e.g. NVIDIA RTX 4050 6 GB VRAM):
 
@@ -430,26 +331,31 @@ Argus includes a production-grade KV-cache runtime optimization and telemetry en
    - Activates Flash Attention kernels (`llama_context: flash_attn = enabled`) to eliminate quadratic memory expansion during attention computation.
    - Managed via the reproducible PowerShell launcher: [`scripts/launch_ollama.ps1`](scripts/launch_ollama.ps1).
 
-2. **Adaptive Context-Length Management & Dynamic Tier Derivation**:
-   - Enforces token budgeting: $\\text{Prompt} + \\text{System} + \\text{Wrapper} + \\text{Predict (512)} + \\text{Headroom (256)}$.
-   - **Dynamic Tier Derivation (4096, 6144, 8192)**: Tiers are dynamically derived and strictly bounded by OLLAMA_MAX_NUM_CTX. Prevents continuous KV cache reallocations while respecting configured maximum context limits.
-   - **Low-VRAM & Overflow Guards**: Under low VRAM (<1,000 MiB), restricts allocation to safe baseline tier (4096) and returns **HTTP 413 Payload Too Large** if budget exceeds that capacity. Prompts exceeding maximum context are rejected cleanly in ~50 ms with zero silent truncation.
+2. **Output Budget Control (Phase 4.1)**:
+   - Replaces fixed 512-token output generation with intelligent, task-aware generation ceilings (`num_predict`).
+   - Supports three distinct validated runtime policies (`adaptive`, `fixed`, `conservative`):
+     - `adaptive`: Dynamically calculates ceilings from validated task category baselines, mode scaling (`concise`: 0.75x, `balanced`: 1.0x, `structure`: 1.2x), complexity scores (+20%), and explicit prompt constraints (`under 50 words`, `in one sentence`, `tl;dr`).
+     - `fixed`: Uses `OUTPUT_BUDGET_DEFAULT_TOKENS` without dynamic variation.
+     - `conservative`: Minimizes memory footprint via 0.75x dampened baselines, 0 constraint headroom, and capped limits.
+   - Coordinates with `AdaptiveContextManager` via centralized headroom calculations, protecting against silent input truncation and enforcing HTTP 413 context boundaries.
+   - Strictly separates allocated budget ceiling from actual tokens generated, reporting native Ollama completion causes (`done_reason: stop` vs `length`).
+   - Conserves **35.0% aggregate generation ceiling headroom** across test suites with **100% natural completions (`done_reason == "stop"`)**.
 
-3. **Genuine Dynamic Concurrency Capacity Enforcement**:
-   - Condition-based admission gate (syncio.Condition) that evaluates hardware telemetry dynamically at admission time.
+3. **Adaptive Context-Length Management & Dynamic Tier Derivation**:
+   - Enforces token budgeting: $\text{Prompt} + \text{System} + \text{Wrapper} + \text{Predict (Dynamic)} + \text{Headroom (256)}$.
+   - **Dynamic Tier Derivation (4096, 6144, 8192)**: Tiers are dynamically derived and strictly bounded by `OLLAMA_MAX_NUM_CTX`. Prevents continuous KV cache reallocations while respecting configured maximum context limits.
+   - **Low-VRAM & Overflow Guards**: Under low VRAM (<1,000 MiB), restricts allocation to safe baseline tier (4096) and returns **HTTP 413 Payload Too Large** if budget exceeds that capacity.
+
+4. **Genuine Dynamic Concurrency Capacity Enforcement**:
+   - Condition-based admission gate (`asyncio.Condition`) that evaluates hardware telemetry dynamically at admission time.
    - Automatically throttles admission capacity from 3 down to 1 under low GPU VRAM (<400 MiB) or host RAM (<1024 MiB), draining active requests safely without permit race conditions.
    - Rejects requests immediately with HTTP 503 when VRAM <150 MiB or RAM <512 MiB.
-   - Accurately tracks queue depth, cleans up on cancellation, measures queue_wait_ms, and provides static conservative fallback.
-
-4. **KV Cache Prefix Reuse**:
-   - Aligns system instructions and prompt prefixes identically to maximize llama.cpp prefix caching.
-   - Empirical experiment demonstrated **90.7% cache hit ratio** (190.0 / 209.5 prompt tokens cached), **1.45x prefill latency speedup** (17.38 ms vs 25.23 ms), and **2.09x effective prompt throughput** (12,093.5 tok/s vs 5,779.7 tok/s).
 
 5. **Authoritative Native Telemetry**:
-   - Directly exposes Ollama's native inference metrics: `prompt_eval_count`, `prompt_eval_cached_count`, `prompt_eval_duration_ns`, `eval_count`, `eval_duration_ns`, and `prompt_tokens_per_second`.
-   - Distinct source attribution (`telemetry_source: "ollama_native"`) transparently separates exact hardware metrics from heuristic estimates.
+   - Directly exposes Ollama's native inference metrics: `prompt_eval_count`, `prompt_eval_cached_count`, `prompt_eval_duration_ns`, `eval_count`, `eval_duration_ns`, `generation_tokens_per_second`, and `done_reason`.
+   - Distinct source attribution transparently separates exact hardware metrics from heuristic estimates with strict zero-fabrication.
 
-See the [KV Cache Optimization Implementation Audit](docs/kv-cache-optimization-audit.md) and [Full Validation Report](docs/reports/kv-cache-validation-report.md) for complete empirical data.
+See the [Output Budget Validation Report](docs/reports/output-budget-validation-report.md) and [KV Cache Optimization Audit](docs/kv-cache-optimization-audit.md) for complete empirical data.
 
 ---
 
@@ -462,10 +368,9 @@ See the [KV Cache Optimization Implementation Audit](docs/kv-cache-optimization-
 | **Phase 3** | **Real Local LLM Integration** | Ollama HTTP integration (`http://127.0.0.1:11434`), `qwen2.5:1.5b` model communication, error handling, status monitoring. | ✅ Complete |
 | **Phase 3.1** | **Task-Aware Optimization Engine** | Modular pipeline (Stages A–D), task domain classification, strategy selection (`compress`, `clarify`, `structure`, `enrich`, `preserve`), explicit constraint & prohibition guardrails, candidate validation. | ✅ Complete |
 | **Phase 3.2** | **Semantic Preservation & Zero-Hardcoding** | Action/deliverable intent extraction, anti-turn-reversal validation, corrective retry/fallback, generalized taxonomies, centralized configuration. | ✅ Complete |
-| **Phase 3.2.1** | **Required-Operation Preservation Engine** | Multi-clause operation extraction, computation/transformation preservation validation, concept synonym mapping, retry/fallback integration. | ✅ Complete |
-| **Phase 3.2.2** | **Strategy Accuracy, Minimal Rewriting & Honest Metrics** | Profile refinement, unsupported addition prevention, accurate applied strategy metadata, consistent character delta (`final - original`), honest status badges. | ✅ Complete |
-| **Phase 4** | **Frontier LLM Gateway & Provider Dispatch** | Configurable external provider integration (Google Gemini / OpenAI), optional direct downstream execution, and frontier token metrics. | ⏳ Planned |
-| **Phase 5** | **Optimization Telemetry & Benchmarking** | Reproducible prompt evaluation datasets, automated constraint verification, quality scoring, and optimization analytics. | ⏳ Planned |
+| **Phase 4** | **Adaptive KV-Cache Runtime Optimization** | Q8_0 KV quantization, Flash Attention, dynamic context tier snapping, memory-aware concurrency controller, prefix cache reuse, managed launcher. | ✅ Complete |
+| **Phase 4.1** | **Output Budget Control & Native Telemetry** | Dynamic task & constraint output budgeting (`num_predict`), explicit word/sentence limit parsing, context headroom coordination, native `done_reason` telemetry. | ✅ Complete |
+| **Phase 5** | **Frontier LLM Gateway & Provider Dispatch** | Configurable external provider integration (Google Gemini / OpenAI), downstream execution, and frontier token metrics. | ⏳ Planned |
 | **Phase 6** | **Cloud Deployment & Production Hardening** | Dockerization, Azure Container Apps / AWS ECS deployment, observability, and containerized Ollama sidecars. | ⏳ Planned |
 
 ---
@@ -478,4 +383,4 @@ For local setup instructions, coding conventions, testing guidelines, and troubl
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

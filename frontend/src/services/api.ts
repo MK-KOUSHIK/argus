@@ -177,6 +177,7 @@ export class ApiService {
             native_metrics_available: Boolean(data.inference_telemetry.native_metrics_available),
           }
         : null,
+      outputBudget: data.output_budget || null,
       kvRuntimePolicy: data.kv_runtime_policy || null,
     };
   }

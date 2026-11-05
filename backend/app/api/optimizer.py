@@ -13,6 +13,7 @@ from app.services.ollama_service import (
     OllamaTimeoutError,
     OllamaResponseError,
 )
+from app.services.adaptive_context_manager import ContextOverflowError
 
 router = APIRouter(tags=["Prompt Optimization"])
 
@@ -28,6 +29,11 @@ async def optimize_prompt(request: OptimizeRequest) -> OptimizeResponse:
     """Optimize prompt with local Ollama model."""
     try:
         return await OllamaService.optimize_prompt(request)
+    except ContextOverflowError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.message,
+        ) from exc
     except (OllamaConnectionError, OllamaTimeoutError, OllamaResponseError, OllamaServiceError) as exc:
         raise HTTPException(
             status_code=exc.status_code,

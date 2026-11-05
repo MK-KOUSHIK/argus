@@ -16,16 +16,36 @@ import os
 import platform
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NotRequired, Optional, TypedDict
+# pyrefly: ignore[missing-import]
 import httpx
+
+
+class MEMORYSTATUSEX(ctypes.Structure):
+    _fields_ = [
+        ("dwLength", ctypes.c_ulong),
+        ("dwMemoryLoad", ctypes.c_ulong),
+        ("ullTotalPhys", ctypes.c_ulonglong),
+        ("ullAvailPhys", ctypes.c_ulonglong),
+        ("ullTotalPageFile", ctypes.c_ulonglong),
+        ("ullAvailPageFile", ctypes.c_ulonglong),
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
 
 
 def detect_hardware_metadata() -> Dict[str, Any]:
     """Dynamically query GPU, CPU, RAM, and OS metadata."""
-    gpu_info = {"name": "Unknown", "total_vram_mib": None, "driver": "Unknown", "source": "nvidia_smi"}
+    gpu_name = "Unknown"
+    total_vram_mib: Optional[int] = None
+    driver_version = "Unknown"
+    gpu_error: Optional[str] = None
+
     try:
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"],
@@ -35,33 +55,47 @@ def detect_hardware_metadata() -> Dict[str, Any]:
         )
         parts = [p.strip() for p in out.strip().split(",")]
         if len(parts) >= 3:
-            gpu_info["name"] = parts[0]
-            gpu_info["total_vram_mib"] = int(re.sub(r"[^\d]", "", parts[1]))
-            gpu_info["driver"] = parts[2]
+            gpu_name = parts[0]
+            vram_digits = re.sub(r"[^\d]", "", parts[1])
+            if vram_digits:
+                total_vram_mib = int(vram_digits)
+            driver_version = parts[2]
     except Exception as exc:
-        gpu_info["error"] = str(exc)
+        gpu_error = str(exc)
 
-    total_ram_mb = None
-    try:
-        class MEMORYSTATUSEX(ctypes.Structure):
-            _fields_ = [
-                ("dwLength", ctypes.c_ulong),
-                ("dwMemoryLoad", ctypes.c_ulong),
-                ("ullTotalPhys", ctypes.c_ulonglong),
-                ("ullAvailPhys", ctypes.c_ulonglong),
-                ("ullTotalPageFile", ctypes.c_ulonglong),
-                ("ullAvailPageFile", ctypes.c_ulonglong),
-                ("ullTotalVirtual", ctypes.c_ulonglong),
-                ("ullAvailVirtual", ctypes.c_ulonglong),
-                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-            ]
+    gpu_info: Dict[str, Any] = {
+        "name": gpu_name,
+        "total_vram_mib": total_vram_mib,
+        "driver": driver_version,
+        "source": "nvidia_smi",
+    }
+    if gpu_error is not None:
+        gpu_info["error"] = gpu_error
 
-        stat = MEMORYSTATUSEX()
-        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
-        total_ram_mb = round(stat.ullTotalPhys / (1024 * 1024), 1)
-    except Exception:
-        pass
+    total_ram_mb: Optional[float] = None
+    if os.name == "nt" or sys.platform == "win32":
+        try:
+            windll = getattr(ctypes, "windll", None)
+            if windll is not None:
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                if windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                    total_ram_mb = round(stat.ullTotalPhys / (1024 * 1024), 1)
+        except Exception:
+            pass
+    elif os.name == "posix":
+        try:
+            meminfo_path = "/proc/meminfo"
+            if os.path.exists(meminfo_path):
+                with open(meminfo_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("MemTotal:"):
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1].isdigit():
+                                total_ram_mb = round(int(parts[1]) / 1024, 1)
+                            break
+        except Exception:
+            pass
 
     return {
         "os": f"{platform.system()} {platform.release()} ({platform.architecture()[0]})",
@@ -86,32 +120,54 @@ def get_vram_usage_mib() -> Optional[int]:
 
 
 def get_system_ram_mb() -> Optional[float]:
-    """Query Windows system RAM usage via ctypes GlobalMemoryStatusEx."""
-    try:
-        class MEMORYSTATUSEX(ctypes.Structure):
-            _fields_ = [
-                ("dwLength", ctypes.c_ulong),
-                ("dwMemoryLoad", ctypes.c_ulong),
-                ("ullTotalPhys", ctypes.c_ulonglong),
-                ("ullAvailPhys", ctypes.c_ulonglong),
-                ("ullTotalPageFile", ctypes.c_ulonglong),
-                ("ullAvailPageFile", ctypes.c_ulonglong),
-                ("ullTotalVirtual", ctypes.c_ulonglong),
-                ("ullAvailVirtual", ctypes.c_ulonglong),
-                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-            ]
+    """Query system RAM usage via ctypes GlobalMemoryStatusEx (Windows) or /proc/meminfo (POSIX)."""
+    if os.name == "nt" or sys.platform == "win32":
+        try:
+            windll = getattr(ctypes, "windll", None)
+            if windll is not None:
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                if windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                    used_ram = (stat.ullTotalPhys - stat.ullAvailPhys) / (1024 * 1024)
+                    return round(used_ram, 1)
+        except Exception:
+            return None
+    elif os.name == "posix":
+        try:
+            meminfo_path = "/proc/meminfo"
+            if os.path.exists(meminfo_path):
+                total_kb: Optional[int] = None
+                avail_kb: Optional[int] = None
+                with open(meminfo_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("MemTotal:"):
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1].isdigit():
+                                total_kb = int(parts[1])
+                        elif line.startswith("MemAvailable:"):
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1].isdigit():
+                                avail_kb = int(parts[1])
+                if total_kb is not None and avail_kb is not None:
+                    return round((total_kb - avail_kb) / 1024, 1)
+        except Exception:
+            return None
+    return None
 
-        stat = MEMORYSTATUSEX()
-        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
-        used_ram = (stat.ullTotalPhys - stat.ullAvailPhys) / (1024 * 1024)
-        return round(used_ram, 1)
-    except Exception:
-        return None
+
+class PromptTestCase(TypedDict):
+    id: str
+    name: str
+    category: str
+    mode: str
+    prompt: str
+    expected_status: int
+    required_invariants: NotRequired[List[str]]
+    prohibited_invariants: NotRequired[List[str]]
 
 
 # Benchmark Test Prompts Matrix
-PROMPT_SUITE = [
+PROMPT_SUITE: List[PromptTestCase] = [
     {
         "id": "prompt_1_short",
         "name": "Short Coding Task",
@@ -293,6 +349,7 @@ def run_benchmark(
                     "wall_clock_elapsed_ms": elapsed_wall_ms,
                     "vram_start_mib": vram_start,
                     "vram_end_mib": vram_end,
+                    "system_ram_start_mb": ram_start,
                     "system_ram_mb": ram_end,
                     "telemetry_present": False,
                 }
@@ -346,7 +403,8 @@ def run_benchmark(
 
                     print(f"  Rep {rep}: 200 OK | Wall: {elapsed_wall_ms}ms | Prompt: {prompt_eval_count} tok (Cached: {prompt_eval_cached}) | Gen: {eval_count} tok ({gen_tps} tok/s) | VRAM: {vram_end} MiB")
                 elif status_code == 413:
-                    error_msg = resp_json.get("error", {}).get("message", "")
+                    error_obj = resp_json.get("error")
+                    error_msg = error_obj.get("message", "") if isinstance(error_obj, dict) else str(error_obj or "")
                     run_data.update({
                         "overflow_error_verified": True,
                         "error_message": error_msg,

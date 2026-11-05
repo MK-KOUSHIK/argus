@@ -74,10 +74,26 @@ export interface TokenEstimation {
   estimatedTokens: number;
 }
 
+export interface OutputBudgetTelemetry {
+  requested_budget?: number | null;
+  allocated_budget: number;
+  policy: string;
+  reason: string;
+  task_category: string;
+  task_confidence?: number | null;
+  actual_generated_tokens?: number | null;
+  generation_duration_ms?: number | null;
+  generation_tokens_per_second?: number | null;
+  done_reason?: string | null;
+  hit_budget_limit?: boolean | null;
+  budget_utilization_percent?: number | null;
+}
+
 export interface OptimizeRequestPayload {
   prompt: string;
   mode: OptimizationMode;
   target_model: TargetModel;
+  requested_output_budget?: number;
 }
 
 export interface OllamaCallTelemetry {
@@ -86,6 +102,9 @@ export interface OllamaCallTelemetry {
   estimated_input_tokens_for_budget?: number;
   selected_num_ctx?: number;
   num_predict_limit?: number;
+  done_reason?: string | null;
+  hit_budget_limit?: boolean | null;
+  budget_utilization_percent?: number | null;
   load_duration_ns?: number | null;
   prompt_eval_count?: number | null;
   prompt_eval_duration_ns?: number | null;
@@ -140,6 +159,7 @@ export interface OptimizationResult {
     calls: OllamaCallTelemetry[];
     native_metrics_available: boolean;
   } | null;
+  outputBudget?: OutputBudgetTelemetry | null;
   kvRuntimePolicy?: {
     requested_num_ctx: number;
     requested_num_predict: number;

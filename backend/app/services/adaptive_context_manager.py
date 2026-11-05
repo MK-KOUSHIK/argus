@@ -65,22 +65,69 @@ class AdaptiveContextManager:
         return tokens, "estimated_conservative_heuristic"
 
     @classmethod
+    def format_input_text(
+        cls,
+        system_instruction: Optional[str],
+        prompt: str,
+        formatted_prompt: Optional[str] = None,
+    ) -> str:
+        """Construct exact full input string including system instruction and prompt wrapper."""
+        body = formatted_prompt if formatted_prompt is not None else f"Original prompt to optimize:\n\n{prompt}"
+        sys_inst = (system_instruction or "").strip()
+        if sys_inst:
+            return f"{sys_inst}\n{body.strip()}"
+        return body.strip()
+
+    @classmethod
+    def calculate_headroom(
+        cls,
+        system_instruction: Optional[str],
+        prompt: str,
+        formatted_prompt: Optional[str] = None,
+        max_num_ctx: Optional[int] = None,
+        reserve_tokens: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Calculate exact input token footprint, safety reserve, and remaining context headroom."""
+        max_ctx = max_num_ctx if max_num_ctx is not None else settings.OLLAMA_MAX_NUM_CTX
+        reserve = reserve_tokens if reserve_tokens is not None else settings.OLLAMA_CONTEXT_RESERVE_TOKENS
+
+        full_text = cls.format_input_text(system_instruction, prompt, formatted_prompt)
+        input_tokens, token_source = cls.estimate_tokens(full_text)
+        available_headroom = max_ctx - input_tokens - reserve
+
+        return {
+            "estimated_input_tokens": input_tokens,
+            "reserve_tokens": reserve,
+            "max_num_ctx": max_ctx,
+            "available_headroom": available_headroom,
+            "token_estimation_source": token_source,
+            "full_input_text": full_text,
+        }
+
+    @classmethod
     def calculate_budget(
         cls,
         system_instruction: str,
         formatted_prompt: str,
         min_ctx: Optional[int] = None,
         max_ctx: Optional[int] = None,
+        output_budget: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Calculate complete required context budget and select optimal context tier."""
         min_limit = min_ctx if min_ctx is not None else settings.OLLAMA_NUM_CTX
         max_limit = max_ctx if max_ctx is not None else settings.OLLAMA_MAX_NUM_CTX
 
-        full_input_text = f"{system_instruction}\n{formatted_prompt}"
-        input_tokens, token_source = cls.estimate_tokens(full_input_text)
+        headroom_data = cls.calculate_headroom(
+            system_instruction=system_instruction,
+            prompt="",
+            formatted_prompt=formatted_prompt,
+            max_num_ctx=max_limit,
+        )
+        input_tokens = headroom_data["estimated_input_tokens"]
+        token_source = headroom_data["token_estimation_source"]
+        reserve_tokens = headroom_data["reserve_tokens"]
 
-        reserve_tokens = settings.OLLAMA_CONTEXT_RESERVE_TOKENS
-        predict_tokens = settings.OLLAMA_NUM_PREDICT
+        predict_tokens = output_budget if output_budget is not None else settings.OLLAMA_NUM_PREDICT
         required_context = input_tokens + reserve_tokens + predict_tokens
 
         eligible_tiers = cls.get_eligible_tiers(min_limit, max_limit)
@@ -89,11 +136,13 @@ class AdaptiveContextManager:
             "estimated_input_tokens": input_tokens,
             "reserve_tokens": reserve_tokens,
             "predict_tokens": predict_tokens,
+            "output_budget_source": "dynamic_controller" if output_budget is not None else "static_setting",
             "total_required_context": required_context,
             "token_estimation_source": token_source,
             "max_num_ctx_limit": max_limit,
             "min_num_ctx_limit": min_limit,
             "eligible_tiers": eligible_tiers,
+            "available_headroom": headroom_data["available_headroom"],
         }
 
         # 1. Reject if required context exceeds maximum permitted context limit
