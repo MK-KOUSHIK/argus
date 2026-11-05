@@ -41,6 +41,9 @@ class PromptRewriter:
             "All functional requirements and data flow steps must be clearly retained in the rewrite.\n"
             "10. DO NOT add unrequested tasks, execution instructions (do NOT instruct to 'execute', 'run', or 'test' "
             "the script/code unless explicitly requested), extra artifact requirements, or unrequested libraries/dependencies.\n"
+            "11. If the input prompt contains an embedded data payload (such as system logs, code blocks, JSON schemas, "
+            "stack traces, or error messages), NEVER delete, omit, or summarize away the payload. Retain the data payload intact "
+            "so the downstream model can inspect and analyze it.\n"
         )
 
         # Strategy-specific directive
@@ -101,17 +104,19 @@ class PromptRewriter:
         retry_block = ""
         if retry_guidance:
             retry_block = (
-                f"\nCRITICAL CORRECTION FROM VALIDATION RETRY:\n"
-                f"- The previous rewrite was REJECTED: {retry_guidance}\n"
-                f"- You must fix this error immediately. Explicitly instruct the AI to perform the user's primary action, "
-                f"deliver the requested artifact, and preserve all required operations and calculations. DO NOT drop any operations and DO NOT ask the user for inputs.\n"
+                f"\nCRITICAL CORRECTION NOTICE:\n"
+                f"Your previous attempt was rejected for this specific reason:\n"
+                f">> {retry_guidance}\n"
+                f"Fix this defect immediately in your new output.\n"
             )
 
-        return (
-            base_instruction
-            + strategy_directives.get(strategy, strategy_directives["compress"])
-            + "\n\nSTYLE INFLUENCE:\n"
-            + profile_modifiers.get(mode, profile_modifiers["balanced"])
-            + constraints_block
-            + retry_block
+        instruction = (
+            f"{base_instruction}"
+            f"{strategy_directives.get(strategy, '')}\n"
+            f"\nPROFILE DIRECTIVE ({mode}):\n"
+            f"{profile_modifiers.get(mode, '')}\n"
+            f"{constraints_block}"
+            f"{retry_block}"
         )
+
+        return instruction.strip()
