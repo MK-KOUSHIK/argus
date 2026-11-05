@@ -692,3 +692,119 @@ def test_exact_reversible_restoration_verification():
     assert res_missing["status"] == "missing_or_expired"
     assert res_missing["actual_hash"] is None
 
+
+
+# ==============================================================================
+
+# ==============================================================================
+
+# ==============================================================================
+# 11. Application Pipeline Integration Verification Tests (Section 4)
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_integration_compression_executed_before_task_analysis():
+    """Verify compression is executed before task analysis and compressed prompt is analyzed."""
+    from app.services.ollama_service import OllamaService
+    from app.services.task_analyzer import TaskAnalyzer
+
+    input_text = "Analyze this data:\n```json\n{\n  \"status\": \"healthy\",\n  \"uptime\": 99.9\n}\n```"
+    req = OptimizeRequest(prompt=input_text, mode="balanced", enable_compression=True)
+
+    with patch.object(CompressionOrchestrator, "compress", wraps=CompressionOrchestrator.compress) as mock_comp, \
+         patch.object(TaskAnalyzer, "analyze", wraps=TaskAnalyzer.analyze) as mock_analyze, \
+         patch.object(OllamaService, "_execute_model_call", new_callable=AsyncMock) as mock_call:
+
+        mock_call.return_value = ("Optimized prompt output.", 15, {"prompt_eval_count": 25, "eval_count": 10, "native_metrics_available": True})
+
+        await OllamaService.optimize_prompt(req)
+
+        # Verify CompressionOrchestrator.compress was called with request prompt
+        mock_comp.assert_called_once()
+        comp_arg = mock_comp.call_args[1]["text"] if "text" in mock_comp.call_args[1] else mock_comp.call_args[0][0]
+        assert comp_arg == input_text
+
+        # Verify TaskAnalyzer.analyze received the compressed text
+        mock_analyze.assert_called_once()
+        analyzed_arg = mock_analyze.call_args[0][0]
+        assert "{\n  \"status\"" not in analyzed_arg
+        assert '{"status":"healthy","uptime":99.9}' in analyzed_arg
+
+
+@pytest.mark.asyncio
+async def test_integration_compressed_prompt_passed_to_rewriter():
+    """Verify the compressed prompt is actually passed to the internal Ollama rewriter."""
+    from app.services.ollama_service import OllamaService
+
+    input_text = "Analyze this data:\n```json\n{\n  \"status\": \"healthy\",\n  \"uptime\": 99.9\n}\n```"
+    req = OptimizeRequest(prompt=input_text, mode="balanced", enable_compression=True)
+
+    with patch.object(OllamaService, "_execute_model_call", new_callable=AsyncMock) as mock_call:
+        mock_call.return_value = ("Optimized prompt output.", 15, {"prompt_eval_count": 25, "eval_count": 10, "native_metrics_available": True})
+
+        await OllamaService.optimize_prompt(req)
+
+        mock_call.assert_called_once()
+        passed_prompt = mock_call.call_args[1].get("prompt")
+        assert passed_prompt is not None
+        assert '{"status":"healthy","uptime":99.9}' in passed_prompt
+
+
+def test_integration_disabled_compression_leaves_input_unchanged():
+    """Verify disabled compression leaves the original input unchanged at the compression stage."""
+    raw_prompt = "  Leading whitespace and \n\n repetitive text.  "
+    res = CompressionOrchestrator.compress(raw_prompt, enabled=False)
+
+    assert res.compressed_text == raw_prompt
+    assert res.strategy_applied == CompressionStrategy.NONE
+    assert res.tokens_reduced == 0
+    assert res.compression_ratio == 1.0
+    assert res.reduction_percent == 0.0
+    assert res.fallback_reason is not None and "Compression disabled" in res.fallback_reason
+
+
+@pytest.mark.asyncio
+async def test_integration_failed_validation_safely_falls_back_to_original():
+    """Verify that any failed candidate validation safely falls back to the original content."""
+    from app.services.ollama_service import OllamaService
+    from app.services.candidate_validator import CandidateValidator, ValidationResult
+
+    input_text = "Strict requirement: do not use external libraries. Write a sort function."
+    req = OptimizeRequest(prompt=input_text, mode="balanced", enable_compression=True)
+
+    with patch.object(CandidateValidator, "validate") as mock_val, \
+         patch.object(OllamaService, "_execute_model_call", new_callable=AsyncMock) as mock_call:
+
+        mock_val.return_value = ValidationResult(is_valid=False, status="fallback", reason="Violation of prohibition")
+        mock_call.return_value = ("Invalid candidate rewrite.", 10, {"prompt_eval_count": 20, "eval_count": 10, "native_metrics_available": True})
+
+        resp = await OllamaService.optimize_prompt(req)
+
+        assert resp.optimized_prompt == input_text
+        assert resp.validation_status == "fallback"
+        assert resp.is_preserved is True
+
+
+@pytest.mark.asyncio
+async def test_integration_compression_telemetry_reflects_compression_stage_not_rewrite():
+    """Verify compression telemetry reflects the actual compression stage, not the final neural rewrite."""
+    from app.services.ollama_service import OllamaService
+
+    input_text = "Analyze this data:\n```json\n{\n  \"key1\": \"value1\",\n  \"key2\": \"value2\"\n}\n```"
+    req = OptimizeRequest(prompt=input_text, mode="balanced", enable_compression=True)
+
+    with patch.object(OllamaService, "_execute_model_call", new_callable=AsyncMock) as mock_call:
+        mock_call.return_value = (
+            "Analyze the minified JSON data provided.",
+            25,
+            {"prompt_eval_count": 50, "eval_count": 12, "eval_duration_ns": 120_000_000, "native_metrics_available": True}
+        )
+
+        resp = await OllamaService.optimize_prompt(req)
+
+        assert resp.compression is not None
+        assert resp.compression.enabled is True
+        assert resp.compression.detected_content_type in {"json", "mixed"}
+        assert resp.compression.tokens_reduced > 0
+        assert resp.compression.processing_time_ms < 25.0

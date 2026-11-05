@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-05T08:00:08.284932+00:00",
+  "timestamp": "2026-11-05T09:18:29.276706+00:00",
   "model": "qwen2.5:1.5b",
   "hardware": {
     "gpu": {
@@ -27,40 +27,61 @@
     "downstream_inference_parameters": {
       "temperature": 0.0,
       "top_p": 0.9,
-      "num_predict": 256,
+      "num_predict": 384,
       "num_ctx": 4096
     },
     "quality_evaluation_note": "Downstream answer quality is evaluated via rule-based programmatic keyword/heuristic checks against workload-specific acceptance criteria; not full semantic equivalence.",
     "restoration_verification_note": "Reversible restoration compares retrieved content against the actual expected original payload, verifying byte-for-byte equality, SHA-256 hash match, and negative test verification.",
-    "ollama_telemetry_semantics_note": "prompt_eval_count represents total input tokens prefilled by Ollama. prompt_eval_cached_count represents tokens found in Ollama's local KV prefix cache. eval_count represents tokens generated during output decoding. All metrics are native counters reported directly by Ollama."
+    "inference_separation_note": "Internal optimizer inference metrics represent the prompt rewriting call (Stage C). Downstream model inference metrics represent actual task execution using the optimized prompt."
   },
   "aggregate_statistics": {
-    "character_reduction": {
-      "aggregate_percent": 32.83,
-      "mean_percent": 26.42,
-      "median_percent": 30.61,
-      "stdev_percent": 25.97
+    "downstream_prompt_token_savings": {
+      "total_baseline_tokens": 2866,
+      "total_compressed_tokens": 2404,
+      "total_tokens_saved": 462,
+      "aggregate_percent": 16.12,
+      "mean_tokens_saved": 46.2,
+      "median_tokens_saved": 15.5,
+      "stdev_tokens_saved": 78.55
     },
-    "prompt_eval_token_reduction": {
+    "internal_optimizer_prompt_token_savings": {
       "total_baseline_tokens": 9058,
       "total_compressed_tokens": 7844,
+      "total_tokens_saved": 1214,
       "aggregate_percent": 13.4,
       "mean_tokens_saved": 121.4,
       "median_tokens_saved": 124.0,
       "stdev_tokens_saved": 85.33
     },
+    "compression_stage_character_reduction": {
+      "total_baseline_chars": 12462,
+      "total_compressed_chars": 8590,
+      "aggregate_percent": 31.07,
+      "mean_percent": 28.71,
+      "median_percent": 31.18,
+      "stdev_percent": 8.01
+    },
+    "final_optimized_prompt_character_reduction": {
+      "total_baseline_chars": 10065,
+      "total_compressed_chars": 8222,
+      "aggregate_percent": 18.31,
+      "mean_percent": 18.2,
+      "median_percent": 11.3,
+      "stdev_percent": 27.7
+    },
     "compression_engine_latency_ms": {
-      "mean_ms": 0.904,
-      "median_ms": 0.475,
-      "stdev_ms": 1.204
+      "mean_ms": 0.564,
+      "median_ms": 0.4,
+      "stdev_ms": 0.495
     },
     "downstream_task_quality_summary": {
       "total_trials": 10,
-      "preserved_count": 10,
-      "regression_count": 0,
-      "improvement_count": 0,
-      "both_failed_count": 0,
-      "preservation_rate_percent": 100.0
+      "preserved_count": 6,
+      "regression_count": 1,
+      "improvement_count": 1,
+      "both_failed_count": 2,
+      "not_evaluated_count": 0,
+      "preservation_rate_percent": 60.0
     },
     "reversible_restoration_summary": {
       "total_tested": 8,
@@ -78,114 +99,184 @@
       "baseline": {
         "workload_id": "json_cluster_config",
         "enable_compression": false,
-        "input_original_chars": 1179,
-        "input_effective_chars": 1179,
-        "char_reduction_percent": 0.0,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 295,
-        "compressed_tokens": 295,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.0,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 2230.18,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 905,
-        "prompt_eval_cached_count": 400,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 68.8,
-        "eval_count": 33,
-        "eval_duration_ms": 242.56,
-        "generation_tokens_per_second": 136.05,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "```json\n{\n  \"cluster_id\": \"us-east-prod-01\",\n  \"environment\": \"production\",\n  \"version\": \"2.4.1\",\n  \"datacenter\": {\n    \"region\": \"us-east-1\",\n    \"zone\": \"us-east-1a\",\n    \"rack_id\": 402\n  },\n  \"nodes\": [\n    {\n      \"node_id\": \"node-alpha\",\n      \"...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_cluster_data_and_task",
-          "details": {
-            "has_nodes": true,
-            "has_task": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 1179,
+          "compression_stage_output_chars": 1179,
+          "final_optimized_prompt_chars": 1179,
+          "downstream_model_input_chars": 1179
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 295,
+          "compressed_tokens": 295,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 4097.68,
+          "validation_status": "fallback",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 905,
+          "prompt_eval_cached_count": 400,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 70.85,
+          "eval_count": 231,
+          "eval_duration_ms": 1739.56,
+          "generation_tokens_per_second": 132.79,
+          "done_reason": "length",
+          "final_optimized_prompt_preview": "```json\n{\n  \"cluster_id\": \"us-east-prod-01\",\n  \"environment\": \"production\",\n  \"version\": \"2.4.1\",\n  \"datacenter\": {\n    \"region\": \"us-east-1\",\n    \"zone\": \"us-east-1a\",\n    \"rack_id\": 402\n  },\n  \"nodes\": [\n    {\n      \"node_id\": \"node-alpha\",\n      \"...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_cluster_data_and_task",
+            "details": {
+              "has_nodes": true,
+              "has_task": true
+            }
           }
         },
-        "downstream_task_answer": "The active nodes in the cluster are:\n\n- Node Alpha (role: control-plane, status: ready, specs: 16 CPU cores, 64 GB memory, 1000 GB storage)\n- Node Beta (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n- Node Gamma (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n\nThe total memory in the cluster is 64 GB + 128 GB + 128 GB = 320 GB.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_identifies_active_nodes_and_memory",
-          "details": {
-            "has_nodes": true,
-            "has_memory": true
+        "downstream_inference": {
+          "prompt_eval_count": 407,
+          "eval_count": 144,
+          "prompt_eval_duration_ms": 10.6,
+          "eval_duration_ms": 1065.44,
+          "latency_ms": 1127.37,
+          "done_reason": "stop",
+          "raw_answer": "The active nodes in the cluster are:\n\n- Node Alpha (role: control-plane, status: ready, specs: 16 CPU cores, 64 GB memory, 1000 GB storage)\n- Node Beta (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n- Node Gamma (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n\nThe total memory in the cluster is 64 GB + 128 GB + 128 GB = 320 GB.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_cluster_nodes_memory_and_structure",
+            "details": {
+              "has_node_alpha": true,
+              "has_node_beta": true,
+              "has_node_gamma": true,
+              "has_all_nodes": true,
+              "has_memory_components": true,
+              "has_memory_total": true,
+              "has_status_or_role": true
+            }
           }
-        },
-        "downstream_eval_tokens": 144,
-        "downstream_latency_ms": 1107.19
+        }
       },
       "compressed": {
         "workload_id": "json_cluster_config",
         "enable_compression": true,
-        "input_original_chars": 1179,
-        "input_effective_chars": 1179,
-        "char_reduction_percent": 0.0,
-        "compression_applied": true,
-        "content_type": "mixed",
-        "strategy": "mixed",
-        "original_tokens": 295,
-        "compressed_tokens": 198,
-        "reduction_percent": 32.9,
-        "compression_time_ms": 0.22,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": "argus:ref:de7f1882ce9044cb",
-        "total_opt_latency_ms": 3025.19,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 765,
-        "prompt_eval_cached_count": 512,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 36.72,
-        "eval_count": 118,
-        "eval_duration_ms": 877.05,
-        "generation_tokens_per_second": 134.54,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "```json\n{\n  \"cluster_id\": \"us-east-prod-01\",\n  \"environment\": \"production\",\n  \"version\": \"2.4.1\",\n  \"datacenter\": {\n    \"region\": \"us-east-1\",\n    \"zone\": \"us-east-1a\",\n    \"rack_id\": 402\n  },\n  \"nodes\": [\n    {\n      \"node_id\": \"node-alpha\",\n      \"...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_cluster_data_and_task",
-          "details": {
-            "has_nodes": true,
-            "has_task": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 1179,
+          "compression_stage_output_chars": 792,
+          "final_optimized_prompt_chars": 1179,
+          "downstream_model_input_chars": 1179
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "mixed",
+          "strategy": "mixed",
+          "original_tokens": 295,
+          "compressed_tokens": 198,
+          "tokens_reduced": 97,
+          "reduction_percent": 32.9,
+          "processing_time_ms": 0.15,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": "argus:ref:de7f1882ce9044cb"
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 3985.48,
+          "validation_status": "fallback",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 765,
+          "prompt_eval_cached_count": 525,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 35.26,
+          "eval_count": 231,
+          "eval_duration_ms": 1722.67,
+          "generation_tokens_per_second": 134.09,
+          "done_reason": "length",
+          "final_optimized_prompt_preview": "```json\n{\n  \"cluster_id\": \"us-east-prod-01\",\n  \"environment\": \"production\",\n  \"version\": \"2.4.1\",\n  \"datacenter\": {\n    \"region\": \"us-east-1\",\n    \"zone\": \"us-east-1a\",\n    \"rack_id\": 402\n  },\n  \"nodes\": [\n    {\n      \"node_id\": \"node-alpha\",\n      \"...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_cluster_data_and_task",
+            "details": {
+              "has_nodes": true,
+              "has_task": true
+            }
           }
         },
-        "downstream_task_answer": "The active nodes in the cluster are:\n\n- Node Alpha (role: control-plane, status: ready, specs: 16 CPU cores, 64 GB memory, 1000 GB storage)\n- Node Beta (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n- Node Gamma (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n\nThe total memory in the cluster is 64 GB + 128 GB + 128 GB = 320 GB.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_identifies_active_nodes_and_memory",
-          "details": {
-            "has_nodes": true,
-            "has_memory": true
+        "downstream_inference": {
+          "prompt_eval_count": 407,
+          "eval_count": 144,
+          "prompt_eval_duration_ms": 10.47,
+          "eval_duration_ms": 1058.58,
+          "latency_ms": 1110.8,
+          "done_reason": "stop",
+          "raw_answer": "The active nodes in the cluster are:\n\n- Node Alpha (role: control-plane, status: ready, specs: 16 CPU cores, 64 GB memory, 1000 GB storage)\n- Node Beta (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n- Node Gamma (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n\nThe total memory in the cluster is 64 GB + 128 GB + 128 GB = 320 GB.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_cluster_nodes_memory_and_structure",
+            "details": {
+              "has_node_alpha": true,
+              "has_node_beta": true,
+              "has_node_gamma": true,
+              "has_all_nodes": true,
+              "has_memory_components": true,
+              "has_memory_total": true,
+              "has_status_or_role": true
+            }
           }
-        },
-        "downstream_eval_tokens": 144,
-        "downstream_latency_ms": 1099.54
+        }
       },
       "comparison": {
-        "character_reduction": 0,
-        "character_reduction_percent": 0.0,
-        "prompt_eval_token_savings": 140,
-        "compression_overhead_ms": 0.22,
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 1179,
+          "compression_stage": {
+            "baseline_chars": 1179,
+            "compressed_chars": 792,
+            "reduction_chars": 387,
+            "reduction_percent": 32.82
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 1179,
+            "compressed_chars": 1179,
+            "reduction_chars": 0,
+            "reduction_percent": 0.0
+          },
+          "downstream_model_input": {
+            "baseline_chars": 1179,
+            "compressed_chars": 1179
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 407,
+          "compressed_prompt_eval_count": 407,
+          "tokens_saved": 0,
+          "reduction_percent": 0.0
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 905,
+          "compressed_prompt_eval_count": 765,
+          "tokens_saved": 140,
+          "reduction_percent": 15.47
+        },
+        "compression_overhead_ms": 0.15,
         "prompt_preservation_status": "preserved",
         "downstream_answer_status": "preserved",
         "restoration_verification": {
@@ -211,114 +302,184 @@
       "baseline": {
         "workload_id": "json_cluster_config",
         "enable_compression": false,
-        "input_original_chars": 1179,
-        "input_effective_chars": 1179,
-        "char_reduction_percent": 0.0,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 295,
-        "compressed_tokens": 295,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.0,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 986.53,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 905,
-        "prompt_eval_cached_count": 512,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 61.57,
-        "eval_count": 36,
-        "eval_duration_ms": 257.06,
-        "generation_tokens_per_second": 140.04,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "```json\n{\n  \"cluster_id\": \"us-east-prod-01\",\n  \"environment\": \"production\",\n  \"version\": \"2.4.1\",\n  \"datacenter\": {\n    \"region\": \"us-east-1\",\n    \"zone\": \"us-east-1a\",\n    \"rack_id\": 402\n  },\n  \"nodes\": [\n    {\n      \"node_id\": \"node-alpha\",\n      \"...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_cluster_data_and_task",
-          "details": {
-            "has_nodes": true,
-            "has_task": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 1179,
+          "compression_stage_output_chars": 1179,
+          "final_optimized_prompt_chars": 1179,
+          "downstream_model_input_chars": 1179
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 295,
+          "compressed_tokens": 295,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 2508.25,
+          "validation_status": "fallback",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 905,
+          "prompt_eval_cached_count": 512,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 64.32,
+          "eval_count": 37,
+          "eval_duration_ms": 270.91,
+          "generation_tokens_per_second": 136.58,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "```json\n{\n  \"cluster_id\": \"us-east-prod-01\",\n  \"environment\": \"production\",\n  \"version\": \"2.4.1\",\n  \"datacenter\": {\n    \"region\": \"us-east-1\",\n    \"zone\": \"us-east-1a\",\n    \"rack_id\": 402\n  },\n  \"nodes\": [\n    {\n      \"node_id\": \"node-alpha\",\n      \"...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_cluster_data_and_task",
+            "details": {
+              "has_nodes": true,
+              "has_task": true
+            }
           }
         },
-        "downstream_task_answer": "The active nodes in the cluster are:\n\n- Node Alpha (role: control-plane, status: ready, specs: 16 CPU cores, 64 GB memory, 1000 GB storage)\n- Node Beta (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n- Node Gamma (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n\nThe total memory in the cluster is 64 GB + 128 GB + 128 GB = 320 GB.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_identifies_active_nodes_and_memory",
-          "details": {
-            "has_nodes": true,
-            "has_memory": true
+        "downstream_inference": {
+          "prompt_eval_count": 407,
+          "eval_count": 144,
+          "prompt_eval_duration_ms": 11.18,
+          "eval_duration_ms": 1059.36,
+          "latency_ms": 1112.07,
+          "done_reason": "stop",
+          "raw_answer": "The active nodes in the cluster are:\n\n- Node Alpha (role: control-plane, status: ready, specs: 16 CPU cores, 64 GB memory, 1000 GB storage)\n- Node Beta (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n- Node Gamma (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n\nThe total memory in the cluster is 64 GB + 128 GB + 128 GB = 320 GB.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_cluster_nodes_memory_and_structure",
+            "details": {
+              "has_node_alpha": true,
+              "has_node_beta": true,
+              "has_node_gamma": true,
+              "has_all_nodes": true,
+              "has_memory_components": true,
+              "has_memory_total": true,
+              "has_status_or_role": true
+            }
           }
-        },
-        "downstream_eval_tokens": 144,
-        "downstream_latency_ms": 1071.27
+        }
       },
       "compressed": {
         "workload_id": "json_cluster_config",
         "enable_compression": true,
-        "input_original_chars": 1179,
-        "input_effective_chars": 1179,
-        "char_reduction_percent": 0.0,
-        "compression_applied": true,
-        "content_type": "mixed",
-        "strategy": "mixed",
-        "original_tokens": 295,
-        "compressed_tokens": 198,
-        "reduction_percent": 32.9,
-        "compression_time_ms": 0.23,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": "argus:ref:de7f1882ce9044cb",
-        "total_opt_latency_ms": 3841.98,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 765,
-        "prompt_eval_cached_count": 512,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 38.41,
-        "eval_count": 231,
-        "eval_duration_ms": 1666.57,
-        "generation_tokens_per_second": 138.61,
-        "done_reason": "length",
-        "optimized_prompt_preview": "```json\n{\n  \"cluster_id\": \"us-east-prod-01\",\n  \"environment\": \"production\",\n  \"version\": \"2.4.1\",\n  \"datacenter\": {\n    \"region\": \"us-east-1\",\n    \"zone\": \"us-east-1a\",\n    \"rack_id\": 402\n  },\n  \"nodes\": [\n    {\n      \"node_id\": \"node-alpha\",\n      \"...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_cluster_data_and_task",
-          "details": {
-            "has_nodes": true,
-            "has_task": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 1179,
+          "compression_stage_output_chars": 792,
+          "final_optimized_prompt_chars": 1179,
+          "downstream_model_input_chars": 1179
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "mixed",
+          "strategy": "mixed",
+          "original_tokens": 295,
+          "compressed_tokens": 198,
+          "tokens_reduced": 97,
+          "reduction_percent": 32.9,
+          "processing_time_ms": 0.16,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": "argus:ref:de7f1882ce9044cb"
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 3936.78,
+          "validation_status": "fallback",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 765,
+          "prompt_eval_cached_count": 512,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 35.62,
+          "eval_count": 231,
+          "eval_duration_ms": 1743.52,
+          "generation_tokens_per_second": 132.49,
+          "done_reason": "length",
+          "final_optimized_prompt_preview": "```json\n{\n  \"cluster_id\": \"us-east-prod-01\",\n  \"environment\": \"production\",\n  \"version\": \"2.4.1\",\n  \"datacenter\": {\n    \"region\": \"us-east-1\",\n    \"zone\": \"us-east-1a\",\n    \"rack_id\": 402\n  },\n  \"nodes\": [\n    {\n      \"node_id\": \"node-alpha\",\n      \"...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_cluster_data_and_task",
+            "details": {
+              "has_nodes": true,
+              "has_task": true
+            }
           }
         },
-        "downstream_task_answer": "The active nodes in the cluster are:\n\n- Node Alpha (role: control-plane, status: ready, specs: 16 CPU cores, 64 GB memory, 1000 GB storage)\n- Node Beta (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n- Node Gamma (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n\nThe total memory in the cluster is 64 GB + 128 GB + 128 GB = 320 GB.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_identifies_active_nodes_and_memory",
-          "details": {
-            "has_nodes": true,
-            "has_memory": true
+        "downstream_inference": {
+          "prompt_eval_count": 407,
+          "eval_count": 144,
+          "prompt_eval_duration_ms": 13.64,
+          "eval_duration_ms": 1060.45,
+          "latency_ms": 1118.51,
+          "done_reason": "stop",
+          "raw_answer": "The active nodes in the cluster are:\n\n- Node Alpha (role: control-plane, status: ready, specs: 16 CPU cores, 64 GB memory, 1000 GB storage)\n- Node Beta (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n- Node Gamma (role: worker, status: ready, specs: 32 CPU cores, 128 GB memory, 2000 GB storage)\n\nThe total memory in the cluster is 64 GB + 128 GB + 128 GB = 320 GB.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_cluster_nodes_memory_and_structure",
+            "details": {
+              "has_node_alpha": true,
+              "has_node_beta": true,
+              "has_node_gamma": true,
+              "has_all_nodes": true,
+              "has_memory_components": true,
+              "has_memory_total": true,
+              "has_status_or_role": true
+            }
           }
-        },
-        "downstream_eval_tokens": 144,
-        "downstream_latency_ms": 1067.56
+        }
       },
       "comparison": {
-        "character_reduction": 0,
-        "character_reduction_percent": 0.0,
-        "prompt_eval_token_savings": 140,
-        "compression_overhead_ms": 0.23,
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 1179,
+          "compression_stage": {
+            "baseline_chars": 1179,
+            "compressed_chars": 792,
+            "reduction_chars": 387,
+            "reduction_percent": 32.82
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 1179,
+            "compressed_chars": 1179,
+            "reduction_chars": 0,
+            "reduction_percent": 0.0
+          },
+          "downstream_model_input": {
+            "baseline_chars": 1179,
+            "compressed_chars": 1179
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 407,
+          "compressed_prompt_eval_count": 407,
+          "tokens_saved": 0,
+          "reduction_percent": 0.0
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 905,
+          "compressed_prompt_eval_count": 765,
+          "tokens_saved": 140,
+          "reduction_percent": 15.47
+        },
+        "compression_overhead_ms": 0.16,
         "prompt_preservation_status": "preserved",
         "downstream_answer_status": "preserved",
         "restoration_verification": {
@@ -344,114 +505,176 @@
       "baseline": {
         "workload_id": "code_caching_pipeline",
         "enable_compression": false,
-        "input_original_chars": 2024,
-        "input_effective_chars": 1927,
-        "char_reduction_percent": 4.79,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 506,
-        "compressed_tokens": 506,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.0,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 3550.92,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 1000,
-        "prompt_eval_cached_count": 448,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 83.75,
-        "eval_count": 427,
-        "eval_duration_ms": 3133.46,
-        "generation_tokens_per_second": 136.27,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "```python\n# ==============================================================================\n# In-Memory Cache with TTL and LRU Eviction\n# Author: Platform Engineering\n# Last Updated: 2026-10-15\n# =======================================================...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_caching_class_and_methods",
-          "details": {
-            "has_class": true,
-            "has_methods": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 2024,
+          "compression_stage_output_chars": 2024,
+          "final_optimized_prompt_chars": 1927,
+          "downstream_model_input_chars": 1927
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 506,
+          "compressed_tokens": 506,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 3713.11,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 1000,
+          "prompt_eval_cached_count": 400,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 95.95,
+          "eval_count": 427,
+          "eval_duration_ms": 3238.21,
+          "generation_tokens_per_second": 131.86,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "```python\n# ==============================================================================\n# In-Memory Cache with TTL and LRU Eviction\n# Author: Platform Engineering\n# Last Updated: 2026-10-15\n# =======================================================...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_caching_class_and_methods",
+            "details": {
+              "has_class": true,
+              "has_methods": true
+            }
           }
         },
-        "downstream_task_answer": "The provided code defines a `MemoryCache` class that implements a memory cache with time-to-live (TTL) expiration and Least Recently Used (LRU) eviction policy. This class is designed to be used in a production environment to manage cache entries efficiently.\n\n### Key Components:\n\n1. **Initialization (`__init__` method)**:\n   - `max_size`: The maximum number of entries allowed in the cache.\n   - `default_ttl`: The default TTL in seconds for new entries.\n   - `_store`: An ordered dictionary that stores key-value pairs with their corresponding expiration timestamps.\n\n2. **Get Method (`get`)**:\n   - Checks if the key exists in the cache.\n   - If the key exists, retrieves the value and its expiration timestamp.\n   - If the key does not exist, returns `None`.\n   - If the key exists, updates the expiration timestamp and moves the entry to the end of the ordered dictionary for LRU tracking.\n\n3. **Set Method (`set`)**:\n   - Determines the effective TTL based on the provided `ttl` or the default `default_ttl`.\n   - Evicts the oldest entry if the cache is at its maximum capacity.\n   - Stores the key-value pair with the provided value and expiration timestamp.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_explains_lru_and_ttl_mechanisms",
-          "details": {
-            "has_lru": true,
-            "has_ttl": true
+        "downstream_inference": {
+          "prompt_eval_count": 455,
+          "eval_count": 384,
+          "prompt_eval_duration_ms": 10.28,
+          "eval_duration_ms": 2909.88,
+          "latency_ms": 2969.89,
+          "done_reason": "length",
+          "raw_answer": "The provided code defines a `MemoryCache` class that implements a memory cache with time-to-live (TTL) expiration and Least Recently Used (LRU) eviction policy. This class is designed to be used in a production environment to manage cache entries efficiently.\n\n### Key Components:\n\n1. **Initialization (`__init__` method)**:\n   - `max_size`: The maximum number of entries allowed in the cache.\n   - `default_ttl`: The default TTL in seconds for new entries.\n   - `_store`: An ordered dictionary that stores key-value pairs with their corresponding expiration timestamps.\n\n2. **Get Method (`get`)**:\n   - Checks if the key exists in the cache.\n   - If the key exists, retrieves the value and its expiration timestamp.\n   - If the key does not exist, returns `None`.\n   - If the key exists, updates the expiration timestamp and moves the entry to the end of the ordered dictionary for LRU tracking.\n\n3. **Set Method (`set`)**:\n   - Determines the effective TTL based on the provided `ttl` or the default `default_ttl`.\n   - Evicts the oldest entry if the cache is at its maximum capacity.\n   - Stores the key-value pair with the provided value and expiration timestamp.\n   - Moves the entry to the end of the ordered dictionary for LRU tracking.\n\n### Example Usage:\n\n```python\ncache = MemoryCache(max_size=10, default_ttl=60)\n\n# Set a key-value pair with a TTL of 30 seconds\ncache.set(\"key1\", \"value1\", ttl=30)\n\n# Get the value for \"key1\"\nprint(cache.get(\"key1\"))  # Output: \"value1\"\n\n# Set another key-value pair with a TTL of 60 seconds\ncache.set(\"key2\", \"value2\", ttl=60)\n\n# Get the value for",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_lru_ttl_and_eviction_behavior",
+            "details": {
+              "has_lru": true,
+              "has_ttl": true,
+              "has_eviction_behavior": true
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1893.28
+        }
       },
       "compressed": {
         "workload_id": "code_caching_pipeline",
         "enable_compression": true,
-        "input_original_chars": 2024,
-        "input_effective_chars": 1296,
-        "char_reduction_percent": 35.97,
-        "compression_applied": true,
-        "content_type": "mixed",
-        "strategy": "mixed",
-        "original_tokens": 506,
-        "compressed_tokens": 349,
-        "reduction_percent": 31.0,
-        "compression_time_ms": 1.4,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": "argus:ref:14378576b38595f5",
-        "total_opt_latency_ms": 2633.0,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 876,
-        "prompt_eval_cached_count": 400,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 67.35,
-        "eval_count": 311,
-        "eval_duration_ms": 2255.43,
-        "generation_tokens_per_second": 137.89,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "```python\n# In-Memory Cache with TTL and LRU Eviction\n# Move accessed entry to end of OrderedDict for LRU tracking\n# Determine actual TTL value\n\nimport time\nfrom collections import OrderedDict\nfrom typing import Any, Optional\n\nclass MemoryCache:\n    ...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_caching_class_and_methods",
-          "details": {
-            "has_class": true,
-            "has_methods": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 2024,
+          "compression_stage_output_chars": 1393,
+          "final_optimized_prompt_chars": 1296,
+          "downstream_model_input_chars": 1296
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "mixed",
+          "strategy": "mixed",
+          "original_tokens": 506,
+          "compressed_tokens": 349,
+          "tokens_reduced": 157,
+          "reduction_percent": 31.0,
+          "processing_time_ms": 1.55,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": "argus:ref:14378576b38595f5"
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 2818.65,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 876,
+          "prompt_eval_cached_count": 448,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 67.23,
+          "eval_count": 311,
+          "eval_duration_ms": 2389.94,
+          "generation_tokens_per_second": 130.13,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "```python\n# In-Memory Cache with TTL and LRU Eviction\n# Move accessed entry to end of OrderedDict for LRU tracking\n# Determine actual TTL value\n\nimport time\nfrom collections import OrderedDict\nfrom typing import Any, Optional\n\nclass MemoryCache:\n    ...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_caching_class_and_methods",
+            "details": {
+              "has_class": true,
+              "has_methods": true
+            }
           }
         },
-        "downstream_task_answer": "The provided code defines a `MemoryCache` class that implements an in-memory cache with a time-to-live (TTL) expiration and Least Recently Used (LRU) eviction policy. Here's a detailed explanation of the class and its methods:\n\n### Class Definition\n\n```python\nclass MemoryCache:\n```\n\n### Initialization\n\n```python\n    def __init__(self, max_size: int=1000, default_ttl_seconds: int=300) -> None:\n```\n\n- **Parameters**:\n  - `max_size`: The maximum number of entries the cache can hold (`int`, default: 1000).\n  - `default_ttl_seconds`: The default TTL for new entries (`int`, default: 300 seconds).\n\n- **Method**:\n  - Initializes the cache with the given `max_size` and `default_ttl_seconds`.\n\n### Get Method\n\n```python\n    def get(self, key: str) -> Optional[Any]:\n```\n\n- **Parameters**:\n  - `key`: The key to retrieve the value for.\n\n- **Returns**:\n  - The value associated with the key if it exists, otherwise `None`.\n\n- **Method**:\n  - Checks if the key exists in the cache.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_explains_lru_and_ttl_mechanisms",
-          "details": {
-            "has_lru": true,
-            "has_ttl": true
+        "downstream_inference": {
+          "prompt_eval_count": 339,
+          "eval_count": 384,
+          "prompt_eval_duration_ms": 15.1,
+          "eval_duration_ms": 2847.31,
+          "latency_ms": 2903.11,
+          "done_reason": "length",
+          "raw_answer": "The provided code defines a `MemoryCache` class that implements an in-memory cache with a time-to-live (TTL) expiration and Least Recently Used (LRU) eviction policy. Here's a detailed explanation of the class and its methods:\n\n### Class Definition\n\n```python\nclass MemoryCache:\n```\n\n### Initialization\n\n```python\n    def __init__(self, max_size: int=1000, default_ttl_seconds: int=300) -> None:\n```\n\n- **Parameters**:\n  - `max_size`: The maximum number of entries the cache can hold (`int`, default: 1000).\n  - `default_ttl_seconds`: The default TTL for new entries (`int`, default: 300 seconds).\n\n- **Method**:\n  - Initializes the cache with the given `max_size` and `default_ttl_seconds`.\n\n### Get Method\n\n```python\n    def get(self, key: str) -> Optional[Any]:\n```\n\n- **Parameters**:\n  - `key`: The key to retrieve the value for.\n\n- **Returns**:\n  - The value associated with the key if it exists, otherwise `None`.\n\n- **Method**:\n  - Checks if the key exists in the cache.\n  - If it does, retrieves the value and the expiration time.\n  - If the expiration time has passed, removes the entry.\n  - Moves the entry to the end of the `OrderedDict` for LRU tracking.\n\n### Set Method\n\n```python\n    def set(self, key: str, value: Any, ttl: Optional[int]=None) -> None:\n```\n\n- **Parameters**:\n  - `key`: The key to set the value for.\n  - `value`: The value to store.\n  - `ttl`: The TTL for the entry (`int`, optional, default: `default_ttl_seconds`).",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_lru_ttl_and_eviction_behavior",
+            "details": {
+              "has_lru": true,
+              "has_ttl": true,
+              "has_eviction_behavior": true
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1869.16
+        }
       },
       "comparison": {
-        "character_reduction": 728,
-        "character_reduction_percent": 35.97,
-        "prompt_eval_token_savings": 124,
-        "compression_overhead_ms": 1.4,
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 2024,
+          "compression_stage": {
+            "baseline_chars": 2024,
+            "compressed_chars": 1393,
+            "reduction_chars": 631,
+            "reduction_percent": 31.18
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 1927,
+            "compressed_chars": 1296,
+            "reduction_chars": 631,
+            "reduction_percent": 32.75
+          },
+          "downstream_model_input": {
+            "baseline_chars": 1927,
+            "compressed_chars": 1296
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 455,
+          "compressed_prompt_eval_count": 339,
+          "tokens_saved": 116,
+          "reduction_percent": 25.49
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 1000,
+          "compressed_prompt_eval_count": 876,
+          "tokens_saved": 124,
+          "reduction_percent": 12.4
+        },
+        "compression_overhead_ms": 1.55,
         "prompt_preservation_status": "preserved",
         "downstream_answer_status": "preserved",
         "restoration_verification": {
@@ -477,114 +700,176 @@
       "baseline": {
         "workload_id": "code_caching_pipeline",
         "enable_compression": false,
-        "input_original_chars": 2024,
-        "input_effective_chars": 1927,
-        "char_reduction_percent": 4.79,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 506,
-        "compressed_tokens": 506,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.0,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 3455.49,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 1000,
-        "prompt_eval_cached_count": 999,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 11.92,
-        "eval_count": 427,
-        "eval_duration_ms": 3117.39,
-        "generation_tokens_per_second": 136.97,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "```python\n# ==============================================================================\n# In-Memory Cache with TTL and LRU Eviction\n# Author: Platform Engineering\n# Last Updated: 2026-10-15\n# =======================================================...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_caching_class_and_methods",
-          "details": {
-            "has_class": true,
-            "has_methods": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 2024,
+          "compression_stage_output_chars": 2024,
+          "final_optimized_prompt_chars": 1927,
+          "downstream_model_input_chars": 1927
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 506,
+          "compressed_tokens": 506,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 3622.82,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 1000,
+          "prompt_eval_cached_count": 999,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 10.59,
+          "eval_count": 427,
+          "eval_duration_ms": 3251.03,
+          "generation_tokens_per_second": 131.34,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "```python\n# ==============================================================================\n# In-Memory Cache with TTL and LRU Eviction\n# Author: Platform Engineering\n# Last Updated: 2026-10-15\n# =======================================================...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_caching_class_and_methods",
+            "details": {
+              "has_class": true,
+              "has_methods": true
+            }
           }
         },
-        "downstream_task_answer": "The provided code defines a `MemoryCache` class that implements a memory cache with time-to-live (TTL) expiration and Least Recently Used (LRU) eviction policy. This class is designed to be used in a production environment to manage cache entries efficiently.\n\n### Key Components:\n\n1. **Initialization (`__init__` method)**:\n   - `max_size`: The maximum number of entries allowed in the cache.\n   - `default_ttl`: The default TTL in seconds for new entries.\n   - `_store`: An ordered dictionary that stores key-value pairs with their corresponding expiration timestamps.\n\n2. **Get Method (`get`)**:\n   - Checks if the key exists in the cache.\n   - If the key exists, retrieves the value and its expiration timestamp.\n   - If the key does not exist, returns `None`.\n   - If the key exists, updates the expiration timestamp and moves the entry to the end of the ordered dictionary for LRU tracking.\n\n3. **Set Method (`set`)**:\n   - Determines the effective TTL based on the provided `ttl` or the default `default_ttl`.\n   - Evicts the oldest entry if the cache is at its maximum capacity.\n   - Stores the key-value pair with the provided value and expiration timestamp.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_explains_lru_and_ttl_mechanisms",
-          "details": {
-            "has_lru": true,
-            "has_ttl": true
+        "downstream_inference": {
+          "prompt_eval_count": 455,
+          "eval_count": 384,
+          "prompt_eval_duration_ms": 11.06,
+          "eval_duration_ms": 2870.7,
+          "latency_ms": 2928.01,
+          "done_reason": "length",
+          "raw_answer": "The provided code defines a `MemoryCache` class that implements a memory cache with time-to-live (TTL) expiration and Least Recently Used (LRU) eviction policy. This class is designed to be used in a production environment to manage cache entries efficiently.\n\n### Key Components:\n\n1. **Initialization (`__init__` method)**:\n   - `max_size`: The maximum number of entries allowed in the cache.\n   - `default_ttl`: The default TTL in seconds for new entries.\n   - `_store`: An ordered dictionary that stores key-value pairs with their corresponding expiration timestamps.\n\n2. **Get Method (`get`)**:\n   - Checks if the key exists in the cache.\n   - If the key exists, retrieves the value and its expiration timestamp.\n   - If the key does not exist, returns `None`.\n   - If the key exists, updates the expiration timestamp and moves the entry to the end of the ordered dictionary for LRU tracking.\n\n3. **Set Method (`set`)**:\n   - Determines the effective TTL based on the provided `ttl` or the default `default_ttl`.\n   - Evicts the oldest entry if the cache is at its maximum capacity.\n   - Stores the key-value pair with the provided value and expiration timestamp.\n   - Moves the entry to the end of the ordered dictionary for LRU tracking.\n\n### Example Usage:\n\n```python\ncache = MemoryCache(max_size=10, default_ttl=60)\n\n# Set a key-value pair with a TTL of 30 seconds\ncache.set(\"key1\", \"value1\", ttl=30)\n\n# Get the value for \"key1\"\nprint(cache.get(\"key1\"))  # Output: \"value1\"\n\n# Set another key-value pair with a TTL of 60 seconds\ncache.set(\"key2\", \"value2\", ttl=60)\n\n# Get the value for",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_lru_ttl_and_eviction_behavior",
+            "details": {
+              "has_lru": true,
+              "has_ttl": true,
+              "has_eviction_behavior": true
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1883.01
+        }
       },
       "compressed": {
         "workload_id": "code_caching_pipeline",
         "enable_compression": true,
-        "input_original_chars": 2024,
-        "input_effective_chars": 1296,
-        "char_reduction_percent": 35.97,
-        "compression_applied": true,
-        "content_type": "mixed",
-        "strategy": "mixed",
-        "original_tokens": 506,
-        "compressed_tokens": 349,
-        "reduction_percent": 31.0,
-        "compression_time_ms": 4.19,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": "argus:ref:14378576b38595f5",
-        "total_opt_latency_ms": 2566.89,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 876,
-        "prompt_eval_cached_count": 875,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 11.91,
-        "eval_count": 311,
-        "eval_duration_ms": 2240.57,
-        "generation_tokens_per_second": 138.8,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "```python\n# In-Memory Cache with TTL and LRU Eviction\n# Move accessed entry to end of OrderedDict for LRU tracking\n# Determine actual TTL value\n\nimport time\nfrom collections import OrderedDict\nfrom typing import Any, Optional\n\nclass MemoryCache:\n    ...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_caching_class_and_methods",
-          "details": {
-            "has_class": true,
-            "has_methods": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 2024,
+          "compression_stage_output_chars": 1393,
+          "final_optimized_prompt_chars": 1296,
+          "downstream_model_input_chars": 1296
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "mixed",
+          "strategy": "mixed",
+          "original_tokens": 506,
+          "compressed_tokens": 349,
+          "tokens_reduced": 157,
+          "reduction_percent": 31.0,
+          "processing_time_ms": 1.41,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": "argus:ref:14378576b38595f5"
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 2720.76,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 876,
+          "prompt_eval_cached_count": 875,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 15.11,
+          "eval_count": 311,
+          "eval_duration_ms": 2339.24,
+          "generation_tokens_per_second": 132.95,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "```python\n# In-Memory Cache with TTL and LRU Eviction\n# Move accessed entry to end of OrderedDict for LRU tracking\n# Determine actual TTL value\n\nimport time\nfrom collections import OrderedDict\nfrom typing import Any, Optional\n\nclass MemoryCache:\n    ...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_caching_class_and_methods",
+            "details": {
+              "has_class": true,
+              "has_methods": true
+            }
           }
         },
-        "downstream_task_answer": "The provided code defines a `MemoryCache` class that implements an in-memory cache with a time-to-live (TTL) expiration and Least Recently Used (LRU) eviction policy. Here's a detailed explanation of the class and its methods:\n\n### Class Definition\n\n```python\nclass MemoryCache:\n```\n\n### Initialization\n\n```python\n    def __init__(self, max_size: int=1000, default_ttl_seconds: int=300) -> None:\n```\n\n- **Parameters**:\n  - `max_size`: The maximum number of entries the cache can hold (`int`, default: 1000).\n  - `default_ttl_seconds`: The default TTL for new entries (`int`, default: 300 seconds).\n\n- **Method**:\n  - Initializes the cache with the given `max_size` and `default_ttl_seconds`.\n\n### Get Method\n\n```python\n    def get(self, key: str) -> Optional[Any]:\n```\n\n- **Parameters**:\n  - `key`: The key to retrieve the value for.\n\n- **Returns**:\n  - The value associated with the key if it exists, otherwise `None`.\n\n- **Method**:\n  - Checks if the key exists in the cache.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_explains_lru_and_ttl_mechanisms",
-          "details": {
-            "has_lru": true,
-            "has_ttl": true
+        "downstream_inference": {
+          "prompt_eval_count": 339,
+          "eval_count": 384,
+          "prompt_eval_duration_ms": 10.63,
+          "eval_duration_ms": 2861.88,
+          "latency_ms": 2917.86,
+          "done_reason": "length",
+          "raw_answer": "The provided code defines a `MemoryCache` class that implements an in-memory cache with a time-to-live (TTL) expiration and Least Recently Used (LRU) eviction policy. Here's a detailed explanation of the class and its methods:\n\n### Class Definition\n\n```python\nclass MemoryCache:\n```\n\n### Initialization\n\n```python\n    def __init__(self, max_size: int=1000, default_ttl_seconds: int=300) -> None:\n```\n\n- **Parameters**:\n  - `max_size`: The maximum number of entries the cache can hold (`int`, default: 1000).\n  - `default_ttl_seconds`: The default TTL for new entries (`int`, default: 300 seconds).\n\n- **Method**:\n  - Initializes the cache with the given `max_size` and `default_ttl_seconds`.\n\n### Get Method\n\n```python\n    def get(self, key: str) -> Optional[Any]:\n```\n\n- **Parameters**:\n  - `key`: The key to retrieve the value for.\n\n- **Returns**:\n  - The value associated with the key if it exists, otherwise `None`.\n\n- **Method**:\n  - Checks if the key exists in the cache.\n  - If it does, retrieves the value and the expiration time.\n  - If the expiration time has passed, removes the entry.\n  - Moves the entry to the end of the `OrderedDict` for LRU tracking.\n\n### Set Method\n\n```python\n    def set(self, key: str, value: Any, ttl: Optional[int]=None) -> None:\n```\n\n- **Parameters**:\n  - `key`: The key to set the value for.\n  - `value`: The value to store.\n  - `ttl`: The TTL for the entry (`int`, optional, default: `default_ttl_seconds`).",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_lru_ttl_and_eviction_behavior",
+            "details": {
+              "has_lru": true,
+              "has_ttl": true,
+              "has_eviction_behavior": true
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1886.12
+        }
       },
       "comparison": {
-        "character_reduction": 728,
-        "character_reduction_percent": 35.97,
-        "prompt_eval_token_savings": 124,
-        "compression_overhead_ms": 4.19,
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 2024,
+          "compression_stage": {
+            "baseline_chars": 2024,
+            "compressed_chars": 1393,
+            "reduction_chars": 631,
+            "reduction_percent": 31.18
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 1927,
+            "compressed_chars": 1296,
+            "reduction_chars": 631,
+            "reduction_percent": 32.75
+          },
+          "downstream_model_input": {
+            "baseline_chars": 1927,
+            "compressed_chars": 1296
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 455,
+          "compressed_prompt_eval_count": 339,
+          "tokens_saved": 116,
+          "reduction_percent": 25.49
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 1000,
+          "compressed_prompt_eval_count": 876,
+          "tokens_saved": 124,
+          "reduction_percent": 12.4
+        },
+        "compression_overhead_ms": 1.41,
         "prompt_preservation_status": "preserved",
         "downstream_answer_status": "preserved",
         "restoration_verification": {
@@ -610,116 +895,176 @@
       "baseline": {
         "workload_id": "logs_database_incident",
         "enable_compression": false,
-        "input_original_chars": 1599,
-        "input_effective_chars": 209,
-        "char_reduction_percent": 86.93,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 400,
-        "compressed_tokens": 400,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.0,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 964.32,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 1224,
-        "prompt_eval_cached_count": 448,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 113.13,
-        "eval_count": 70,
-        "eval_duration_ms": 510.76,
-        "generation_tokens_per_second": 137.05,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "Examine the system service logs and identify the timestamp and cause of the worker crash: 2026-11-05 08:00:12 ERROR [pool-worker-1] Connection refused: failed to connect to PostgreSQL primary at 10.0.1.5:5432.",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_critical_error_and_timestamp",
-          "details": {
-            "has_error": true,
-            "has_ts": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 1599,
+          "compression_stage_output_chars": 1599,
+          "final_optimized_prompt_chars": 209,
+          "downstream_model_input_chars": 209
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 400,
+          "compressed_tokens": 400,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 1004.1,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 1224,
+          "prompt_eval_cached_count": 503,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 111.39,
+          "eval_count": 70,
+          "eval_duration_ms": 537.29,
+          "generation_tokens_per_second": 130.28,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "Examine the system service logs and identify the timestamp and cause of the worker crash: 2026-11-05 08:00:12 ERROR [pool-worker-1] Connection refused: failed to connect to PostgreSQL primary at 10.0.1.5:5432.",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_critical_error_and_timestamp",
+            "details": {
+              "has_error": true,
+              "has_ts": true
+            }
           }
         },
-        "downstream_task_answer": "The error message you provided indicates that a worker process encountered an issue with connecting to a PostgreSQL database. Specifically, the worker crashed at the timestamp of 2026-11-05 08:00:12, and the cause was a connection refusal to the PostgreSQL primary server at the IP address 10.0.1.5 on port 5432.\n\nHere's a breakdown of the error message:\n\n- **Timestamp**: 2026-11-05 08:00:12\n- **Error Type**: ERROR\n- **Component**: [pool-worker-1]\n- **Cause**: Connection refused\n\nThis means that the worker process was attempting to connect to the PostgreSQL database, but the connection was refused. The connection attempt was made to the PostgreSQL primary server running on the IP address 10.0.1.5 on port 5432.\n\nTo resolve this issue, you would need to investigate why the connection is being refused. This could be due to network issues, firewall rules, or configuration problems with the PostgreSQL server. Once the root cause is identified, appropriate steps can be taken to fix the connection issue, such as adjusting firewall settings, ensuring the",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_identifies_incident_cause_and_timestamp",
-          "details": {
-            "has_cause": true,
-            "has_timestamp": true
+        "downstream_inference": {
+          "prompt_eval_count": 98,
+          "eval_count": 384,
+          "prompt_eval_duration_ms": 21.38,
+          "eval_duration_ms": 2841.01,
+          "latency_ms": 2896.6,
+          "done_reason": "length",
+          "raw_answer": "The error message indicates that the worker process encountered an issue connecting to the PostgreSQL primary database at the IP address 10.0.1.5 on port 5432. The specific error is \"Connection refused,\" which means the connection attempt was not successful.\n\nTo identify the timestamp and the cause of the worker crash, we can look at the system service logs. The timestamp provided is 2026-11-05 08:00:12, which corresponds to November 5, 2026, at 8:00:12 AM.\n\nThe cause of the crash is that the worker process was unable to connect to the PostgreSQL primary database. This could be due to several reasons:\n\n1. **Network Issues**: There might be a problem with the network connection between the worker process and the PostgreSQL server. This could include issues with the network cable, router, or firewall settings.\n\n2. **Firewall or Security Settings**: The worker process might be configured to block connections to the PostgreSQL port (5432) or might be using a firewall that is blocking the connection.\n\n3. **Database Configuration**: The PostgreSQL server might be configured to listen on a different port or might be running on a different machine.\n\n4. **Service Configuration**: The worker process might be configured to connect to a different PostgreSQL server or database.\n\n5. **Database Maintenance**: The PostgreSQL server might be undergoing maintenance or might be down for scheduled downtime.\n\nTo resolve this issue, you should check the following:\n\n- **Network Connectivity**: Ensure that the network connection between the worker process and the PostgreSQL server is stable and working correctly.\n- **Firewall Rules**: Check the firewall rules to ensure that the PostgreSQL port (5432) is not being blocked.\n- **Database Configuration**: Verify that the PostgreSQL server is configured to listen on the correct port and that",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_incident_failure_cause_and_timestamp",
+            "details": {
+              "has_cause": true,
+              "has_timestamp": true
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1846.92
+        }
       },
       "compressed": {
         "workload_id": "logs_database_incident",
         "enable_compression": true,
-        "input_original_chars": 1599,
-        "input_effective_chars": 578,
-        "char_reduction_percent": 63.85,
-        "compression_applied": true,
-        "content_type": "logs",
-        "strategy": "log_repeated",
-        "original_tokens": 400,
-        "compressed_tokens": 242,
-        "reduction_percent": 39.5,
-        "compression_time_ms": 0.47,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": "argus:ref:66aaf834568ba2bd",
-        "total_opt_latency_ms": 2012.97,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 966,
-        "prompt_eval_cached_count": 575,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 58.96,
-        "eval_count": 224,
-        "eval_duration_ms": 1642.04,
-        "generation_tokens_per_second": 136.42,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "Examine the system service logs and identify the timestamp and cause of the worker crash: 2026-11-05 08:00:12, Connection refused: failed to connect to PostgreSQL primary at 10.0.1.5:5432; 2026-11-05 08:00:13, CRITICAL [pool-worker-1] ConnectionPoolE...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_critical_error_and_timestamp",
-          "details": {
-            "has_error": true,
-            "has_ts": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 1599,
+          "compression_stage_output_chars": 968,
+          "final_optimized_prompt_chars": 112,
+          "downstream_model_input_chars": 112
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "logs",
+          "strategy": "log_repeated",
+          "original_tokens": 400,
+          "compressed_tokens": 242,
+          "tokens_reduced": 158,
+          "reduction_percent": 39.5,
+          "processing_time_ms": 0.42,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": "argus:ref:66aaf834568ba2bd"
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 681.5,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 966,
+          "prompt_eval_cached_count": 575,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 56.95,
+          "eval_count": 39,
+          "eval_duration_ms": 290.26,
+          "generation_tokens_per_second": 134.36,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "Examine the system service logs and identify the timestamp and cause of the worker crash at 2026-11-05 08:00:18.",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": false,
+            "reason": "rule_based_critical_error_and_timestamp",
+            "details": {
+              "has_error": false,
+              "has_ts": true
+            }
           }
         },
-        "downstream_task_answer": "Based on the system service logs provided, the worker crashed due to a database connection issue. Here's a summary of the events and the cause:\n\n1. **Timestamp and Cause of the Crash:**\n   - **2026-11-05 08:00:12:** Connection refused: failed to connect to PostgreSQL primary at 10.0.1.5:5432.\n   - **2026-11-05 08:00:13:** CRITICAL [pool-worker-1] ConnectionPoolExhausted: all 20 active connections terminated unexpectedly.\n   - **2026-11-05 08:00:14:** INFO [pool-worker-1] Retrying connection attempt 1 of 5.\n   - **2026-11-05 08:00:17:** INFO [pool-worker-1] Retrying connection attempt 1 of 5.\n   - **2026-11-05 08:00:18:** FATAL [pool-worker-1] Worker process terminated due to unhandled database connection loss.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_identifies_incident_cause_and_timestamp",
-          "details": {
-            "has_cause": true,
-            "has_timestamp": true
+        "downstream_inference": {
+          "prompt_eval_count": 67,
+          "eval_count": 301,
+          "prompt_eval_duration_ms": 21.81,
+          "eval_duration_ms": 2259.23,
+          "latency_ms": 2319.92,
+          "done_reason": "stop",
+          "raw_answer": "I'm sorry, but I can't examine system service logs directly. As an AI assistant, I don't have the capability to access or analyze specific log files. However, I can provide some general guidance on how to identify the timestamp and cause of a worker crash based on typical log patterns.\n\nIf you have access to the system service logs, you can follow these steps to identify the timestamp and cause of the worker crash:\n\n1. **Identify the Log File**: Determine which log file contains the relevant information. Common log files include `systemd.log`, `journal.log`, or specific service logs like `worker.log`.\n\n2. **Search for Timestamps**: Look for timestamps in the log entries. The timestamp will typically be in the format `YYYY-MM-DD HH:MM:SS`.\n\n3. **Analyze the Cause**: Once you have identified the timestamp, look for the cause of the crash. This could be a specific error message, a warning, or a critical error that led to the crash.\n\n4. **Check for Logs Related to the Crash**: Look for any logs that might have been generated around the time of the crash. This could include error messages, warnings, or other system messages that might indicate what happened.\n\n5. **Review the Crash Report**: If available, review the crash report or the system's crash log. This can provide additional context and details about the crash.\n\nIf you need help with specific log patterns or how to interpret them, feel free to ask!",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": false,
+            "status": "failed",
+            "reason": "rule_based_incident_failure_cause_and_timestamp",
+            "details": {
+              "has_cause": false,
+              "has_timestamp": false
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1886.83
+        }
       },
       "comparison": {
-        "character_reduction": 1021,
-        "character_reduction_percent": 63.85,
-        "prompt_eval_token_savings": 258,
-        "compression_overhead_ms": 0.47,
-        "prompt_preservation_status": "preserved",
-        "downstream_answer_status": "preserved",
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 1599,
+          "compression_stage": {
+            "baseline_chars": 1599,
+            "compressed_chars": 968,
+            "reduction_chars": 631,
+            "reduction_percent": 39.46
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 209,
+            "compressed_chars": 112,
+            "reduction_chars": 97,
+            "reduction_percent": 46.41
+          },
+          "downstream_model_input": {
+            "baseline_chars": 209,
+            "compressed_chars": 112
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 98,
+          "compressed_prompt_eval_count": 67,
+          "tokens_saved": 31,
+          "reduction_percent": 31.63
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 1224,
+          "compressed_prompt_eval_count": 966,
+          "tokens_saved": 258,
+          "reduction_percent": 21.08
+        },
+        "compression_overhead_ms": 0.42,
+        "prompt_preservation_status": "regression",
+        "downstream_answer_status": "regression",
         "restoration_verification": {
           "tested": true,
           "status": "matched",
@@ -743,115 +1088,175 @@
       "baseline": {
         "workload_id": "logs_database_incident",
         "enable_compression": false,
-        "input_original_chars": 1599,
-        "input_effective_chars": 749,
-        "char_reduction_percent": 53.16,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 400,
-        "compressed_tokens": 400,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.0,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 2615.84,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 1224,
-        "prompt_eval_cached_count": 575,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 91.56,
-        "eval_count": 300,
-        "eval_duration_ms": 2208.03,
-        "generation_tokens_per_second": 135.87,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "Examine the system service logs and identify the timestamp and cause of the worker crash: 2026-11-05 08:00:12 ERROR [pool-worker-1] Connection refused: failed to connect to PostgreSQL primary at 10.0.1.5:5432, 2026-11-05 08:00:13 CRITICAL [pool-worke...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_critical_error_and_timestamp",
-          "details": {
-            "has_error": true,
-            "has_ts": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 1599,
+          "compression_stage_output_chars": 1599,
+          "final_optimized_prompt_chars": 667,
+          "downstream_model_input_chars": 667
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 400,
+          "compressed_tokens": 400,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 2436.78,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 1224,
+          "prompt_eval_cached_count": 575,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 109.14,
+          "eval_count": 260,
+          "eval_duration_ms": 1979.24,
+          "generation_tokens_per_second": 131.36,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "Examine the system service logs and identify the timestamp and cause of the worker crash:\n\n- Timestamp: 2026-11-05 08:00:12\n- Cause: Connection refused: failed to connect to PostgreSQL primary at 10.0.1.5:5432\n- Timestamp: 2026-11-05 08:00:14\n- Cause...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_critical_error_and_timestamp",
+            "details": {
+              "has_error": true,
+              "has_ts": true
+            }
           }
         },
-        "downstream_task_answer": "Based on the system service logs provided, the worker crashed due to a database connection issue. Here's a breakdown of the timestamps and the cause:\n\n1. **Timestamps:**\n   - 2026-11-05 08:00:12: ERROR\n   - 2026-11-05 08:00:13: CRITICAL\n   - 2026-11-05 08:00:14: INFO\n   - 2026-11-05 08:00:15: INFO\n   - 2026-11-05 08:00:16: INFO\n   - 2026-11-05 08:00:17: INFO\n   - 2026-11-05 08:00:18: FATAL\n\n2. **Cause:**\n   - The worker encountered a connection issue with the PostgreSQL primary server at 10.0.1.5:5432.\n   - The worker tried to connect to",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_identifies_incident_cause_and_timestamp",
-          "details": {
-            "has_cause": true,
-            "has_timestamp": true
+        "downstream_inference": {
+          "prompt_eval_count": 288,
+          "eval_count": 384,
+          "prompt_eval_duration_ms": 42.24,
+          "eval_duration_ms": 2875.14,
+          "latency_ms": 2957.38,
+          "done_reason": "length",
+          "raw_answer": "Based on the provided timestamps and causes, the worker process appears to have experienced multiple connection issues with the PostgreSQL primary server at 10.0.1.5:5432. Here's a summary of the events:\n\n1. **Timestamp: 2026-11-05 08:00:12**\n   - **Cause:** Connection refused: failed to connect to PostgreSQL primary at 10.0.1.5:5432\n\n2. **Timestamp: 2026-11-05 08:00:14**\n   - **Cause:** ConnectionPoolExhausted: all 20 active connections terminated unexpectedly\n\n3. **Timestamp: 2026-11-05 08:00:15**\n   - **Cause:** Retrying connection attempt 1 of 5\n\n4. **Timestamp: 2026-11-05 08:00:16**\n   - **Cause:** Retrying connection attempt 1 of 5\n\n5. **Timestamp: 2026-11-05 08:00:17**\n   - **Cause:** Retrying connection attempt 1 of 5\n\n6. **Timestamp: 2026-11-05 08:00:18**\n   - **Cause:** Retrying connection attempt 1 of 5\n\n7. **Timestamp: 2026-11-05 08:00:19**\n   - **Cause:** Worker process terminated due to unhandled database connection loss\n\nThe worker process is experiencing a series of connection failures with the PostgreSQL primary server. The connection attempts are being retried multiple times, indicating that the",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_incident_failure_cause_and_timestamp",
+            "details": {
+              "has_cause": true,
+              "has_timestamp": true
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1903.11
+        }
       },
       "compressed": {
         "workload_id": "logs_database_incident",
         "enable_compression": true,
-        "input_original_chars": 1599,
-        "input_effective_chars": 525,
-        "char_reduction_percent": 67.17,
-        "compression_applied": true,
-        "content_type": "logs",
-        "strategy": "log_repeated",
-        "original_tokens": 400,
-        "compressed_tokens": 242,
-        "reduction_percent": 39.5,
-        "compression_time_ms": 0.48,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": "argus:ref:66aaf834568ba2bd",
-        "total_opt_latency_ms": 1821.26,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 966,
-        "prompt_eval_cached_count": 965,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 12.88,
-        "eval_count": 206,
-        "eval_duration_ms": 1485.87,
-        "generation_tokens_per_second": 138.64,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "Examine the system service logs and identify the timestamp and cause of the worker crash: 2026-11-05 08:00:12, ERROR: Connection refused: failed to connect to PostgreSQL primary at 10.0.1.5:5432; 2026-11-05 08:00:13, CRITICAL: ConnectionPoolExhausted...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_critical_error_and_timestamp",
-          "details": {
-            "has_error": true,
-            "has_ts": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 1599,
+          "compression_stage_output_chars": 968,
+          "final_optimized_prompt_chars": 200,
+          "downstream_model_input_chars": 200
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "logs",
+          "strategy": "log_repeated",
+          "original_tokens": 400,
+          "compressed_tokens": 242,
+          "tokens_reduced": 158,
+          "reduction_percent": 39.5,
+          "processing_time_ms": 0.42,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": "argus:ref:66aaf834568ba2bd"
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 723.96,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 966,
+          "prompt_eval_cached_count": 965,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 10.63,
+          "eval_count": 55,
+          "eval_duration_ms": 398.88,
+          "generation_tokens_per_second": 137.88,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "Examine the system service logs and identify the timestamp and cause of the worker crash:\n\n- Timestamp: 2026-11-05 08:00:18\n- Cause: Worker process terminated due to unhandled database connection loss",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": false,
+            "reason": "rule_based_critical_error_and_timestamp",
+            "details": {
+              "has_error": false,
+              "has_ts": true
+            }
           }
         },
-        "downstream_task_answer": "Based on the system service logs provided, the worker crashed due to a database connection issue. Here's a summary of the events and the cause:\n\n1. **Timestamp and Cause of the Worker Crash:**\n   - **Timestamp:** 2026-11-05 08:00:12\n   - **Cause:** Connection refused: failed to connect to PostgreSQL primary at 10.0.1.5:5432\n\n2. **Timestamp and Cause of the Worker Crash:**\n   - **Timestamp:** 2026-11-05 08:00:13\n   - **Cause:** ConnectionPoolExhausted: all 20 active connections terminated unexpectedly\n\n3. **Timestamp and Cause of the Worker Crash:**\n   - **Timestamp:** 2026-11-05 08:00:14\n   - **Cause:** Retrying connection attempt 1 of 5\n\n4. **Timestamp and Cause of the Worker Crash:**\n   - **Timestamp:** 2026-11-05 08:00:17\n   - **Cause:** Retrying connection attempt",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_identifies_incident_cause_and_timestamp",
-          "details": {
-            "has_cause": true,
-            "has_timestamp": true
+        "downstream_inference": {
+          "prompt_eval_count": 83,
+          "eval_count": 281,
+          "prompt_eval_duration_ms": 18.67,
+          "eval_duration_ms": 2081.77,
+          "latency_ms": 2132.84,
+          "done_reason": "stop",
+          "raw_answer": "To identify the timestamp and cause of the worker crash, you need to examine the system service logs. The timestamp provided is 2026-11-05 08:00:18, and the cause is that the worker process was terminated due to unhandled database connection loss.\n\nHere's a step-by-step guide on how to identify this information:\n\n1. **Locate the Logs**: The logs are typically found in the system's log directory. This can be `/var/log/`, `/var/log/syslog`, or `/var/log/messages` depending on the system configuration.\n\n2. **Search for the Timestamp**: Look for the timestamp in the log entries. The timestamp is usually in the format `YYYY-MM-DD HH:MM:SS`.\n\n3. **Identify the Cause**: The cause of the crash is mentioned in the log entry. In this case, it is \"Worker process terminated due to unhandled database connection loss.\"\n\n4. **Extract the Information**: Once you find the timestamp and the cause, you can extract the information. The timestamp is 2026-11-05 08:00:18, and the cause is \"Worker process terminated due to unhandled database connection loss.\"\n\nBy following these steps, you can identify the specific timestamp and cause of the worker crash from the system service logs.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_incident_failure_cause_and_timestamp",
+            "details": {
+              "has_cause": true,
+              "has_timestamp": true
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1890.64
+        }
       },
       "comparison": {
-        "character_reduction": 1074,
-        "character_reduction_percent": 67.17,
-        "prompt_eval_token_savings": 258,
-        "compression_overhead_ms": 0.48,
-        "prompt_preservation_status": "preserved",
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 1599,
+          "compression_stage": {
+            "baseline_chars": 1599,
+            "compressed_chars": 968,
+            "reduction_chars": 631,
+            "reduction_percent": 39.46
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 667,
+            "compressed_chars": 200,
+            "reduction_chars": 467,
+            "reduction_percent": 70.01
+          },
+          "downstream_model_input": {
+            "baseline_chars": 667,
+            "compressed_chars": 200
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 288,
+          "compressed_prompt_eval_count": 83,
+          "tokens_saved": 205,
+          "reduction_percent": 71.18
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 1224,
+          "compressed_prompt_eval_count": 966,
+          "tokens_saved": 258,
+          "reduction_percent": 21.08
+        },
+        "compression_overhead_ms": 0.42,
+        "prompt_preservation_status": "regression",
         "downstream_answer_status": "preserved",
         "restoration_verification": {
           "tested": true,
@@ -876,122 +1281,184 @@
       "baseline": {
         "workload_id": "text_redundant_instructions",
         "enable_compression": false,
-        "input_original_chars": 547,
-        "input_effective_chars": 547,
-        "char_reduction_percent": 0.0,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 137,
-        "compressed_tokens": 137,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.0,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 1025.78,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 623,
-        "prompt_eval_cached_count": 501,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 24.36,
-        "eval_count": 45,
-        "eval_duration_ms": 319.74,
-        "generation_tokens_per_second": 140.74,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "Please help me by providing a helpful answer. I would really appreciate your assistance with this task.\nExplain the core architectural differences between horizontal scaling and vertical scaling in cloud systems.\nExplain the core architectural differ...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_scaling_concepts_and_bullet_constraint",
-          "details": {
-            "has_horizontal": true,
-            "has_vertical": true,
-            "has_bullets": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 547,
+          "compression_stage_output_chars": 547,
+          "final_optimized_prompt_chars": 547,
+          "downstream_model_input_chars": 547
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 137,
+          "compressed_tokens": 137,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 1077.7,
+          "validation_status": "fallback",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 623,
+          "prompt_eval_cached_count": 448,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 31.41,
+          "eval_count": 44,
+          "eval_duration_ms": 324.31,
+          "generation_tokens_per_second": 135.67,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "Please help me by providing a helpful answer. I would really appreciate your assistance with this task.\nExplain the core architectural differences between horizontal scaling and vertical scaling in cloud systems.\nExplain the core architectural differ...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_scaling_concepts_and_bullet_constraint",
+            "details": {
+              "has_horizontal": true,
+              "has_vertical": true,
+              "has_bullets": true
+            }
           }
         },
-        "downstream_task_answer": "- **Horizontal Scaling vs. Vertical Scaling:**\n  - **Horizontal Scaling:** This approach involves adding more resources to an existing system, such as by adding more servers or instances. This increases the system's capacity to handle more workloads without changing the underlying architecture. It is often used in cloud environments to scale out, where the system's performance is improved by adding more resources.\n  - **Vertical Scaling:** This approach involves increasing the resources of a single server or instance, such as by upgrading the CPU, RAM, or storage. This increases the system's performance by adding more resources to a single instance, rather than adding more instances. It is often used in cloud environments to scale up, where the system's performance is improved by adding more resources to a single instance.\n\n- **Key Differences:**\n  - **Resource Utilization:** Horizontal scaling distributes the workload across multiple resources, while vertical scaling increases the workload on a single resource.\n  - **Scalability:** Horizontal scaling is more scalable because it can be easily scaled out by adding more resources, whereas vertical scaling is more scalable within a single instance.\n  - **Cost:** Horizontal scaling can be more cost-effective in the long run because it allows for more efficient use of resources, while vertical scaling can be more expensive",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_explains_scaling_with_bullets_and_no_vendor_names",
-          "details": {
-            "has_horizontal": true,
-            "has_vertical": true,
-            "has_vendor_prohibition_violation": false,
-            "bullet_count": 7
+        "downstream_inference": {
+          "prompt_eval_count": 119,
+          "eval_count": 265,
+          "prompt_eval_duration_ms": 10.73,
+          "eval_duration_ms": 1979.25,
+          "latency_ms": 2025.0,
+          "done_reason": "stop",
+          "raw_answer": "- **Horizontal Scaling vs. Vertical Scaling:**\n  - **Horizontal Scaling:** This approach involves adding more resources to an existing system, such as by adding more servers or instances. This increases the system's capacity to handle more workloads without changing the underlying architecture. It is often used in cloud environments to scale out, where the system's performance is improved by adding more resources.\n  - **Vertical Scaling:** This approach involves increasing the resources of a single server or instance, such as by upgrading the CPU, RAM, or storage. This increases the system's performance by adding more resources to a single instance, rather than adding more instances. It is often used in cloud environments to scale up, where the system's performance is improved by adding more resources to a single instance.\n\n- **Key Differences:**\n  - **Resource Utilization:** Horizontal scaling distributes the workload across multiple resources, while vertical scaling increases the workload on a single resource.\n  - **Scalability:** Horizontal scaling is more scalable because it can be easily scaled out by adding more resources, whereas vertical scaling is more scalable within a single instance.\n  - **Cost:** Horizontal scaling can be more cost-effective in the long run because it allows for more efficient use of resources, while vertical scaling can be more expensive due to the need for additional resources.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": false,
+            "status": "failed",
+            "reason": "rule_based_scaling_concepts_three_bullets_and_no_vendor_names",
+            "details": {
+              "has_horizontal": true,
+              "has_vertical": true,
+              "has_vendor_prohibition_violation": false,
+              "bullet_count": 7,
+              "has_three_bullets": false
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1855.39
+        }
       },
       "compressed": {
         "workload_id": "text_redundant_instructions",
         "enable_compression": true,
-        "input_original_chars": 547,
-        "input_effective_chars": 547,
-        "char_reduction_percent": 0.0,
-        "compression_applied": true,
-        "content_type": "text",
-        "strategy": "text_redundancy",
-        "original_tokens": 137,
-        "compressed_tokens": 110,
-        "reduction_percent": 19.7,
-        "compression_time_ms": 0.37,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 676.66,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 606,
-        "prompt_eval_cached_count": 518,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 20.18,
-        "eval_count": 20,
-        "eval_duration_ms": 139.52,
-        "generation_tokens_per_second": 143.35,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "Please help me by providing a helpful answer. I would really appreciate your assistance with this task.\nExplain the core architectural differences between horizontal scaling and vertical scaling in cloud systems.\nExplain the core architectural differ...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_scaling_concepts_and_bullet_constraint",
-          "details": {
-            "has_horizontal": true,
-            "has_vertical": true,
-            "has_bullets": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 547,
+          "compression_stage_output_chars": 438,
+          "final_optimized_prompt_chars": 547,
+          "downstream_model_input_chars": 547
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "text",
+          "strategy": "text_redundancy",
+          "original_tokens": 137,
+          "compressed_tokens": 110,
+          "tokens_reduced": 27,
+          "reduction_percent": 19.7,
+          "processing_time_ms": 0.38,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 794.38,
+          "validation_status": "fallback",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 606,
+          "prompt_eval_cached_count": 518,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 20.2,
+          "eval_count": 29,
+          "eval_duration_ms": 208.98,
+          "generation_tokens_per_second": 138.77,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "Please help me by providing a helpful answer. I would really appreciate your assistance with this task.\nExplain the core architectural differences between horizontal scaling and vertical scaling in cloud systems.\nExplain the core architectural differ...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_scaling_concepts_and_bullet_constraint",
+            "details": {
+              "has_horizontal": true,
+              "has_vertical": true,
+              "has_bullets": true
+            }
           }
         },
-        "downstream_task_answer": "- **Horizontal Scaling vs. Vertical Scaling:**\n  - **Horizontal Scaling:** This approach involves adding more resources to an existing system, such as by adding more servers or instances. This increases the system's capacity to handle more workloads without changing the underlying architecture. It is often used in cloud environments to scale out, where the system's performance is improved by adding more resources.\n  - **Vertical Scaling:** This approach involves increasing the resources of a single server or instance, such as by upgrading the CPU, RAM, or storage. This increases the system's performance by adding more resources to a single instance, rather than adding more instances. It is often used in cloud environments to scale up, where the system's performance is improved by adding more resources to a single instance.\n\n- **Key Differences:**\n  - **Resource Utilization:** Horizontal scaling distributes the workload across multiple resources, while vertical scaling increases the workload on a single resource.\n  - **Scalability:** Horizontal scaling is more scalable because it can be easily scaled out by adding more resources, whereas vertical scaling is more scalable within a single instance.\n  - **Cost:** Horizontal scaling can be more cost-effective in the long run because it allows for more efficient use of resources, while vertical scaling can be more expensive",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_explains_scaling_with_bullets_and_no_vendor_names",
-          "details": {
-            "has_horizontal": true,
-            "has_vertical": true,
-            "has_vendor_prohibition_violation": false,
-            "bullet_count": 7
+        "downstream_inference": {
+          "prompt_eval_count": 119,
+          "eval_count": 265,
+          "prompt_eval_duration_ms": 12.44,
+          "eval_duration_ms": 1966.72,
+          "latency_ms": 2014.03,
+          "done_reason": "stop",
+          "raw_answer": "- **Horizontal Scaling vs. Vertical Scaling:**\n  - **Horizontal Scaling:** This approach involves adding more resources to an existing system, such as by adding more servers or instances. This increases the system's capacity to handle more workloads without changing the underlying architecture. It is often used in cloud environments to scale out, where the system's performance is improved by adding more resources.\n  - **Vertical Scaling:** This approach involves increasing the resources of a single server or instance, such as by upgrading the CPU, RAM, or storage. This increases the system's performance by adding more resources to a single instance, rather than adding more instances. It is often used in cloud environments to scale up, where the system's performance is improved by adding more resources to a single instance.\n\n- **Key Differences:**\n  - **Resource Utilization:** Horizontal scaling distributes the workload across multiple resources, while vertical scaling increases the workload on a single resource.\n  - **Scalability:** Horizontal scaling is more scalable because it can be easily scaled out by adding more resources, whereas vertical scaling is more scalable within a single instance.\n  - **Cost:** Horizontal scaling can be more cost-effective in the long run because it allows for more efficient use of resources, while vertical scaling can be more expensive due to the need for additional resources.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": false,
+            "status": "failed",
+            "reason": "rule_based_scaling_concepts_three_bullets_and_no_vendor_names",
+            "details": {
+              "has_horizontal": true,
+              "has_vertical": true,
+              "has_vendor_prohibition_violation": false,
+              "bullet_count": 7,
+              "has_three_bullets": false
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1846.58
+        }
       },
       "comparison": {
-        "character_reduction": 0,
-        "character_reduction_percent": 0.0,
-        "prompt_eval_token_savings": 17,
-        "compression_overhead_ms": 0.37,
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 547,
+          "compression_stage": {
+            "baseline_chars": 547,
+            "compressed_chars": 438,
+            "reduction_chars": 109,
+            "reduction_percent": 19.93
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 547,
+            "compressed_chars": 547,
+            "reduction_chars": 0,
+            "reduction_percent": 0.0
+          },
+          "downstream_model_input": {
+            "baseline_chars": 547,
+            "compressed_chars": 547
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 119,
+          "compressed_prompt_eval_count": 119,
+          "tokens_saved": 0,
+          "reduction_percent": 0.0
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 623,
+          "compressed_prompt_eval_count": 606,
+          "tokens_saved": 17,
+          "reduction_percent": 2.73
+        },
+        "compression_overhead_ms": 0.38,
         "prompt_preservation_status": "preserved",
-        "downstream_answer_status": "preserved",
+        "downstream_answer_status": "inconclusive_or_both_failed",
         "restoration_verification": {
           "tested": false,
           "status": "not_applicable",
@@ -1013,122 +1480,184 @@
       "baseline": {
         "workload_id": "text_redundant_instructions",
         "enable_compression": false,
-        "input_original_chars": 547,
-        "input_effective_chars": 547,
-        "char_reduction_percent": 0.0,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 137,
-        "compressed_tokens": 137,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.0,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 1060.73,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 623,
-        "prompt_eval_cached_count": 518,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 23.07,
-        "eval_count": 44,
-        "eval_duration_ms": 325.18,
-        "generation_tokens_per_second": 135.31,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "Please help me by providing a helpful answer. I would really appreciate your assistance with this task.\nExplain the core architectural differences between horizontal scaling and vertical scaling in cloud systems.\nExplain the core architectural differ...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_scaling_concepts_and_bullet_constraint",
-          "details": {
-            "has_horizontal": true,
-            "has_vertical": true,
-            "has_bullets": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 547,
+          "compression_stage_output_chars": 547,
+          "final_optimized_prompt_chars": 547,
+          "downstream_model_input_chars": 547
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 137,
+          "compressed_tokens": 137,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 1047.84,
+          "validation_status": "fallback",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 623,
+          "prompt_eval_cached_count": 518,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 22.81,
+          "eval_count": 44,
+          "eval_duration_ms": 318.94,
+          "generation_tokens_per_second": 137.96,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "Please help me by providing a helpful answer. I would really appreciate your assistance with this task.\nExplain the core architectural differences between horizontal scaling and vertical scaling in cloud systems.\nExplain the core architectural differ...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_scaling_concepts_and_bullet_constraint",
+            "details": {
+              "has_horizontal": true,
+              "has_vertical": true,
+              "has_bullets": true
+            }
           }
         },
-        "downstream_task_answer": "- **Horizontal Scaling vs. Vertical Scaling:**\n  - **Horizontal Scaling:** This approach involves adding more resources to an existing system, such as by adding more servers or instances. This increases the system's capacity to handle more workloads without changing the underlying architecture. It is often used in cloud environments to scale out, where the system's performance is improved by adding more resources.\n  - **Vertical Scaling:** This approach involves increasing the resources of a single server or instance, such as by upgrading the CPU, RAM, or storage. This increases the system's performance by adding more resources to a single instance, rather than adding more instances. It is often used in cloud environments to scale up, where the system's performance is improved by adding more resources to a single instance.\n\n- **Key Differences:**\n  - **Resource Utilization:** Horizontal scaling distributes the workload across multiple resources, while vertical scaling increases the workload on a single resource.\n  - **Scalability:** Horizontal scaling is more scalable because it can be easily scaled out by adding more resources, whereas vertical scaling is more scalable within a single instance.\n  - **Cost:** Horizontal scaling can be more cost-effective in the long run because it allows for more efficient use of resources, while vertical scaling can be more expensive",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_explains_scaling_with_bullets_and_no_vendor_names",
-          "details": {
-            "has_horizontal": true,
-            "has_vertical": true,
-            "has_vendor_prohibition_violation": false,
-            "bullet_count": 7
+        "downstream_inference": {
+          "prompt_eval_count": 119,
+          "eval_count": 265,
+          "prompt_eval_duration_ms": 13.75,
+          "eval_duration_ms": 1898.23,
+          "latency_ms": 1964.08,
+          "done_reason": "stop",
+          "raw_answer": "- **Horizontal Scaling vs. Vertical Scaling:**\n  - **Horizontal Scaling:** This approach involves adding more resources to an existing system, such as by adding more servers or instances. This increases the system's capacity to handle more workloads without changing the underlying architecture. It is often used in cloud environments to scale out, where the system's performance is improved by adding more resources.\n  - **Vertical Scaling:** This approach involves increasing the resources of a single server or instance, such as by upgrading the CPU, RAM, or storage. This increases the system's performance by adding more resources to a single instance, rather than adding more instances. It is often used in cloud environments to scale up, where the system's performance is improved by adding more resources to a single instance.\n\n- **Key Differences:**\n  - **Resource Utilization:** Horizontal scaling distributes the workload across multiple resources, while vertical scaling increases the workload on a single resource.\n  - **Scalability:** Horizontal scaling is more scalable because it can be easily scaled out by adding more resources, whereas vertical scaling is more scalable within a single instance.\n  - **Cost:** Horizontal scaling can be more cost-effective in the long run because it allows for more efficient use of resources, while vertical scaling can be more expensive due to the need for additional resources.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": false,
+            "status": "failed",
+            "reason": "rule_based_scaling_concepts_three_bullets_and_no_vendor_names",
+            "details": {
+              "has_horizontal": true,
+              "has_vertical": true,
+              "has_vendor_prohibition_violation": false,
+              "bullet_count": 7,
+              "has_three_bullets": false
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1892.2
+        }
       },
       "compressed": {
         "workload_id": "text_redundant_instructions",
         "enable_compression": true,
-        "input_original_chars": 547,
-        "input_effective_chars": 547,
-        "char_reduction_percent": 0.0,
-        "compression_applied": true,
-        "content_type": "text",
-        "strategy": "text_redundancy",
-        "original_tokens": 137,
-        "compressed_tokens": 110,
-        "reduction_percent": 19.7,
-        "compression_time_ms": 0.35,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 1010.15,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 606,
-        "prompt_eval_cached_count": 518,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 19.58,
-        "eval_count": 49,
-        "eval_duration_ms": 348.03,
-        "generation_tokens_per_second": 140.79,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "Please help me by providing a helpful answer. I would really appreciate your assistance with this task.\nExplain the core architectural differences between horizontal scaling and vertical scaling in cloud systems.\nExplain the core architectural differ...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_scaling_concepts_and_bullet_constraint",
-          "details": {
-            "has_horizontal": true,
-            "has_vertical": true,
-            "has_bullets": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 547,
+          "compression_stage_output_chars": 438,
+          "final_optimized_prompt_chars": 547,
+          "downstream_model_input_chars": 547
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "text",
+          "strategy": "text_redundancy",
+          "original_tokens": 137,
+          "compressed_tokens": 110,
+          "tokens_reduced": 27,
+          "reduction_percent": 19.7,
+          "processing_time_ms": 0.32,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 1188.7,
+          "validation_status": "fallback",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 606,
+          "prompt_eval_cached_count": 518,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 20.77,
+          "eval_count": 37,
+          "eval_duration_ms": 297.3,
+          "generation_tokens_per_second": 124.45,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "Please help me by providing a helpful answer. I would really appreciate your assistance with this task.\nExplain the core architectural differences between horizontal scaling and vertical scaling in cloud systems.\nExplain the core architectural differ...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_scaling_concepts_and_bullet_constraint",
+            "details": {
+              "has_horizontal": true,
+              "has_vertical": true,
+              "has_bullets": true
+            }
           }
         },
-        "downstream_task_answer": "- **Horizontal Scaling vs. Vertical Scaling:**\n  - **Horizontal Scaling:** This approach involves adding more resources to an existing system, such as by adding more servers or instances. This increases the system's capacity to handle more workloads without changing the underlying architecture. It is often used in cloud environments to scale out, where the system's performance is improved by adding more resources.\n  - **Vertical Scaling:** This approach involves increasing the resources of a single server or instance, such as by upgrading the CPU, RAM, or storage. This increases the system's performance by adding more resources to a single instance, rather than adding more instances. It is often used in cloud environments to scale up, where the system's performance is improved by adding more resources to a single instance.\n\n- **Key Differences:**\n  - **Resource Utilization:** Horizontal scaling distributes the workload across multiple resources, while vertical scaling increases the workload on a single resource.\n  - **Scalability:** Horizontal scaling is more scalable because it can be easily scaled out by adding more resources, whereas vertical scaling is more scalable within a single instance.\n  - **Cost:** Horizontal scaling can be more cost-effective in the long run because it allows for more efficient use of resources, while vertical scaling can be more expensive",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_explains_scaling_with_bullets_and_no_vendor_names",
-          "details": {
-            "has_horizontal": true,
-            "has_vertical": true,
-            "has_vendor_prohibition_violation": false,
-            "bullet_count": 7
+        "downstream_inference": {
+          "prompt_eval_count": 119,
+          "eval_count": 265,
+          "prompt_eval_duration_ms": 12.84,
+          "eval_duration_ms": 1962.23,
+          "latency_ms": 2016.74,
+          "done_reason": "stop",
+          "raw_answer": "- **Horizontal Scaling vs. Vertical Scaling:**\n  - **Horizontal Scaling:** This approach involves adding more resources to an existing system, such as by adding more servers or instances. This increases the system's capacity to handle more workloads without changing the underlying architecture. It is often used in cloud environments to scale out, where the system's performance is improved by adding more resources.\n  - **Vertical Scaling:** This approach involves increasing the resources of a single server or instance, such as by upgrading the CPU, RAM, or storage. This increases the system's performance by adding more resources to a single instance, rather than adding more instances. It is often used in cloud environments to scale up, where the system's performance is improved by adding more resources to a single instance.\n\n- **Key Differences:**\n  - **Resource Utilization:** Horizontal scaling distributes the workload across multiple resources, while vertical scaling increases the workload on a single resource.\n  - **Scalability:** Horizontal scaling is more scalable because it can be easily scaled out by adding more resources, whereas vertical scaling is more scalable within a single instance.\n  - **Cost:** Horizontal scaling can be more cost-effective in the long run because it allows for more efficient use of resources, while vertical scaling can be more expensive due to the need for additional resources.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": false,
+            "status": "failed",
+            "reason": "rule_based_scaling_concepts_three_bullets_and_no_vendor_names",
+            "details": {
+              "has_horizontal": true,
+              "has_vertical": true,
+              "has_vendor_prohibition_violation": false,
+              "bullet_count": 7,
+              "has_three_bullets": false
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1853.17
+        }
       },
       "comparison": {
-        "character_reduction": 0,
-        "character_reduction_percent": 0.0,
-        "prompt_eval_token_savings": 17,
-        "compression_overhead_ms": 0.35,
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 547,
+          "compression_stage": {
+            "baseline_chars": 547,
+            "compressed_chars": 438,
+            "reduction_chars": 109,
+            "reduction_percent": 19.93
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 547,
+            "compressed_chars": 547,
+            "reduction_chars": 0,
+            "reduction_percent": 0.0
+          },
+          "downstream_model_input": {
+            "baseline_chars": 547,
+            "compressed_chars": 547
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 119,
+          "compressed_prompt_eval_count": 119,
+          "tokens_saved": 0,
+          "reduction_percent": 0.0
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 623,
+          "compressed_prompt_eval_count": 606,
+          "tokens_saved": 17,
+          "reduction_percent": 2.73
+        },
+        "compression_overhead_ms": 0.32,
         "prompt_preservation_status": "preserved",
-        "downstream_answer_status": "preserved",
+        "downstream_answer_status": "inconclusive_or_both_failed",
         "restoration_verification": {
           "tested": false,
           "status": "not_applicable",
@@ -1150,114 +1679,174 @@
       "baseline": {
         "workload_id": "mixed_debugging_dossier",
         "enable_compression": false,
-        "input_original_chars": 882,
-        "input_effective_chars": 912,
-        "char_reduction_percent": -3.4,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 221,
-        "compressed_tokens": 221,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.01,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 2122.57,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 777,
-        "prompt_eval_cached_count": 400,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 58.45,
-        "eval_count": 226,
-        "eval_duration_ms": 1702.95,
-        "generation_tokens_per_second": 132.71,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "### Summary\n\nPlease inspect the following debugging information and summarize the status of the service:\n\n- **Service Configuration Payload:**\n  ```json\n  {\n    \"service_name\": \"billing-aggregator\",\n    \"port\": 8080,\n    \"health_check\": {\n      \"inte...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_service_name_and_port",
-          "details": {
-            "has_billing": true,
-            "has_port": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 882,
+          "compression_stage_output_chars": 882,
+          "final_optimized_prompt_chars": 978,
+          "downstream_model_input_chars": 978
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 221,
+          "compressed_tokens": 221,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 2098.36,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 777,
+          "prompt_eval_cached_count": 400,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 50.59,
+          "eval_count": 238,
+          "eval_duration_ms": 1723.9,
+          "generation_tokens_per_second": 138.06,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "### Microservice Health Investigation Dossier\n\nPlease inspect the following debugging information and summarize the status of the service:\n\n1. **Service Configuration Payload:**\n   ```json\n   {\n     \"service_name\": \"billing-aggregator\",\n     \"port\": ...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_service_name_and_port",
+            "details": {
+              "has_billing": true,
+              "has_port": true
+            }
           }
         },
-        "downstream_task_answer": "### Summary\n\n#### Service Configuration\n\nThe service configuration payload is as follows:\n\n```json\n{\n  \"service_name\": \"billing-aggregator\",\n  \"port\": 8080,\n  \"health_check\": {\n    \"interval_seconds\": 15,\n    \"timeout_ms\": 2000\n  },\n  \"database\": {\n    \"host\": \"postgres-primary.internal\",\n    \"port\": 5432,\n    \"max_connections\": 50\n  }\n}\n```\n\n#### Handler Code\n\nThe handler code snippet is:\n\n```python\ndef handle_transaction(tx_id: str, amount: float) -> bool:\n    # Validate transaction id is non-empty\n    if not tx_id:\n        return False  # Reject empty ID\n    # Log transaction processing\n    print(f\"Processing transaction: {tx_id}\")\n    return True\n```\n\n### Summary\n\n- **Service Configuration:**\n  - The service name is `billing-aggregator`.\n  - The port number is `8080`.\n  - The health check interval is `15` seconds.\n  - The health check timeout is `2000` milliseconds.\n  - The database host is `postgres-primary.internal`, the port is `5",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_summarizes_service_and_evaluates_port",
-          "details": {
-            "has_service": true,
-            "has_port": true
+        "downstream_inference": {
+          "prompt_eval_count": 266,
+          "eval_count": 383,
+          "prompt_eval_duration_ms": 38.67,
+          "eval_duration_ms": 2754.47,
+          "latency_ms": 2828.46,
+          "done_reason": "stop",
+          "raw_answer": "### Microservice Health Investigation Dossier\n\n#### 1. Service Configuration Payload\n```json\n{\n  \"service_name\": \"billing-aggregator\",\n  \"port\": 8080,\n  \"health_check\": {\n    \"interval_seconds\": 15,\n    \"timeout_ms\": 2000\n  },\n  \"database\": {\n    \"host\": \"postgres-primary.internal\",\n    \"port\": 5432,\n    \"max_connections\": 50\n  }\n}\n```\n\n#### 2. Handler Code Snippet\n```python\n# Main request dispatch logic\ndef handle_transaction(tx_id: str, amount: float) -> bool:\n    # Validate transaction id is non-empty\n    if not tx_id:\n        return False  # Reject empty ID\n    # Log transaction processing\n    print(f\"Processing transaction: {tx_id}\")\n    return True\n```\n\n#### 3. Task Directives\n- **Summary:**\n  - The service configuration payload includes the following details:\n    - Service name: `billing-aggregator`\n    - Port: `8080`\n    - Health check interval: `15 seconds`\n    - Health check timeout: `2000 milliseconds`\n    - Database host: `postgres-primary.internal`\n    - Database port: `5432`\n    - Maximum database connections: `50`\n\n  - The handler code snippet is a simple function that processes a transaction ID and amount. It checks if the transaction ID is non-empty and logs the transaction processing.\n\n  - The port configuration matches across the payload: `8080` in the service configuration and `8080` in the handler code snippet.\n\n#### 4. Verification\n- The port configuration matches across the service configuration and the handler code snippet, confirming that the port is correctly specified and consistent.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_service_identity_and_port_consistency",
+            "details": {
+              "has_service": true,
+              "has_port_consistency_evaluation": true
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 2003.0
+        }
       },
       "compressed": {
         "workload_id": "mixed_debugging_dossier",
         "enable_compression": true,
-        "input_original_chars": 882,
-        "input_effective_chars": 612,
-        "char_reduction_percent": 30.61,
-        "compression_applied": true,
-        "content_type": "mixed",
-        "strategy": "mixed",
-        "original_tokens": 221,
-        "compressed_tokens": 176,
-        "reduction_percent": 20.4,
-        "compression_time_ms": 0.66,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": "argus:ref:10def958cdd25889",
-        "total_opt_latency_ms": 1439.62,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 709,
-        "prompt_eval_cached_count": 400,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 45.39,
-        "eval_count": 147,
-        "eval_duration_ms": 1080.38,
-        "generation_tokens_per_second": 136.06,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "# Microservice Health Investigation Dossier\n\n### Service Configuration Payload\n```json\n{\"service_name\":\"billing-aggregator\",\"port\":8080,\"health_check\":{\"interval_seconds\":15,\"timeout_ms\":2000},\"database\":{\"host\":\"postgres-primary.internal\",\"port\":543...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_service_name_and_port",
-          "details": {
-            "has_billing": true,
-            "has_port": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 882,
+          "compression_stage_output_chars": 704,
+          "final_optimized_prompt_chars": 757,
+          "downstream_model_input_chars": 757
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "mixed",
+          "strategy": "mixed",
+          "original_tokens": 221,
+          "compressed_tokens": 176,
+          "tokens_reduced": 45,
+          "reduction_percent": 20.4,
+          "processing_time_ms": 0.38,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": "argus:ref:10def958cdd25889"
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 1687.01,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 709,
+          "prompt_eval_cached_count": 501,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 31.53,
+          "eval_count": 182,
+          "eval_duration_ms": 1311.21,
+          "generation_tokens_per_second": 138.8,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "### Summary\n\nPlease inspect the following debugging information and summarize the status of the service:\n\n- **Service Configuration**: \n  - Service Name: `billing-aggregator`\n  - Port: `8080`\n  - Health Check:\n    - Interval: `15 seconds`\n    - Timeo...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_service_name_and_port",
+            "details": {
+              "has_billing": true,
+              "has_port": true
+            }
           }
         },
-        "downstream_task_answer": "# Microservice Health Investigation Dossier\n\n## Service Configuration Payload\n\n```json\n{\n    \"service_name\": \"billing-aggregator\",\n    \"port\": 8080,\n    \"health_check\": {\n        \"interval_seconds\": 15,\n        \"timeout_ms\": 2000\n    },\n    \"database\": {\n        \"host\": \"postgres-primary.internal\",\n        \"port\": 5432,\n        \"max_connections\": 50\n    }\n}\n```\n\n## Handler Code Snippet\n\n```python\ndef handle_transaction(tx_id: str, amount: float) -> bool:\n    if not tx_id:\n        return False\n    print(f'Processing transaction: {tx_id}')\n    return True\n```\n\n### Task Directives\n\n- **Summary**: The summary should be formatted with markdown headings to clearly outline the configuration details and the handler code snippet.\n- **Port Configuration Verification**: Ensure that the port configuration matches across the service configuration payload.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_summarizes_service_and_evaluates_port",
-          "details": {
-            "has_service": true,
-            "has_port": true
+        "downstream_inference": {
+          "prompt_eval_count": 210,
+          "eval_count": 384,
+          "prompt_eval_duration_ms": 34.72,
+          "eval_duration_ms": 2749.69,
+          "latency_ms": 2818.75,
+          "done_reason": "length",
+          "raw_answer": "### Summary\n\nThe service configuration for `billing-aggregator` is as follows:\n\n- **Service Name**: `billing-aggregator`\n- **Port**: `8080`\n- **Health Check**:\n  - **Interval**: `15 seconds`\n  - **Timeout**: `2000 milliseconds`\n- **Database**:\n  - **Host**: `postgres-primary.internal`\n  - **Port**: `5432`\n  - **Max Connections**: `50`\n\n### Handler Code Snippet\n\n```python\ndef handle_transaction(tx_id: str, amount: float) -> bool:\n    if not tx_id:\n        return False\n    print(f'Processing transaction: {tx_id}')\n    return True\n```\n\n### Verify Port Configuration Across Payload\n\nTo ensure that the port configuration matches across the payload, we need to confirm that the service is correctly configured and that the port `8080` is used consistently throughout the service. This includes verifying that the service is running on the correct port and that any external references or configurations do not override the default port.\n\n### Steps to Verify\n\n1. **Check Service Configuration**:\n   - Ensure that the service is configured to listen on port `8080`.\n   - Verify that the service is not configured to listen on any other port.\n\n2. **Check External References**:\n   - Review any external references or configurations that might override the default port.\n   - Ensure that any external references do not specify a different port.\n\n3. **Run the Service**:\n   - Start the service and verify that it is listening on port `8080`.\n   - Use a tool like `netstat` or `lsof` to check the listening ports.\n\n4. **Test the Service**:\n   - Send a request to the service and verify that it responds on port `8080`.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_service_identity_and_port_consistency",
+            "details": {
+              "has_service": true,
+              "has_port_consistency_evaluation": true
+            }
           }
-        },
-        "downstream_eval_tokens": 202,
-        "downstream_latency_ms": 1511.13
+        }
       },
       "comparison": {
-        "character_reduction": 270,
-        "character_reduction_percent": 30.61,
-        "prompt_eval_token_savings": 68,
-        "compression_overhead_ms": 0.66,
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 882,
+          "compression_stage": {
+            "baseline_chars": 882,
+            "compressed_chars": 704,
+            "reduction_chars": 178,
+            "reduction_percent": 20.18
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 978,
+            "compressed_chars": 757,
+            "reduction_chars": 221,
+            "reduction_percent": 22.6
+          },
+          "downstream_model_input": {
+            "baseline_chars": 978,
+            "compressed_chars": 757
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 266,
+          "compressed_prompt_eval_count": 210,
+          "tokens_saved": 56,
+          "reduction_percent": 21.05
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 777,
+          "compressed_prompt_eval_count": 709,
+          "tokens_saved": 68,
+          "reduction_percent": 8.75
+        },
+        "compression_overhead_ms": 0.38,
         "prompt_preservation_status": "preserved",
         "downstream_answer_status": "preserved",
         "restoration_verification": {
@@ -1283,116 +1872,176 @@
       "baseline": {
         "workload_id": "mixed_debugging_dossier",
         "enable_compression": false,
-        "input_original_chars": 882,
-        "input_effective_chars": 891,
-        "char_reduction_percent": -1.02,
-        "compression_applied": false,
-        "content_type": "text",
-        "strategy": "none",
-        "original_tokens": 221,
-        "compressed_tokens": 221,
-        "reduction_percent": 0.0,
-        "compression_time_ms": 0.0,
-        "compression_reason": "Compression disabled or text below minimum character threshold",
-        "compression_validation_passed": true,
-        "restoration_reference": null,
-        "total_opt_latency_ms": 1915.17,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 777,
-        "prompt_eval_cached_count": 776,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 12.08,
-        "eval_count": 219,
-        "eval_duration_ms": 1580.01,
-        "generation_tokens_per_second": 138.61,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "### Summary of Microservice Health Investigation\n\nPlease inspect the following debugging information and summarize the status of the service:\n\n#### Service Configuration Payload\n```json\n{\n  \"service_name\": \"billing-aggregator\",\n  \"port\": 8080,\n  \"hea...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_service_name_and_port",
-          "details": {
-            "has_billing": true,
-            "has_port": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 882,
+          "compression_stage_output_chars": 882,
+          "final_optimized_prompt_chars": 905,
+          "downstream_model_input_chars": 905
+        },
+        "compression_stage": {
+          "applied": false,
+          "content_type": "text",
+          "strategy": "none",
+          "original_tokens": 221,
+          "compressed_tokens": 221,
+          "tokens_reduced": 0,
+          "reduction_percent": 0.0,
+          "processing_time_ms": 0.0,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": null
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 2021.22,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 777,
+          "prompt_eval_cached_count": 501,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 45.64,
+          "eval_count": 224,
+          "eval_duration_ms": 1624.46,
+          "generation_tokens_per_second": 137.89,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "# Microservice Health Investigation Dossier\n\nPlease inspect the following debugging information and summarize the status of the service:\n\n### Service Configuration Payload\n```json\n{\n  \"service_name\": \"billing-aggregator\",\n  \"port\": 8080,\n  \"health_ch...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_service_name_and_port",
+            "details": {
+              "has_billing": true,
+              "has_port": true
+            }
           }
         },
-        "downstream_task_answer": "### Summary of Microservice Health Investigation\n\n#### Service Configuration Payload\n```json\n{\n  \"service_name\": \"billing-aggregator\",\n  \"port\": 8080,\n  \"health_check\": {\n    \"interval_seconds\": 15,\n    \"timeout_ms\": 2000\n  },\n  \"database\": {\n    \"host\": \"postgres-primary.internal\",\n    \"port\": 5432,\n    \"max_connections\": 50\n  }\n}\n```\n\n#### Handler Code Snippet\n```python\n# Main request dispatch logic\ndef handle_transaction(tx_id: str, amount: float) -> bool:\n    # Validate transaction id is non-empty\n    if not tx_id:\n        return False  # Reject empty ID\n    # Log transaction processing\n    print(f\"Processing transaction: {tx_id}\")\n    return True\n```\n\n#### Task Directives\n- The service configuration payload specifies the following details:\n  - Service name: `billing-aggregator`\n  - Port: `8080`\n  - Health check interval: `15 seconds`\n  - Health check timeout: `2000 milliseconds`\n  - Database host: `postgres-primary.internal`\n  - Database port: `5",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_summarizes_service_and_evaluates_port",
-          "details": {
-            "has_service": true,
-            "has_port": true
+        "downstream_inference": {
+          "prompt_eval_count": 252,
+          "eval_count": 345,
+          "prompt_eval_duration_ms": 35.79,
+          "eval_duration_ms": 2528.43,
+          "latency_ms": 2609.02,
+          "done_reason": "stop",
+          "raw_answer": "### Summary\n\n- **Port Configuration**: The service port is correctly configured as `8080` in the payload and the handler code snippet. This indicates that the service is listening on the expected port.\n\n- **Health Check**: The health check interval is set to `15` seconds and the timeout is set to `2000` milliseconds. This suggests that the service is configured to perform health checks every 15 seconds with a timeout of 2 seconds. This is a reasonable interval for monitoring the service's health.\n\n- **Database Configuration**: The database configuration is set to connect to `postgres-primary.internal` on port `5432` with a maximum of `50` connections. This indicates that the service is configured to connect to the database using the specified host and port, and it is also configured to handle up to 50 connections simultaneously.\n\n- **Transaction Processing**: The handler code snippet includes a function `handle_transaction` that processes a transaction ID. The function checks if the transaction ID is non-empty and logs the transaction processing. If the transaction ID is empty, it returns `False`, indicating a rejection. If the transaction ID is valid, it prints a message indicating that the transaction is being processed and returns `True`.\n\n### Conclusion\n\nThe service configuration and handler code snippet appear to be correctly set up and configured. The service is listening on port `8080`, performing health checks every 15 seconds with a timeout of 2 seconds, and connecting to the database on `postgres-primary.internal` with a maximum of 50 connections. The transaction processing function is correctly implemented, rejecting empty transaction IDs and logging the processing of valid transaction IDs.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": false,
+            "status": "failed",
+            "reason": "rule_based_service_identity_and_port_consistency",
+            "details": {
+              "has_service": false,
+              "has_port_consistency_evaluation": true
+            }
           }
-        },
-        "downstream_eval_tokens": 256,
-        "downstream_latency_ms": 1897.77
+        }
       },
       "compressed": {
         "workload_id": "mixed_debugging_dossier",
         "enable_compression": true,
-        "input_original_chars": 882,
-        "input_effective_chars": 612,
-        "char_reduction_percent": 30.61,
-        "compression_applied": true,
-        "content_type": "mixed",
-        "strategy": "mixed",
-        "original_tokens": 221,
-        "compressed_tokens": 176,
-        "reduction_percent": 20.4,
-        "compression_time_ms": 0.67,
-        "compression_reason": "passed",
-        "compression_validation_passed": true,
-        "restoration_reference": "argus:ref:10def958cdd25889",
-        "total_opt_latency_ms": 1398.92,
-        "selected_num_ctx": 4096,
-        "prompt_eval_count": 709,
-        "prompt_eval_cached_count": 708,
-        "cache_hit_ratio": null,
-        "prompt_eval_duration_ms": 13.12,
-        "eval_count": 147,
-        "eval_duration_ms": 1063.81,
-        "generation_tokens_per_second": 138.18,
-        "done_reason": "stop",
-        "optimized_prompt_preview": "# Microservice Health Investigation Dossier\n\n### Service Configuration Payload\n```json\n{\"service_name\":\"billing-aggregator\",\"port\":8080,\"health_check\":{\"interval_seconds\":15,\"timeout_ms\":2000},\"database\":{\"host\":\"postgres-primary.internal\",\"port\":543...",
-        "prompt_preservation_evaluation": {
-          "evaluation_type": "rule_based_prompt_preservation",
-          "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_service_name_and_port",
-          "details": {
-            "has_billing": true,
-            "has_port": true
+        "stage_measurements": {
+          "original_workload_prompt_chars": 882,
+          "compression_stage_output_chars": 704,
+          "final_optimized_prompt_chars": 1109,
+          "downstream_model_input_chars": 1109
+        },
+        "compression_stage": {
+          "applied": true,
+          "content_type": "mixed",
+          "strategy": "mixed",
+          "original_tokens": 221,
+          "compressed_tokens": 176,
+          "tokens_reduced": 45,
+          "reduction_percent": 20.4,
+          "processing_time_ms": 0.45,
+          "validation_status": "passed",
+          "validation_passed": true,
+          "restoration_reference": "argus:ref:10def958cdd25889"
+        },
+        "optimizer_inference": {
+          "total_latency_ms": 2413.38,
+          "validation_status": "passed",
+          "selected_num_ctx": 4096,
+          "prompt_eval_count": 709,
+          "prompt_eval_cached_count": 708,
+          "cache_hit_ratio": null,
+          "prompt_eval_duration_ms": 7.78,
+          "eval_count": 286,
+          "eval_duration_ms": 2061.22,
+          "generation_tokens_per_second": 138.75,
+          "done_reason": "stop",
+          "final_optimized_prompt_preview": "### Summary\n\nPlease inspect the following debugging information and summarize the status of the service:\n\n- **Service Configuration Payload:**\n  ```json\n  {\"service_name\":\"billing-aggregator\",\"port\":8080,\"health_check\":{\"interval_seconds\":15,\"timeout...",
+          "prompt_preservation_evaluation": {
+            "evaluation_type": "rule_based_prompt_preservation",
+            "methodology_note": "Rule-based structural/keyword check of optimized prompt; does not guarantee downstream response fidelity.",
+            "evaluated": true,
+            "passed": true,
+            "reason": "rule_based_service_name_and_port",
+            "details": {
+              "has_billing": true,
+              "has_port": true
+            }
           }
         },
-        "downstream_task_answer": "# Microservice Health Investigation Dossier\n\n## Service Configuration Payload\n\n```json\n{\n    \"service_name\": \"billing-aggregator\",\n    \"port\": 8080,\n    \"health_check\": {\n        \"interval_seconds\": 15,\n        \"timeout_ms\": 2000\n    },\n    \"database\": {\n        \"host\": \"postgres-primary.internal\",\n        \"port\": 5432,\n        \"max_connections\": 50\n    }\n}\n```\n\n## Handler Code Snippet\n\n```python\ndef handle_transaction(tx_id: str, amount: float) -> bool:\n    if not tx_id:\n        return False\n    print(f'Processing transaction: {tx_id}')\n    return True\n```\n\n### Task Directives\n\n- **Summary**: The summary should be formatted with markdown headings to clearly outline the configuration and functionality of the service.\n- **Port Configuration Verification**: Ensure that the port configuration matches across the service configuration payload.",
-        "downstream_task_evaluation": {
-          "evaluation_type": "rule_based_answer_quality",
-          "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
-          "evaluated": true,
-          "passed": true,
-          "reason": "rule_based_summarizes_service_and_evaluates_port",
-          "details": {
-            "has_service": true,
-            "has_port": true
+        "downstream_inference": {
+          "prompt_eval_count": 314,
+          "eval_count": 151,
+          "prompt_eval_duration_ms": 44.58,
+          "eval_duration_ms": 1083.1,
+          "latency_ms": 1164.82,
+          "done_reason": "stop",
+          "raw_answer": "### Summary\n\n#### Service Configuration\n\n- **Service Name:** `billing-aggregator`\n- **Port:** `8080`\n- **Health Check:** `interval_seconds: 15, timeout_ms: 2000`\n- **Database:** `host: postgres-primary.internal, port: 5432, max_connections: 50`\n\n#### Handler Code\n\n- **Function:** `handle_transaction`\n  - **Parameters:** `tx_id`, `amount`\n  - **Returns:** `bool`\n  - **Prints:** `Processing transaction: tx_id`\n\n### Verification\n\n- The port configuration in the service configuration matches the port used in the handler code snippet.\n- The summary is formatted with markdown headings.",
+          "task_evaluation": {
+            "evaluation_type": "rule_based_answer_quality",
+            "methodology_note": "Rule-based programmatic heuristic check of generated answer against workload-specific acceptance criteria; not full semantic equivalence.",
+            "evaluated": true,
+            "passed": true,
+            "status": "passed",
+            "reason": "rule_based_service_identity_and_port_consistency",
+            "details": {
+              "has_service": true,
+              "has_port_consistency_evaluation": true
+            }
           }
-        },
-        "downstream_eval_tokens": 201,
-        "downstream_latency_ms": 1473.35
+        }
       },
       "comparison": {
-        "character_reduction": 270,
-        "character_reduction_percent": 30.61,
-        "prompt_eval_token_savings": 68,
-        "compression_overhead_ms": 0.67,
+        "stage_measurements_comparison": {
+          "original_workload_prompt_chars": 882,
+          "compression_stage": {
+            "baseline_chars": 882,
+            "compressed_chars": 704,
+            "reduction_chars": 178,
+            "reduction_percent": 20.18
+          },
+          "final_optimized_prompt": {
+            "baseline_chars": 905,
+            "compressed_chars": 1109,
+            "reduction_chars": -204,
+            "reduction_percent": -22.54
+          },
+          "downstream_model_input": {
+            "baseline_chars": 905,
+            "compressed_chars": 1109
+          }
+        },
+        "downstream_token_savings": {
+          "baseline_prompt_eval_count": 252,
+          "compressed_prompt_eval_count": 314,
+          "tokens_saved": -62,
+          "reduction_percent": -24.6
+        },
+        "internal_optimizer_token_savings": {
+          "baseline_prompt_eval_count": 777,
+          "compressed_prompt_eval_count": 709,
+          "tokens_saved": 68,
+          "reduction_percent": 8.75
+        },
+        "compression_overhead_ms": 0.45,
         "prompt_preservation_status": "preserved",
-        "downstream_answer_status": "preserved",
+        "downstream_answer_status": "improvement",
         "restoration_verification": {
           "tested": true,
           "status": "matched",
