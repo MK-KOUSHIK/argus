@@ -128,11 +128,13 @@ describe('Argus Workspace Dashboard (Phase 3)', () => {
       prompt: expect.stringContaining('expert principal software engineer'),
       mode: 'balanced',
       target_model: 'gemini-1-5-flash',
+      enable_routing: true,
+      requested_model: undefined,
     });
 
     // Check latency and model
     expect(screen.getByText('1,680 ms')).toBeInTheDocument();
-    expect(screen.getByText('qwen2.5:1.5b')).toBeInTheDocument();
+    expect(screen.getAllByText('qwen2.5:1.5b').length).toBeGreaterThan(0);
 
     // Check metrics
     expect(screen.getByText(/Estimated Token Change/i)).toBeInTheDocument();
@@ -189,5 +191,66 @@ describe('Argus Workspace Dashboard (Phase 3)', () => {
     expect(editableTextarea).toBeInTheDocument();
     fireEvent.change(editableTextarea, { target: { value: '{"custom_json": true}' } });
     expect(editableTextarea.value).toBe('{"custom_json": true}');
+  });
+
+  it('displays Phase 5 model routing telemetry when routing decision is returned', async () => {
+    const resultWithRouting: OptimizationResult = {
+      ...MOCK_OPTIMIZE_RESULT,
+      routing: {
+        selected_model: 'qwen2.5:1.5b',
+        target_model_tier: 'small',
+        routing_status: 'routed',
+        policy_applied: 'balanced',
+        reason: 'Simple task (complexity 0.28 <= 0.60). Routed to lightweight optimizer model.',
+        decision_confidence: 0.95,
+        complexity: {
+          heuristic_score: 0.28,
+          task_category: 'coding',
+          task_confidence: 0.9,
+          category_weight: 0.35,
+          explicit_constraints_count: 2,
+          required_operations_count: 1,
+          input_tokens: 71,
+          context_tier: 1024,
+          output_budget: 512,
+          has_prohibitions: false,
+          has_code_or_data: true,
+          complexity_factors: ['coding domain', '2 explicit constraints'],
+        },
+        resources: {
+          gpu_available: true,
+          vram_total_mb: 6141,
+          vram_free_mb: 4700,
+          vram_used_mb: 1441,
+          ram_total_mb: 16000,
+          ram_free_mb: 2400,
+          ram_used_mb: 13600,
+          estimated_model_vram_mb: 986,
+          is_resource_sufficient: true,
+          resource_pressure_reason: null,
+          is_currently_loaded: true,
+          concurrency_in_flight: 0,
+          concurrency_capacity: 1,
+        },
+        routing_duration_ms: 12,
+        fallback_model: null,
+        is_fallback: false,
+      },
+    };
+
+    vi.spyOn(apiService, 'optimizePrompt').mockResolvedValue(resultWithRouting);
+
+    render(<WorkspacePage />);
+    const exampleButton = screen.getByText(/Code Review & Security Audit/i);
+    fireEvent.click(exampleButton);
+
+    const optimizeBtn = screen.getByRole('button', { name: /optimize prompt/i });
+    fireEvent.click(optimizeBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Local Model Routing Decision \(Phase 5\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/28% \(0\.28\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Simple task \(complexity 0\.28 <= 0\.60\)/i)).toBeInTheDocument();
+    });
   });
 });

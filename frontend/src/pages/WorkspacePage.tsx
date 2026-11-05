@@ -14,6 +14,7 @@ import {
   OptimizationStatus,
   ExamplePrompt,
   OllamaStatus,
+  ModelCatalogItem,
 } from '@/types';
 import {
   Sparkles,
@@ -34,6 +35,29 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
   const [status, setStatus] = useState<OptimizationStatus>('idle');
   const [result, setResult] = useState<OptimizationResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [enableRouting, setEnableRouting] = useState<boolean>(true);
+  const [requestedModel, setRequestedModel] = useState<string>('');
+  const [discoveredModels, setDiscoveredModels] = useState<ModelCatalogItem[]>([]);
+
+  React.useEffect(() => {
+    let isMounted = true;
+    apiService
+      .getModels()
+      .then((data) => {
+        if (isMounted && data.models) {
+          setDiscoveredModels(data.models);
+          if (!requestedModel && data.models.length > 0) {
+            setRequestedModel(data.models[0].name);
+          }
+        }
+      })
+      .catch(() => {
+        // Fallback to ollamaStatus if models endpoint not reached
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleSelectExample = (example: ExamplePrompt) => {
     setRawPrompt(example.content);
@@ -59,11 +83,13 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
     setStatus('optimizing');
 
     try {
-      // Real backend API call to FastAPI -> Ollama (qwen2.5:1.5b)
+      // Real backend API call to FastAPI -> Ollama (qwen2.5:1.5b or routed model)
       const optimizationResult = await apiService.optimizePrompt({
         prompt: trimmed,
         mode,
         target_model: targetModel,
+        enable_routing: enableRouting,
+        requested_model: enableRouting ? undefined : (requestedModel || undefined),
       });
 
       setResult(optimizationResult);
@@ -166,6 +192,11 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
             isLoading={status === 'optimizing'}
             disabled={rawPrompt.trim().length === 0}
             ollamaStatus={ollamaStatus}
+            enableRouting={enableRouting}
+            onEnableRoutingChange={setEnableRouting}
+            requestedModel={requestedModel}
+            onRequestedModelChange={setRequestedModel}
+            discoveredModels={discoveredModels}
           />
         </div>
       </div>

@@ -11,15 +11,33 @@ from .optimizer import (
     OllamaStatusResponse,
     TokenEstimation,
 )
+from .routing import (
+    ComplexityTelemetry,
+    ModelCatalogItem,
+    ModelCatalogResponse,
+    ModelTier,
+    ResourceTelemetry,
+    RouteRequest,
+    RoutingDecisionTelemetry,
+    RoutingStatus,
+)
 
 __all__ = [
+    "ComplexityTelemetry",
     "HealthResponse",
+    "ModelCatalogItem",
+    "ModelCatalogResponse",
+    "ModelTier",
     "OptimizationMode",
     "OptimizationStrategy",
-    "TaskCategory",
-    "ValidationStatus",
     "OptimizeRequest",
     "OptimizeResponse",
     "OllamaStatusResponse",
+    "ResourceTelemetry",
+    "RouteRequest",
+    "RoutingDecisionTelemetry",
+    "RoutingStatus",
+    "TaskCategory",
     "TokenEstimation",
+    "ValidationStatus",
 ]

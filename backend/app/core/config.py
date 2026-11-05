@@ -91,6 +91,15 @@ class Settings(BaseSettings):
         "text": True,
     }
 
+    # Local-First Model Routing (Phase 5)
+    ROUTING_ENABLED: bool = True
+    ROUTING_POLICY: str = "auto"  # "auto", "prefer_small", "prefer_large"
+    ROUTING_COMPLEXITY_THRESHOLD: float = 0.55
+    ROUTING_DEFAULT_FALLBACK_MODEL: str = "qwen2.5:1.5b"
+    ROUTING_VRAM_SAFETY_MARGIN_MB: int = 512
+    ROUTING_RAM_SAFETY_MARGIN_MB: int = 1024
+    ROUTING_REGISTRY_TTL_SECONDS: float = 5.0
+
     # Optimization & Token Estimation Heuristics
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0
     MAX_VALIDATION_RETRY_ATTEMPTS: int = 1
@@ -252,6 +261,45 @@ class Settings(BaseSettings):
         missing = required - set(v.keys())
         if missing:
             raise ValueError(f"COMPRESSION_STRATEGIES_ENABLED missing required strategies: {sorted(missing)}")
+        return v
+
+    @field_validator("ROUTING_POLICY")
+    @classmethod
+    def validate_routing_policy(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        allowed = {"auto", "prefer_small", "prefer_large"}
+        if normalized not in allowed:
+            raise ValueError(
+                f"ROUTING_POLICY must be one of {sorted(allowed)}; got '{v}'"
+            )
+        return normalized
+
+    @field_validator("ROUTING_COMPLEXITY_THRESHOLD")
+    @classmethod
+    def validate_routing_threshold(cls, v: float) -> float:
+        if v < 0.0 or v > 1.0:
+            raise ValueError(f"ROUTING_COMPLEXITY_THRESHOLD must be between 0.0 and 1.0; got {v}")
+        return v
+
+    @field_validator("ROUTING_VRAM_SAFETY_MARGIN_MB")
+    @classmethod
+    def validate_vram_margin(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"ROUTING_VRAM_SAFETY_MARGIN_MB must be non-negative; got {v}")
+        return v
+
+    @field_validator("ROUTING_RAM_SAFETY_MARGIN_MB")
+    @classmethod
+    def validate_ram_margin(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"ROUTING_RAM_SAFETY_MARGIN_MB must be non-negative; got {v}")
+        return v
+
+    @field_validator("ROUTING_REGISTRY_TTL_SECONDS")
+    @classmethod
+    def validate_registry_ttl(cls, v: float) -> float:
+        if v <= 0.0:
+            raise ValueError(f"ROUTING_REGISTRY_TTL_SECONDS must be positive; got {v}")
         return v
 
     @field_validator("CORS_ORIGINS", mode="before")

@@ -461,6 +461,7 @@ def test_validator_rejects_student_marks_turn_reversal():
     validation = CandidateValidator.validate(prompt, invalid_candidate, analysis)
     assert validation.is_valid is False
     assert validation.status == "fallback"
+    assert validation.reason is not None
     assert any(
         kw in validation.reason.lower()
         for kw in ["user data", "deliverable", "requesting"]
@@ -604,6 +605,7 @@ def test_phase_3_2_1_test_a_confirmed_failure_rejected():
 
     assert result.is_valid is False
     assert result.status == "fallback"
+    assert result.reason is not None
     assert "calculate average marks" in result.reason
     assert "identify highest-scoring student" in result.reason
     assert any("average marks" in c for c in result.missing_constraints)

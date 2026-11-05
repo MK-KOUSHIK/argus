@@ -3,6 +3,8 @@
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.routing import RoutingDecisionTelemetry
+
 
 OptimizationMode = Literal["balanced", "concise", "structure"]
 
@@ -153,6 +155,14 @@ class OptimizeRequest(BaseModel):
         default=None,
         description="Optional override to enable/disable registry storage of omitted original content",
     )
+    requested_model: Optional[str] = Field(
+        default=None,
+        description="Optional manual local model override (e.g. 'qwen2.5:1.5b' or 'qwen2.5:7b')",
+    )
+    enable_routing: Optional[bool] = Field(
+        default=None,
+        description="Optional override to enable/disable automatic model routing",
+    )
 
     @field_validator("prompt")
     @classmethod
@@ -253,6 +263,10 @@ class OptimizeResponse(BaseModel):
     compression: Optional[CompressionTelemetry] = Field(
         default=None,
         description="Content-aware compression telemetry and execution metadata",
+    )
+    routing: Optional[RoutingDecisionTelemetry] = Field(
+        default=None,
+        description="Model routing decision and hardware resource telemetry",
     )
     kv_runtime_policy: Optional[Dict[str, Any]] = Field(
         default=None,

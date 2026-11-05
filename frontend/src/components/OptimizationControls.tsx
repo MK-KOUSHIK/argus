@@ -2,8 +2,8 @@ import React from 'react';
 import { Card } from './Card';
 import { Button } from './Button';
 import { ILLUSTRATIVE_MODELS } from '@/services/mockOptimizer';
-import { OptimizationMode, TargetModel, OllamaStatus } from '@/types';
-import { Zap, Sliders, ShieldAlert, AlertCircle, CheckCircle } from 'lucide-react';
+import { OptimizationMode, TargetModel, OllamaStatus, ModelCatalogItem } from '@/types';
+import { Zap, Sliders, ShieldAlert, AlertCircle, CheckCircle, Route } from 'lucide-react';
 
 export interface OptimizationControlsProps {
   mode: OptimizationMode;
@@ -14,6 +14,11 @@ export interface OptimizationControlsProps {
   isLoading: boolean;
   disabled: boolean;
   ollamaStatus?: OllamaStatus | null;
+  enableRouting?: boolean;
+  onEnableRoutingChange?: (enabled: boolean) => void;
+  requestedModel?: string;
+  onRequestedModelChange?: (model: string) => void;
+  discoveredModels?: ModelCatalogItem[];
 }
 
 export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
@@ -25,6 +30,11 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
   isLoading,
   disabled,
   ollamaStatus,
+  enableRouting = true,
+  onEnableRoutingChange,
+  requestedModel = '',
+  onRequestedModelChange,
+  discoveredModels = [],
 }) => {
   const isOllamaReady = Boolean(ollamaStatus?.connected && ollamaStatus?.model_installed);
 
@@ -78,6 +88,59 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
           </div>
         </div>
       )}
+
+      {/* Phase 5: Local Optimizer Model Routing Bar */}
+      <div className="p-3.5 rounded-lg bg-[#080d19] border border-cyan-500/20 space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+            <Route className="w-3.5 h-3.5 text-cyan-400" />
+            Optimizer Model Routing (Phase 5)
+          </label>
+          {onEnableRoutingChange && (
+            <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-mono text-cyan-300">
+              <input
+                type="checkbox"
+                checked={enableRouting}
+                onChange={(e) => onEnableRoutingChange(e.target.checked)}
+                className="rounded border-white/20 bg-[#0c1424] text-cyan-500 focus:ring-0 focus:ring-offset-0"
+              />
+              <span>Auto-Route</span>
+            </label>
+          )}
+        </div>
+
+        {enableRouting ? (
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            Automatic router dynamically selects between fast compact (<code className="text-cyan-300">qwen2.5:1.5b</code>) and strong reasoning (<code className="text-cyan-300">qwen2.5:7b</code>) local models based on rule complexity and live GPU VRAM.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+              <span>Manual Local Model Override:</span>
+              <span>Installed: {discoveredModels.length || ollamaStatus?.available_models.length || 0}</span>
+            </div>
+            <select
+              value={requestedModel || (ollamaStatus?.model || 'qwen2.5:1.5b')}
+              onChange={(e) => onRequestedModelChange && onRequestedModelChange(e.target.value)}
+              className="w-full p-2 rounded-lg bg-[#0c1424] border border-white/10 text-slate-200 text-xs font-mono focus:outline-none focus:border-cyan-500/50"
+            >
+              {discoveredModels.length > 0 ? (
+                discoveredModels.map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.name} ({m.parameter_size || m.tier}) {m.is_loaded ? '• [resident in VRAM]' : ''}
+                  </option>
+                ))
+              ) : (
+                (ollamaStatus?.available_models || ['qwen2.5:1.5b']).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Mode Selector */}
@@ -141,7 +204,7 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
             </select>
 
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Select the intended destination model for token estimation and prompt structure tuning.
+              Target profile for illustrative token estimation. Downstream task execution routing is not yet implemented.
             </p>
           </div>
 

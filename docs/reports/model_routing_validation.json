@@ -1,0 +1,55 @@
+[
+  {
+    "scenario": "1_simple_task_small_model",
+    "prompt": "Summarize the key differences between synchronous and asynchronous I/O in three brief sentences.",
+    "selected_model": "qwen2.5:1.5b",
+    "executed_model": "qwen2.5:1.5b",
+    "target_tier": "small",
+    "complexity_score": 0.225,
+    "routing_status": "routed",
+    "prompt_eval_count": 535,
+    "eval_count": 18,
+    "latency_ms": 5500,
+    "done_reason": "stop",
+    "verified": true
+  },
+  {
+    "scenario": "2_complex_task_medium_model",
+    "prompt": "Write an asynchronous Python data ingestion service using httpx and asyncio. Do not use requests or aiohttp. Parse incoming JSON, extract entities matching keys ['user_id', 'transaction_value', 'timestamp'], validate non-negative values, handle transient network retries with exponential backoff, and save aggregated dictionary to metrics.json.",
+    "selected_model": "qwen2.5:7b",
+    "executed_model": "qwen2.5:7b",
+    "target_tier": "medium",
+    "complexity_score": 1.0,
+    "routing_status": "routed",
+    "prompt_eval_count": 637,
+    "eval_count": 67,
+    "latency_ms": 12433,
+    "done_reason": "stop",
+    "verified": true
+  },
+  {
+    "scenario": "3_resource_constrained_fallback",
+    "prompt": "Write an asynchronous Python data ingestion service using httpx and asyncio. Do not use requests or aiohttp. Parse incoming JSON, extract entities matching keys ['user_id', 'transaction_value', 'timestamp'], validate non-negative values, handle transient network retries with exponential backoff, and save aggregated dictionary to metrics.json.",
+    "selected_model": "qwen2.5:1.5b",
+    "executed_model": "qwen2.5:1.5b",
+    "target_tier": "small",
+    "routing_status": "fallback",
+    "is_fallback": true,
+    "prompt_eval_count": 639,
+    "eval_count": 63,
+    "latency_ms": 5837,
+    "verified": true
+  },
+  {
+    "scenario": "4_manual_override_7b",
+    "prompt": "List 3 tips for better sleep.",
+    "selected_model": "qwen2.5:7b",
+    "executed_model": "qwen2.5:7b",
+    "target_tier": "medium",
+    "routing_status": "manual_override",
+    "prompt_eval_count": 505,
+    "eval_count": 10,
+    "latency_ms": 9066,
+    "verified": true
+  }
+]

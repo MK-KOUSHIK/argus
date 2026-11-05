@@ -13,6 +13,7 @@ from .strategy_selector import StrategySelector
 from .prompt_rewriter import PromptRewriter
 from .candidate_validator import CandidateValidator, ValidationResult
 from .compression import CompressionOrchestrator, CompressionRegistry
+from .routing import LocalModelRegistry, ModelRouter, ModelRouterError, ModelNotInstalledError
 
 __all__ = [
     "HealthService",
@@ -29,4 +30,8 @@ __all__ = [
     "ValidationResult",
     "CompressionOrchestrator",
     "CompressionRegistry",
+    "LocalModelRegistry",
+    "ModelRouter",
+    "ModelRouterError",
+    "ModelNotInstalledError",
 ]

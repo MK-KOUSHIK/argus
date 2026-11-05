@@ -1,7 +1,9 @@
-"""Ollama Local LLM Service with Task-Aware Optimization Pipeline (Phase 3.1 & 4.1).
+"""Ollama Local LLM Service with Task-Aware Optimization Pipeline (Phase 3.1, 4.1 & 5).
 
-Coordinates Stages A through D:
+Coordinates Stages 0 through D with dynamic local model routing:
+- Stage 0: Content-aware compression (CompressionOrchestrator)
 - Stage A: Task analysis & constraint detection (TaskAnalyzer)
+- Stage Routing: Local model selection based on complexity & live hardware resources (ModelRouter)
 - Stage B: Strategy selection (StrategySelector) & Output Budget Control (OutputBudgetController)
 - Stage C: Targeted model rewriting (PromptRewriter) with adaptive context & output budgets
 - Stage D: Candidate validation & safe fallback (CandidateValidator)
@@ -35,6 +37,13 @@ from app.services.adaptive_context_manager import AdaptiveContextManager, Contex
 from app.services.output_budget_controller import OutputBudgetController, OutputBudgetAllocation
 from app.services.ollama_process_manager import OllamaProcessManager
 from app.services.hardware_telemetry import HardwareTelemetryProvider
+from app.services.routing.models import (
+    ComplexityTelemetry,
+    ResourceTelemetry,
+    RoutingDecisionTelemetry,
+)
+from app.services.routing.registry import LocalModelRegistry
+from app.services.routing.router import ModelRouter
 
 
 class OllamaServiceError(Exception):
@@ -196,6 +205,9 @@ class OllamaService:
                         f"Run 'ollama pull {settings.OLLAMA_MODEL}' to install."
                     )
 
+                # Prime model registry cache in background
+                asyncio.create_task(LocalModelRegistry.refresh(force=True))
+
                 return OllamaStatusResponse(
                     connected=True,
                     base_url=settings.OLLAMA_BASE_URL,
@@ -247,11 +259,13 @@ class OllamaService:
         system_instruction: str,
         prompt: str,
         output_budget: Optional[OutputBudgetAllocation] = None,
+        model: Optional[str] = None,
     ) -> Tuple[str, int, dict]:
         """Invoke Ollama with adaptive context budgeting, output budget control, and native telemetry."""
 
         url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
         formatted_prompt = f"Original prompt to optimize:\n\n{prompt}"
+        target_model = model or settings.OLLAMA_MODEL
 
         target_num_predict = (
             output_budget.allocated_budget
@@ -271,7 +285,7 @@ class OllamaService:
 
         selected_num_ctx = budget["selected_num_ctx"]
         payload = {
-            "model": settings.OLLAMA_MODEL,
+            "model": target_model,
             "system": system_instruction,
             "prompt": formatted_prompt,
             "stream": False,
@@ -336,7 +350,6 @@ class OllamaService:
         done_reason = data.get("done_reason")
 
         # Determine if budget limit was hit strictly from native done_reason
-        # Do not infer authoritative completion status from eval_count >= target_num_predict
         if done_reason == "length":
             hit_budget_limit = True
         elif done_reason == "stop":
@@ -351,6 +364,7 @@ class OllamaService:
         )
 
         telemetry = {
+            "model": target_model,
             "queue_wait_ms": slot_telemetry["queue_wait_ms"],
             "wall_time_ms": duration_ms,
             "estimated_input_tokens_for_budget": budget["estimated_input_tokens"],
@@ -411,6 +425,7 @@ class OllamaService:
                 )
             ),
             "telemetry_source_attribution": {
+                "model": "argus_model_router",
                 "prompt_eval_count": "ollama_native",
                 "prompt_eval_cached_count": "ollama_native",
                 "prompt_eval_duration": "ollama_native",
@@ -431,7 +446,7 @@ class OllamaService:
 
     @classmethod
     async def optimize_prompt(cls, request: OptimizeRequest) -> OptimizeResponse:
-        """Task-aware prompt optimization pipeline orchestrating Stages A through D."""
+        """Task-aware prompt optimization pipeline orchestrating Stages 0 through D with dynamic routing."""
         # --- STAGE 0: Independent Content-Aware Compression (Phase 4.2) ---
         compression_res = CompressionOrchestrator.compress(
             text=request.prompt,
@@ -442,6 +457,25 @@ class OllamaService:
 
         # --- STAGE A: Understand the Prompt ---
         analysis = TaskAnalyzer.analyze(working_prompt)
+
+        # --- STAGE ROUTING: Dynamic Local Model Selection (Phase 5) ---
+        if request.enable_routing is False:
+            routing_decision = await ModelRouter.route(
+                prompt=working_prompt,
+                mode=request.mode,
+                task_analysis=analysis,
+                requested_model=settings.OLLAMA_MODEL,
+                requested_output_budget=request.requested_output_budget,
+            )
+        else:
+            routing_decision = await ModelRouter.route(
+                prompt=working_prompt,
+                mode=request.mode,
+                task_analysis=analysis,
+                requested_model=request.requested_model,
+                requested_output_budget=request.requested_output_budget,
+            )
+        effective_model = routing_decision.selected_model
 
         # --- STAGE B: Select Strategy ---
         strategy = StrategySelector.select_strategy(analysis, request.mode)
@@ -487,6 +521,7 @@ class OllamaService:
                 system_instruction=system_instruction or "",
                 prompt=working_prompt,
                 output_budget=output_allocation,
+                model=effective_model,
             )
             inference_telemetry.append(call_telemetry)
             total_duration_ms += call_ms
@@ -504,7 +539,7 @@ class OllamaService:
                 validation_status = "passed"
                 is_preserved = (optimized_prompt == request.prompt)
             else:
-                # Controlled retry with targeted correction notice
+                # Controlled retry with targeted correction notice using the same effective model
                 retry_instruction = PromptRewriter.build_system_instruction(
                     analysis=analysis,
                     strategy=strategy,
@@ -517,6 +552,7 @@ class OllamaService:
                         system_instruction=retry_instruction,
                         prompt=working_prompt,
                         output_budget=output_allocation,
+                        model=effective_model,
                     )
                     inference_telemetry.append(retry_telemetry)
                     total_duration_ms += retry_ms
@@ -553,7 +589,6 @@ class OllamaService:
         opt_len = len(optimized_prompt)
 
         # Consistent convention: final_character_count - original_character_count
-        # Negative = shorter, Positive = longer, Zero = equal
         char_delta = opt_len - orig_len
 
         orig_tokens = original_metrics.estimated_tokens
@@ -590,7 +625,6 @@ class OllamaService:
         if outcome in {"fallback", "unchanged_original"}:
             applied_strategy = "preserve"
         elif strategy == "structure":
-            # Verify candidate actually contains markdown/structural elements
             has_structure = bool(
                 re.search(r"(?:^|\n)\s*(?:[-*•]|\d+[\.\)]|[A-Z][a-zA-Z\s]+:|\#+)\s+", optimized_prompt)
             )
@@ -649,6 +683,48 @@ class OllamaService:
             else None
         )
 
+        routing_telemetry = RoutingDecisionTelemetry(
+            selected_model=routing_decision.selected_model,
+            target_model_tier=routing_decision.target_model_tier.value,
+            routing_status=routing_decision.routing_status.value,
+            policy_applied=routing_decision.policy_applied,
+            reason=routing_decision.reason,
+            decision_confidence=routing_decision.decision_confidence,
+            complexity=ComplexityTelemetry(
+                heuristic_score=routing_decision.complexity_assessment.heuristic_score,
+                task_category=routing_decision.complexity_assessment.task_category,
+                task_confidence=routing_decision.complexity_assessment.task_confidence,
+                category_weight=routing_decision.complexity_assessment.category_weight,
+                explicit_constraints_count=routing_decision.complexity_assessment.explicit_constraints_count,
+                required_operations_count=routing_decision.complexity_assessment.required_operations_count,
+                input_tokens=routing_decision.complexity_assessment.input_tokens,
+                context_tier=routing_decision.complexity_assessment.context_tier,
+                output_budget=routing_decision.complexity_assessment.output_budget,
+                has_prohibitions=routing_decision.complexity_assessment.has_prohibitions,
+                has_code_or_data=routing_decision.complexity_assessment.has_code_or_data,
+                complexity_factors=routing_decision.complexity_assessment.complexity_factors,
+            ),
+            resources=ResourceTelemetry(
+                gpu_available=routing_decision.resource_assessment.gpu_available,
+                vram_total_mb=routing_decision.resource_assessment.vram_total_mb,
+                vram_free_mb=routing_decision.resource_assessment.vram_free_mb,
+                vram_used_mb=routing_decision.resource_assessment.vram_used_mb,
+                ram_total_mb=routing_decision.resource_assessment.ram_total_mb,
+                ram_free_mb=routing_decision.resource_assessment.ram_free_mb,
+                ram_used_mb=routing_decision.resource_assessment.ram_used_mb,
+                estimated_model_vram_mb=routing_decision.resource_assessment.estimated_model_vram_mb,
+                is_resource_sufficient=routing_decision.resource_assessment.is_resource_sufficient,
+                resource_pressure_reason=routing_decision.resource_assessment.resource_pressure_reason,
+                is_currently_loaded=routing_decision.resource_assessment.is_currently_loaded,
+                concurrency_in_flight=routing_decision.resource_assessment.concurrency_in_flight,
+                concurrency_capacity=routing_decision.resource_assessment.concurrency_capacity,
+            ),
+            routing_duration_ms=routing_decision.routing_duration_ms,
+            fallback_model=routing_decision.fallback_model,
+            is_fallback=routing_decision.is_fallback,
+            warning=routing_decision.warning,
+        )
+
         return OptimizeResponse(
             original_prompt=request.prompt,
             optimized_prompt=optimized_prompt,
@@ -673,7 +749,7 @@ class OllamaService:
             char_delta=char_delta,
             preserved_constraints=preserved_constraints,
             execution_time_ms=total_duration_ms,
-            model=settings.OLLAMA_MODEL,
+            model=effective_model,
             timestamp=datetime.now(timezone.utc).isoformat(),
             inference_telemetry=(
                 {
@@ -685,5 +761,6 @@ class OllamaService:
             ),
             output_budget=output_budget_telemetry,
             compression=compression_telemetry,
+            routing=routing_telemetry,
             kv_runtime_policy=OllamaProcessManager.get_runtime_policy(),
         )

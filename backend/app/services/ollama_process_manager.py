@@ -309,7 +309,7 @@ class OllamaProcessManager:
         manifest_stale = False
         manifest_pid = manifest.get("pid") if manifest else None
 
-        if manifest_pid:
+        if manifest_pid and manifest is not None:
             if manifest_pid == active_pid and is_ollama:
                 # Verify manifest start_time against process creation time
                 manifest_time_str = manifest.get("start_time")
@@ -350,7 +350,7 @@ class OllamaProcessManager:
         elif fa_confirmed and not kv_confirmed:
             status = "partially_confirmed_fa_only"
             note = f"Ollama process PID {active_pid}: Flash Attention confirmed in logs; {configured_kv.upper()} KV-cache not yet observed."
-        elif managed:
+        elif managed and manifest is not None:
             status = "launched_with_requested_settings"
             evidence = f"Manifest records launch with OLLAMA_KV_CACHE_TYPE={manifest.get('kv_cache_type')}"
             note = f"Ollama managed with PID {active_pid}. Runtime KV quantization will log on first model execution."
