@@ -125,6 +125,13 @@ class Settings(BaseSettings):
     CHARS_PER_TOKEN_HEURISTIC: float = 4.0
     MAX_VALIDATION_RETRY_ATTEMPTS: int = 1
 
+    # Agent History & Trajectory Reduction (Phase 6)
+    TRAJECTORY_REDUCTION_ENABLED: bool = True
+    TRAJECTORY_PRESERVE_RECENT_TURNS: int = 2
+    TRAJECTORY_MAX_TOOL_OUTPUT_CHARS: int = 400
+    TRAJECTORY_REDUCTION_PROFILE: str = "balanced"  # "conservative", "balanced", "aggressive"
+    TRAJECTORY_CONSERVATIVE_RETENTION: bool = True
+
     # Main LLM Provider Settings (Phase 4 - Google Gemini as Default)
     MAIN_LLM_PROVIDER: str = "gemini"
     GEMINI_API_KEY: Optional[str] = None
@@ -356,6 +363,43 @@ class Settings(BaseSettings):
         if parsed < 0:
             raise ValueError(f"{info.field_name} must be non-negative; got {parsed}")
         return parsed
+
+    @field_validator("TRAJECTORY_PRESERVE_RECENT_TURNS", mode="before")
+    @classmethod
+    def validate_trajectory_preserve_recent_turns(cls, v: Any) -> int:
+        if isinstance(v, bool):
+            raise ValueError("TRAJECTORY_PRESERVE_RECENT_TURNS must be an integer, not a boolean")
+        try:
+            val = int(v)
+        except (ValueError, TypeError):
+            raise ValueError(f"TRAJECTORY_PRESERVE_RECENT_TURNS must be an integer; got {v}")
+        if val < 1:
+            raise ValueError(f"TRAJECTORY_PRESERVE_RECENT_TURNS must be >= 1; got {val}")
+        return val
+
+    @field_validator("TRAJECTORY_MAX_TOOL_OUTPUT_CHARS", mode="before")
+    @classmethod
+    def validate_trajectory_max_tool_output_chars(cls, v: Any) -> int:
+        if isinstance(v, bool):
+            raise ValueError("TRAJECTORY_MAX_TOOL_OUTPUT_CHARS must be an integer, not a boolean")
+        try:
+            val = int(v)
+        except (ValueError, TypeError):
+            raise ValueError(f"TRAJECTORY_MAX_TOOL_OUTPUT_CHARS must be an integer; got {v}")
+        if val < 50:
+            raise ValueError(f"TRAJECTORY_MAX_TOOL_OUTPUT_CHARS must be >= 50; got {val}")
+        return val
+
+    @field_validator("TRAJECTORY_REDUCTION_PROFILE")
+    @classmethod
+    def validate_trajectory_reduction_profile(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        allowed = {"conservative", "balanced", "aggressive"}
+        if normalized not in allowed:
+            raise ValueError(
+                f"TRAJECTORY_REDUCTION_PROFILE must be one of {sorted(allowed)}; got '{v}'"
+            )
+        return normalized
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
