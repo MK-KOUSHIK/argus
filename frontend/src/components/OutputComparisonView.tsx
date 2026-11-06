@@ -77,10 +77,17 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-900 text-slate-300 border border-white/10 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              {trialsCount > 1 ? `${trialsCount} Paired Trials (Alternating)` : 'Completed (Warm-Up + Paired Run)'}
-            </span>
+            {comparison.warmup_attempted && !comparison.warmup_succeeded ? (
+              <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-amber-950/80 text-amber-300 border border-amber-500/30 flex items-center gap-1.5" title={comparison.warmup_error || 'Warm-up inference failed'}>
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                Cold-Start Warning (Warm-Up Failed)
+              </span>
+            ) : (
+              <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-900 text-slate-300 border border-white/10 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                {trialsCount > 1 ? `${trialsCount} Paired Trials (Alternating)` : 'Completed (Warm-Up + Paired Run)'}
+              </span>
+            )}
           </div>
         </div>
 

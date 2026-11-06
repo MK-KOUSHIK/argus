@@ -153,6 +153,9 @@ async def run_live_comparison_validation():
                 "mode": sc["mode"],
                 "trials": resp.trials,
                 "warmup": resp.warmup,
+                "warmup_attempted": resp.warmup_attempted,
+                "warmup_succeeded": resp.warmup_succeeded,
+                "warmup_error": resp.warmup_error,
                 "effective_settings": resp.effective_settings.model_dump() if resp.effective_settings else None,
                 "original_prompt": sc["prompt"],
                 "optimized_prompt": resp.optimized_execution.prompt,
@@ -284,7 +287,8 @@ async def run_live_comparison_validation():
 
             f.write(f"### {sc_data['scenario_name']}\n\n")
             f.write(f"**Description:** {sc_data['description']}\n\n")
-            f.write(f"**Optimization Mode:** `{sc_data['mode']}` | **Optimizer Strategy:** `{sc_data['optimizer_strategy']}`\n\n")
+            warmup_status_str = "Succeeded (Weights Resident)" if sc_data.get("warmup_succeeded") else f"Failed ({sc_data.get('warmup_error')})"
+            f.write(f"**Optimization Mode:** `{sc_data['mode']}` | **Optimizer Strategy:** `{sc_data['optimizer_strategy']}` | **Warm-Up:** `{warmup_status_str}`\n\n")
 
             eff = sc_data.get("effective_settings")
             if eff:

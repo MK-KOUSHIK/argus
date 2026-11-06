@@ -353,6 +353,9 @@ Executes two genuine downstream LLM inferences (Execution A on original prompt, 
   },
   "trials": 3,
   "warmup": true,
+  "warmup_attempted": true,
+  "warmup_succeeded": true,
+  "warmup_error": null,
   "timestamp": "2026-11-06T03:46:41Z"
 }
 ```

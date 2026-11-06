@@ -19,6 +19,9 @@ vi.mock('@/services/api', () => ({
 const mockComparisonResult: ComparisonResult = {
   downstreamModel: 'qwen2.5:1.5b',
   timestamp: '2026-11-06T00:00:00Z',
+  warmup_attempted: true,
+  warmup_succeeded: true,
+  warmup_error: null,
   originalExecution: {
     prompt: 'Summarize the history of Python in 2 short bullet points.',
     response: '• Created by Guido van Rossum in 1991.\n• Emphasizes code readability and simplicity.',
@@ -163,6 +166,19 @@ describe('OutputComparisonView Component', () => {
     // N/A should be displayed in the metrics grid
     const naElements = screen.getAllByText('N/A');
     expect(naElements.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('displays cold-start warning when warm-up fails', () => {
+    const warmupFailedResult: ComparisonResult = {
+      ...mockComparisonResult,
+      warmup_attempted: true,
+      warmup_succeeded: false,
+      warmup_error: 'Ollama warm-up connection timeout',
+    };
+
+    render(<OutputComparisonView comparison={warmupFailedResult} />);
+
+    expect(screen.getByText(/Cold-Start Warning \(Warm-Up Failed\)/i)).toBeInTheDocument();
   });
 });
 

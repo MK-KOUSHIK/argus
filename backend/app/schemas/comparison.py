@@ -281,6 +281,18 @@ class ComparisonResponse(BaseModel):
         default=True,
         description="Whether warm-up was performed prior to timing",
     )
+    warmup_attempted: bool = Field(
+        default=False,
+        description="Whether a model warm-up call was attempted prior to timing",
+    )
+    warmup_succeeded: bool = Field(
+        default=False,
+        description="Whether the model warm-up call completed successfully without errors",
+    )
+    warmup_error: Optional[str] = Field(
+        default=None,
+        description="Error details if the warm-up call failed",
+    )
     trial_measurements: Optional[List[Dict[str, Any]]] = Field(
         default=None,
         description="Combined paired trial telemetry across all trials",

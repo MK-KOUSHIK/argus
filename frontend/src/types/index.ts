@@ -447,6 +447,14 @@ export interface ComparisonResult {
   metrics: ComparisonMetrics;
   optimizerDetails: OptimizationResult;
   downstreamModel: string;
+  effective_settings?: EffectiveGenerationSettings | null;
+  trials?: number;
+  warmup?: boolean;
+  warmup_attempted?: boolean;
+  warmup_succeeded?: boolean;
+  warmup_error?: string | null;
+  trial_measurements?: TrialTelemetry[] | null;
+  aggregate_latency?: Record<string, AggregateLatency | null> | null;
   timestamp: string;
 }
 

@@ -73,12 +73,12 @@ class ComparisonService:
         eval_ns = telemetry.get("eval_duration")
         eval_ms = round(eval_ns / 1e6, 2) if isinstance(eval_ns, (int, float)) else None
 
+        # Required native measurements: both prompt_eval_duration and eval_duration must be available
         if prompt_eval_ms is not None and eval_ms is not None:
             inference_ms = round(prompt_eval_ms + eval_ms, 2)
-        elif eval_ms is not None:
-            inference_ms = eval_ms
         else:
-            inference_ms = wall_duration_ms
+            # Do NOT fall back to wall-clock duration. Set inference_duration_ms=None.
+            inference_ms = None
 
         queue_wait_ms = telemetry.get("queue_wait_ms", 0.0)
         p_tokens = telemetry.get("prompt_eval_count")
@@ -133,6 +133,9 @@ class ComparisonService:
         optimized: ComparisonExecutionTelemetry,
         num_trials: int = 1,
         generation_parameters_identical: bool = True,
+        warmup_succeeded: bool = True,
+        warmup_error: Optional[str] = None,
+        warmup_attempted: bool = True,
     ) -> ComparisonMetrics:
         """Calculate honest delta metrics between original and optimized downstream runs."""
         # 1. Prompt Tokens Reduction (Zero denominator must yield None, not 0.0)
@@ -187,7 +190,32 @@ class ComparisonService:
             latency_delta_ms = None
             latency_reduction_pct = None
 
-        if num_trials > 1:
+        if warmup_attempted and not warmup_succeeded:
+            cold_start_warning = (
+                f"Model warm-up failed ({warmup_error or 'execution error'}). "
+                "Latency measurements may include cold-start effects and initial model loading overhead."
+            )
+            if num_trials > 1:
+                latency_note = (
+                    f"{cold_start_warning} Evaluated across {num_trials} paired trials with alternating execution order."
+                )
+            else:
+                latency_note = (
+                    f"{cold_start_warning} A single pair does not prove statistically significant latency improvement, "
+                    "and measurements may be biased by cold start."
+                )
+        elif not warmup_attempted:
+            if num_trials > 1:
+                latency_note = (
+                    f"Model warm-up was disabled. Evaluated across {num_trials} paired trials with alternating "
+                    "execution order. Initial trials may include cold-start effects."
+                )
+            else:
+                latency_note = (
+                    "Single trial execution with model warm-up disabled. A single pair does not prove statistically "
+                    "significant latency improvement, and measurements may include cold-start effects."
+                )
+        elif num_trials > 1:
             latency_note = (
                 f"Evaluated across {num_trials} paired trials with alternating execution order and preliminary "
                 "model warm-up. Individual trial durations and aggregate statistics are reported."
@@ -239,7 +267,12 @@ class ComparisonService:
         optimized_prompt = opt_res.optimized_prompt
 
         # 3. Model Warm-Up: eliminate cold-start weight loading bias
+        warmup_attempted = False
+        warmup_succeeded = False
+        warmup_error: Optional[str] = None
+
         if request.warmup:
+            warmup_attempted = True
             try:
                 await OllamaService.execute_downstream_call(
                     prompt="warmup",
@@ -247,8 +280,10 @@ class ComparisonService:
                     num_predict=1,
                     num_ctx=2048,
                 )
-            except Exception:
-                pass  # Non-fatal; if connection fails, trial calls will raise proper error
+                warmup_succeeded = True
+            except Exception as exc:
+                warmup_succeeded = False
+                warmup_error = str(exc)
 
         # 4. Context Budgeting: compute budgets for both prompts and snap to a common num_ctx
         effective_predict = (
@@ -272,7 +307,6 @@ class ComparisonService:
         )
 
         common_num_ctx = max(budget_a["selected_num_ctx"], budget_b["selected_num_ctx"])
-        settings_identical = (budget_a["selected_num_ctx"] == budget_b["selected_num_ctx"])
 
         settings_a = EffectiveGenerationSettings(
             model=pinned_model,
@@ -291,6 +325,16 @@ class ComparisonService:
             top_p=effective_top_p,
             system_instruction=request.system_instruction,
             context_window_shared=True,
+        )
+
+        # Calculate equality from the effective settings passed to the actual Ollama calls
+        settings_identical = (
+            settings_a.model == settings_b.model
+            and settings_a.num_ctx == settings_b.num_ctx
+            and settings_a.num_predict == settings_b.num_predict
+            and settings_a.temperature == settings_b.temperature
+            and settings_a.top_p == settings_b.top_p
+            and settings_a.system_instruction == settings_b.system_instruction
         )
 
         # 5. Paired Trials with Alternating Execution Order
@@ -399,20 +443,28 @@ class ComparisonService:
             exec_b,
             num_trials=num_trials,
             generation_parameters_identical=settings_identical,
+            warmup_succeeded=warmup_succeeded,
+            warmup_error=warmup_error,
+            warmup_attempted=warmup_attempted,
         )
 
         combined_trials: List[Dict[str, Any]] = []
         for i in range(num_trials):
             ta = trials_a[i]
             tb = trials_b[i]
-            lat_a_ms = ta.latency.inference_duration_ms or 0.0
-            lat_b_ms = tb.latency.inference_duration_ms or 0.0
+            lat_a_ms = ta.latency.inference_duration_ms
+            lat_b_ms = tb.latency.inference_duration_ms
+            delta_ms = (
+                round(lat_b_ms - lat_a_ms, 2)
+                if (lat_a_ms is not None and lat_b_ms is not None)
+                else None
+            )
             combined_trials.append({
                 "trial_index": i + 1,
                 "execution_order": "A -> B" if i % 2 == 0 else "B -> A",
-                "original_duration_ms": ta.latency.inference_duration_ms,
-                "optimized_duration_ms": tb.latency.inference_duration_ms,
-                "latency_delta_ms": round(lat_b_ms - lat_a_ms, 2),
+                "original_duration_ms": lat_a_ms,
+                "optimized_duration_ms": lat_b_ms,
+                "latency_delta_ms": delta_ms,
                 "original_prompt_eval_ms": ta.latency.prompt_eval_duration_ms,
                 "optimized_prompt_eval_ms": tb.latency.prompt_eval_duration_ms,
             })
@@ -425,7 +477,10 @@ class ComparisonService:
             downstream_model=pinned_model,
             effective_settings=settings_a,
             trials=num_trials,
-            warmup=request.warmup,
+            warmup=warmup_succeeded,
+            warmup_attempted=warmup_attempted,
+            warmup_succeeded=warmup_succeeded,
+            warmup_error=warmup_error,
             trial_measurements=combined_trials,
             aggregate_latency={
                 "original": agg_a.model_dump() if agg_a else None,

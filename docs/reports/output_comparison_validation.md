@@ -1,6 +1,6 @@
 # Argus – End-to-End Output Comparison Live Validation Report
 
-- **Execution Date:** 2026-11-06T04:10:26.164172+00:00
+- **Execution Date:** 2026-11-06T04:25:46.079802+00:00
 - **Ollama Endpoint:** `http://127.0.0.1:11434`
 - **Pinned Downstream Model:** `qwen2.5:1.5b`
 - **Paired Alternating Trials:** 3 trials per scenario (with initial model warm-up)
@@ -24,7 +24,7 @@ For each scenario, the Argus prompt optimization pipeline was run first to obtai
 
 **Description:** Short prompt with a direct factual query and output formatting constraint.
 
-**Optimization Mode:** `concise` | **Optimizer Strategy:** `compress`
+**Optimization Mode:** `concise` | **Optimizer Strategy:** `compress` | **Warm-Up:** `Succeeded (Weights Resident)`
 
 **Effective Settings:** `num_ctx=4096`, `temperature=0.3`, `num_predict=300`, `top_p=0.9` | Identical Parameters: `True`
 
@@ -33,12 +33,12 @@ For each scenario, the Argus prompt optimization pipeline was run first to obtai
 | Metric | Execution A (Original) | Execution B (Optimized) | Delta / Savings |
 | :--- | :--- | :--- | :--- |
 | **Prompt Tokens** | 54 | 42 | **22.22% saved** (saved 12) |
-| **Output Tokens** | 25 | 26 | 1 tokens (4.0%) |
-| **Total Tokens** | 79 | 68 | saved 11 (13.92% saved) |
-| **Pure Inference Duration** | 207.98 ms | 200.14 ms | -7.84 ms (3.77% delta) |
-| **Prompt Eval Duration (`prompt_eval_duration_ms`)** | 60.37 ms | 13.6 ms | - |
-| **Model Load Duration** | 4480.93 ms | 4.2 ms | - |
-| **Queue Wait Duration** | 0.0 ms | 80.0 ms | - |
+| **Output Tokens** | 25 | 29 | 4 tokens (16.0%) |
+| **Total Tokens** | 79 | 71 | saved 8 (10.13% saved) |
+| **Pure Inference Duration** | 451.85 ms | 442.71 ms | -9.14 ms (2.02% delta) |
+| **Prompt Eval Duration (`prompt_eval_duration_ms`)** | 321.25 ms | 42.2 ms | - |
+| **Model Load Duration** | 14581.12 ms | 21.15 ms | - |
+| **Queue Wait Duration** | 0.0 ms | 264.0 ms | - |
 | **Completion Reason** | `stop` | `stop` | - |
 | **Semantic Quality** | - | - | `not_evaluated` |
 
@@ -49,9 +49,9 @@ For each scenario, the Argus prompt optimization pipeline was run first to obtai
 
 | Trial | Order | A Duration | B Duration | Latency Delta | A Prompt Eval | B Prompt Eval |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Trial 1 | `A -> B` | 245.43 ms | 194.34 ms | -51.09 ms | 60.37 ms | 13.6 ms |
-| Trial 2 | `B -> A` | 195.89 ms | 186.38 ms | -9.51 ms | 18.36 ms | 7.54 ms |
-| Trial 3 | `A -> B` | 182.63 ms | 219.71 ms | 37.08 ms | 7.63 ms | 13.89 ms |
+| Trial 1 | `A -> B` | 670.76 ms | 362.12 ms | -308.64 ms | 321.25 ms | 42.2 ms |
+| Trial 2 | `B -> A` | 404.68 ms | 452.43 ms | 47.75 ms | 43.56 ms | 67.35 ms |
+| Trial 3 | `A -> B` | 280.11 ms | 513.58 ms | 233.47 ms | 11.11 ms | 30.99 ms |
 
 #### Prompts Dispatched
 
@@ -74,7 +74,7 @@ The speed of light in vacuum is exactly 299,792,458 meters per second.
 
 **Response B (from Optimized Prompt):**
 ```
-The speed of light in a vacuum is approximately 299,792,458 meters per second.
+The speed of light in a vacuum is approximately \( 299,792,458 \) meters per second.
 ```
 
 #### Qualitative Sanity Inspection
@@ -91,7 +91,7 @@ The speed of light in a vacuum is approximately 299,792,458 meters per second.
 
 **Description:** Longer prompt with extensive academic background preamble and conversational filler.
 
-**Optimization Mode:** `balanced` | **Optimizer Strategy:** `compress`
+**Optimization Mode:** `balanced` | **Optimizer Strategy:** `preserve` | **Warm-Up:** `Succeeded (Weights Resident)`
 
 **Effective Settings:** `num_ctx=4096`, `temperature=0.3`, `num_predict=300`, `top_p=0.9` | Identical Parameters: `True`
 
@@ -99,14 +99,14 @@ The speed of light in a vacuum is approximately 299,792,458 meters per second.
 
 | Metric | Execution A (Original) | Execution B (Optimized) | Delta / Savings |
 | :--- | :--- | :--- | :--- |
-| **Prompt Tokens** | 112 | 80 | **28.57% saved** (saved 32) |
-| **Output Tokens** | 121 | 300 | 179 tokens (147.93%) |
-| **Total Tokens** | 233 | 380 | saved -147 (-63.09% saved) |
-| **Pure Inference Duration** | 939.31 ms | 2353.7 ms | 1414.39 ms (-150.58% delta) |
-| **Prompt Eval Duration (`prompt_eval_duration_ms`)** | 74.47 ms | 19.45 ms | - |
-| **Model Load Duration** | 4284.58 ms | 10.3 ms | - |
-| **Queue Wait Duration** | 0.0 ms | 111.0 ms | - |
-| **Completion Reason** | `stop` | `length` | - |
+| **Prompt Tokens** | 112 | 112 | **0.0% saved** (saved 0) |
+| **Output Tokens** | 136 | 91 | -45 tokens (-33.09%) |
+| **Total Tokens** | 248 | 203 | saved 45 (18.15% saved) |
+| **Pure Inference Duration** | 1027.51 ms | 919.94 ms | -107.57 ms (10.47% delta) |
+| **Prompt Eval Duration (`prompt_eval_duration_ms`)** | 136.55 ms | 10.6 ms | - |
+| **Model Load Duration** | 8666.06 ms | 12.61 ms | - |
+| **Queue Wait Duration** | 0.0 ms | 147.0 ms | - |
+| **Completion Reason** | `stop` | `stop` | - |
 | **Semantic Quality** | - | - | `not_evaluated` |
 
 > [!NOTE]
@@ -116,9 +116,9 @@ The speed of light in a vacuum is approximately 299,792,458 meters per second.
 
 | Trial | Order | A Duration | B Duration | Latency Delta | A Prompt Eval | B Prompt Eval |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Trial 1 | `A -> B` | 979.38 ms | 2281.44 ms | 1302.06 ms | 74.47 ms | 19.45 ms |
-| Trial 2 | `B -> A` | 1123.84 ms | 2445.85 ms | 1322.01 ms | 16.43 ms | 17.12 ms |
-| Trial 3 | `A -> B` | 714.71 ms | 2333.81 ms | 1619.1 ms | 7.76 ms | 22.9 ms |
+| Trial 1 | `A -> B` | 1341.14 ms | 789.78 ms | -551.36 ms | 136.55 ms | 10.6 ms |
+| Trial 2 | `B -> A` | 852.34 ms | 1175.62 ms | 323.28 ms | 10.78 ms | 8.46 ms |
+| Trial 3 | `A -> B` | 889.04 ms | 794.43 ms | -94.61 ms | 10.22 ms | 8.1 ms |
 
 #### Prompts Dispatched
 
@@ -129,47 +129,37 @@ I am currently conducting an academic literature review on distributed database 
 
 **Execution B (Optimized):**
 ```
-- Primary operational differences between Paxos and Raft:
-  - Paxos uses a more complex round-based protocol with multiple phases to achieve consensus.
-  - Raft simplifies the process with a leader-based model, making it easier to understand and implement.
+I am currently conducting an academic literature review on distributed database synchronization mechanisms and consensus protocols. As you may well know, in computer science and distributed computing, consensus is a fundamental problem where multiple nodes must agree on a single data value or state. Given all this background and context, could you please summarize the primary operational differences between the Paxos consensus algorithm and the Raft consensus algorithm in exactly two concise comparative bullet points?
 ```
 
 #### Generated Downstream LLM Responses
 
 **Response A (from Original Prompt):**
 ```
-Certainly! Here are the primary operational differences between the Paxos and Raft consensus algorithms, summarized in two concise bullet points:
+Certainly! Here are the primary operational differences between the Paxos and Raft consensus algorithms summarized in two concise bullet points:
 
 - **Paxos**:
-  - Uses a majority vote to decide on a single value.
-  - Requires a global coordinator to manage the consensus process.
+  - Uses a majority vote for agreement.
+  - Requires a higher number of nodes to reach a decision (typically 3 out of 5).
 
 - **Raft**:
-  - Decides on a single value through a majority vote.
-  - Does not require a global coordinator; nodes elect a leader to maintain the consensus process.
+  - Uses a leader election mechanism.
+  - Requires fewer nodes to reach a decision (typically 3 out of 5).
 
-These differences reflect the fundamental differences in how each algorithm handles the consensus problem and the role of the coordinator in the consensus process.
+These differences reflect the trade-offs between simplicity and robustness in the design of consensus algorithms. Paxos is more complex but guarantees higher reliability, while Raft is simpler but may be less robust in certain scenarios.
 ```
 
 **Response B (from Optimized Prompt):**
 ```
-Paxos and Raft are both algorithms used in distributed systems to achieve consensus, but they differ in several key ways:
+Certainly! Here are the primary operational differences between the Paxos and Raft consensus algorithms in two concise bullet points:
 
-1. **Consensus Algorithm Type**:
-   - **Paxos**: This algorithm is based on a majority voting mechanism. It involves multiple rounds of communication between nodes to reach a consensus on a decision.
-   - **Raft**: Raft is a leader-based consensus algorithm. It does not require multiple rounds of communication; instead, it relies on a single leader node to coordinate the consensus process.
+- **Paxos**:
+  - Uses a majority vote to decide on a single value.
+  - Requires a higher number of steps to reach a consensus.
 
-2. **Communication Model**:
-   - **Paxos**: Uses a round-based protocol with multiple phases to reach a consensus. This includes phases like "prepare," "accept," and "commit."
-   - **Raft**: Simplifies the process by eliminating the need for multiple rounds of communication. It uses a single phase where the leader node makes a decision and the followers update their state accordingly.
-
-3. **Leader Node**:
-   - **Paxos**: The algorithm relies on a leader node to make decisions. This leader node is responsible for coordinating the consensus process.
-   - **Raft**: Raft does not require a leader node. Instead, it elects a single node to act as the leader, and this leader node makes decisions on behalf of the followers.
-
-4. **Communication Complexity**:
-   - **Paxos**: The algorithm is more complex due to the need for multiple rounds of communication between nodes.
-   - **Raft
+- **Raft**:
+  - Uses a leader election mechanism to decide on a single value.
+  - Requires fewer steps to reach a consensus compared to Paxos.
 ```
 
 #### Qualitative Sanity Inspection
@@ -186,7 +176,7 @@ Paxos and Raft are both algorithms used in distributed systems to achieve consen
 
 **Description:** Programming prompt with multiple strict constraints, negative requirements, and output rules.
 
-**Optimization Mode:** `structure` | **Optimizer Strategy:** `preserve`
+**Optimization Mode:** `structure` | **Optimizer Strategy:** `structure` | **Warm-Up:** `Succeeded (Weights Resident)`
 
 **Effective Settings:** `num_ctx=4096`, `temperature=0.3`, `num_predict=300`, `top_p=0.9` | Identical Parameters: `True`
 
@@ -194,13 +184,13 @@ Paxos and Raft are both algorithms used in distributed systems to achieve consen
 
 | Metric | Execution A (Original) | Execution B (Optimized) | Delta / Savings |
 | :--- | :--- | :--- | :--- |
-| **Prompt Tokens** | 131 | 131 | **0.0% saved** (saved 0) |
-| **Output Tokens** | 189 | 161 | -28 tokens (-14.81%) |
-| **Total Tokens** | 320 | 292 | saved 28 (8.75% saved) |
-| **Pure Inference Duration** | 1070.69 ms | 956.88 ms | -113.81 ms (10.63% delta) |
-| **Prompt Eval Duration (`prompt_eval_duration_ms`)** | 67.84 ms | 12.57 ms | - |
-| **Model Load Duration** | 4591.99 ms | 7.39 ms | - |
-| **Queue Wait Duration** | 0.0 ms | 91.0 ms | - |
+| **Prompt Tokens** | 131 | 123 | **6.11% saved** (saved 8) |
+| **Output Tokens** | 129 | 201 | 72 tokens (55.81%) |
+| **Total Tokens** | 260 | 324 | saved -64 (-24.62% saved) |
+| **Pure Inference Duration** | 912.19 ms | 1181.97 ms | 269.78 ms (-29.57% delta) |
+| **Prompt Eval Duration (`prompt_eval_duration_ms`)** | 66.71 ms | 21.7 ms | - |
+| **Model Load Duration** | 4143.1 ms | 8.54 ms | - |
+| **Queue Wait Duration** | 0.0 ms | 82.0 ms | - |
 | **Completion Reason** | `stop` | `stop` | - |
 | **Semantic Quality** | - | - | `not_evaluated` |
 
@@ -211,9 +201,9 @@ Paxos and Raft are both algorithms used in distributed systems to achieve consen
 
 | Trial | Order | A Duration | B Duration | Latency Delta | A Prompt Eval | B Prompt Eval |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Trial 1 | `A -> B` | 1441.08 ms | 1182.15 ms | -258.93 ms | 67.84 ms | 12.57 ms |
-| Trial 2 | `B -> A` | 881.05 ms | 805.15 ms | -75.9 ms | 7.8 ms | 11.48 ms |
-| Trial 3 | `A -> B` | 889.95 ms | 883.33 ms | -6.62 ms | 8.16 ms | 8.13 ms |
+| Trial 1 | `A -> B` | 982.22 ms | 1449.92 ms | 467.7 ms | 66.71 ms | 21.7 ms |
+| Trial 2 | `B -> A` | 944.99 ms | 824.84 ms | -120.15 ms | 7.86 ms | 13.15 ms |
+| Trial 3 | `A -> B` | 809.35 ms | 1271.15 ms | 461.8 ms | 11.35 ms | 7.74 ms |
 
 #### Prompts Dispatched
 
@@ -224,7 +214,11 @@ Write a Python function named 'extract_valid_emails' that takes a list of string
 
 **Execution B (Optimized):**
 ```
-Write a Python function named 'extract_valid_emails' that takes a list of strings as input and returns only those strings that are valid email addresses. Constraints: 1) Do not use external third-party libraries, only the standard library 're' module. 2) The function must include type hints and a docstring. 3) Return an empty list if the input list is empty or contains no valid emails. 4) Output only the Python code block with no conversational introduction or concluding remarks.
+Write a Python function named `extract_valid_emails` that takes a list of strings as input and returns only those strings that are valid email addresses. Constraints:
+- Do not use external third-party libraries, only the standard library `re` module.
+- The function must include type hints and a docstring.
+- Return an empty list if the input list is empty or contains no valid emails.
+- Output only the Python code block with no conversational introduction or concluding remarks.
 ```
 
 #### Generated Downstream LLM Responses
@@ -246,16 +240,9 @@ def extract_valid_emails(emails: list) -> list:
     """
     valid_emails = []
     for email in emails:
-        # Regular expression pattern for validating an email address
-        pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
-        if re.match(pattern, email):
+        if re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
             valid_emails.append(email)
     return valid_emails
-
-# Example usage
-emails_list = ["test@example.com", "invalid-email", "another@example.co.uk", "noatsign.com"]
-valid_emails = extract_valid_emails(emails_list)
-print(valid_emails)  # Expected output: ['test@example.com', 'another@example.co.uk']
 ```
 ```
 
@@ -264,24 +251,25 @@ print(valid_emails)  # Expected output: ['test@example.com', 'another@example.co
 ```python
 import re
 
-def extract_valid_emails(email_list: list) -> list:
+def extract_valid_emails(emails: list) -> list:
     """
-    Extracts and returns only the valid email addresses from a given list of strings.
+    Extracts valid email addresses from a list of strings.
     
     Args:
-    email_list (list): A list of strings to be processed.
+    emails (list): A list of strings to be checked for validity.
     
     Returns:
-    list: A list of valid email addresses extracted from the input list.
+    list: A list of strings that are valid email addresses.
     """
-    # Regular expression pattern for validating an email
-    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    
-    # Filter the list to include only valid email addresses
-    valid_emails = [email for email in email_list if re.match(email_pattern, email)]
-    
+    valid_emails = []
+    for email in emails:
+        # Regular expression to match a valid email address
+        if re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            valid_emails.append(email)
     return valid_emails
 ```
+
+This Python function `extract_valid_emails` takes a list of strings (`emails`) as input and returns a list of strings that are valid email addresses. It uses a regular expression to check each email address in the input list and appends only those that match the pattern of a valid email address to the `valid_emails` list. The function returns this list at the end.
 ```
 
 #### Qualitative Sanity Inspection

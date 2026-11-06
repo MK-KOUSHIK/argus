@@ -487,3 +487,171 @@ def test_api_compare_connection_error_returns_503(test_client, mock_installed_mo
             assert resp.status_code == 503
             err_msg = resp.json().get("error", {}).get("message") or resp.json().get("detail", "")
             assert "cannot connect" in err_msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# Targeted Regression Tests: Warm-Up, Settings Equality & Telemetry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_warmup_status_tracking_success_and_failure(
+    mock_installed_model, mock_dummy_optimize_response
+):
+    """Verify warm-up status tracking: attempted, succeeded, error, and cold-start warning."""
+    # 1. Warm-up succeeds
+    async def fake_success(prompt, model, **kwargs):
+        return ("Output", 50.0, {"prompt_eval_duration": 10_000_000, "eval_duration": 40_000_000})
+
+    with patch.object(OllamaService, "execute_downstream_call", side_effect=fake_success):
+        with patch.object(OllamaService, "optimize_prompt", new_callable=AsyncMock) as mock_opt:
+            mock_opt.return_value = mock_dummy_optimize_response
+            req = ComparisonRequest(prompt="Test prompt", downstream_model="qwen2.5:1.5b", warmup=True, trials=1)
+            res_succ = await ComparisonService.compare(req)
+
+            assert res_succ.warmup_attempted is True
+            assert res_succ.warmup_succeeded is True
+            assert res_succ.warmup_error is None
+            assert res_succ.warmup is True
+            assert "cold-start" not in res_succ.metrics.latency_note.lower()
+
+    # 2. Warm-up fails (inference fails on warmup prompt, but succeeds on actual prompts)
+    call_idx = 0
+
+    async def fake_warmup_fails(prompt, model, **kwargs):
+        nonlocal call_idx
+        call_idx += 1
+        if prompt == "warmup":
+            raise OllamaResponseError("Warm-up execution timed out")
+        return ("Output", 60.0, {"prompt_eval_duration": 10_000_000, "eval_duration": 50_000_000})
+
+    with patch.object(OllamaService, "execute_downstream_call", side_effect=fake_warmup_fails):
+        with patch.object(OllamaService, "optimize_prompt", new_callable=AsyncMock) as mock_opt:
+            mock_opt.return_value = mock_dummy_optimize_response
+            req = ComparisonRequest(prompt="Test prompt", downstream_model="qwen2.5:1.5b", warmup=True, trials=1)
+            res_fail = await ComparisonService.compare(req)
+
+            # Warm-up was attempted, but failed
+            assert res_fail.warmup_attempted is True
+            assert res_fail.warmup_succeeded is False
+            assert res_fail.warmup is False  # Never report as successful unless actually completed
+            assert "Warm-up execution timed out" in (res_fail.warmup_error or "")
+            # Latency note explicitly warns about cold-start effects
+            assert "cold-start effects" in res_fail.metrics.latency_note.lower()
+
+    # 3. Warm-up not attempted (warmup=False)
+    with patch.object(OllamaService, "execute_downstream_call", side_effect=fake_success):
+        with patch.object(OllamaService, "optimize_prompt", new_callable=AsyncMock) as mock_opt:
+            mock_opt.return_value = mock_dummy_optimize_response
+            req_no_warmup = ComparisonRequest(prompt="Test", downstream_model="qwen2.5:1.5b", warmup=False, trials=1)
+            res_disabled = await ComparisonService.compare(req_no_warmup)
+
+            assert res_disabled.warmup_attempted is False
+            assert res_disabled.warmup_succeeded is False
+            assert res_disabled.warmup_error is None
+
+
+@pytest.mark.asyncio
+async def test_generation_settings_equality_with_differing_raw_budgets(
+    mock_installed_model, mock_dummy_optimize_response
+):
+    """Verify that settings_identical is True when independent context budgets differ but effective common_num_ctx is shared."""
+    from app.services.adaptive_context_manager import AdaptiveContextManager
+
+    budget_call_count = 0
+
+    def fake_calculate_budget(system_instruction, formatted_prompt, output_budget):
+        nonlocal budget_call_count
+        budget_call_count += 1
+        # First call (original): 4096 tier. Second call (optimized): 2048 tier.
+        if budget_call_count == 1:
+            return {"selected_num_ctx": 4096, "effective_tier": 4096, "required_tokens": 3000}
+        return {"selected_num_ctx": 2048, "effective_tier": 2048, "required_tokens": 1000}
+
+    actual_calls_ctx = []
+
+    async def fake_execute_downstream(prompt, model, num_ctx=None, **kwargs):
+        if prompt != "warmup":
+            actual_calls_ctx.append(num_ctx)
+        return ("Output", 80.0, {"prompt_eval_duration": 15_000_000, "eval_duration": 65_000_000})
+
+    with patch.object(AdaptiveContextManager, "calculate_budget", side_effect=fake_calculate_budget):
+        with patch.object(OllamaService, "execute_downstream_call", side_effect=fake_execute_downstream):
+            with patch.object(OllamaService, "optimize_prompt", new_callable=AsyncMock) as mock_opt:
+                mock_opt.return_value = mock_dummy_optimize_response
+
+                req = ComparisonRequest(
+                    prompt="Long original prompt...",
+                    downstream_model="qwen2.5:1.5b",
+                    warmup=False,
+                    trials=1,
+                )
+                res = await ComparisonService.compare(req)
+
+                # Both calls received common_num_ctx = max(4096, 2048) = 4096
+                assert actual_calls_ctx == [4096, 4096]
+                assert res.effective_settings is not None
+                assert res.effective_settings.num_ctx == 4096
+                assert res.original_execution.effective_settings.num_ctx == 4096
+                assert res.optimized_execution.effective_settings.num_ctx == 4096
+
+                # Because both executions received identical effective parameters, generation_parameters_identical is True!
+                assert res.metrics.generation_parameters_identical is True
+
+
+def test_build_trial_missing_inference_telemetry():
+    """Verify _build_trial() sets inference_duration_ms=None unless native measurements are available, while preserving wall_time_ms."""
+    wall_ms = 250.75
+
+    # Case 1: Missing prompt_eval_duration
+    t1 = ComparisonService._build_trial(
+        trial_idx=1,
+        order=1,
+        raw_response="resp",
+        wall_duration_ms=wall_ms,
+        telemetry={"eval_duration": 100_000_000},  # prompt_eval_duration missing
+    )
+    assert t1.latency.prompt_eval_duration_ms is None
+    assert t1.latency.eval_duration_ms == 100.0
+    assert t1.latency.inference_duration_ms is None  # Must NOT fall back to wall_ms
+    assert t1.latency.wall_time_ms == wall_ms
+
+    # Case 2: Missing eval_duration
+    t2 = ComparisonService._build_trial(
+        trial_idx=1,
+        order=1,
+        raw_response="resp",
+        wall_duration_ms=wall_ms,
+        telemetry={"prompt_eval_duration": 40_000_000},  # eval_duration missing
+    )
+    assert t2.latency.prompt_eval_duration_ms == 40.0
+    assert t2.latency.eval_duration_ms is None
+    assert t2.latency.inference_duration_ms is None  # Must NOT fall back to wall_ms
+    assert t2.latency.wall_time_ms == wall_ms
+
+    # Case 3: Missing both prompt_eval_duration and eval_duration
+    t3 = ComparisonService._build_trial(
+        trial_idx=1,
+        order=1,
+        raw_response="resp",
+        wall_duration_ms=wall_ms,
+        telemetry={},  # both missing
+    )
+    assert t3.latency.prompt_eval_duration_ms is None
+    assert t3.latency.eval_duration_ms is None
+    assert t3.latency.inference_duration_ms is None  # Must NOT fall back to wall_ms
+    assert t3.latency.wall_time_ms == wall_ms
+
+    # Case 4: Both present -> inference_duration_ms is calculated
+    t4 = ComparisonService._build_trial(
+        trial_idx=1,
+        order=1,
+        raw_response="resp",
+        wall_duration_ms=wall_ms,
+        telemetry={"prompt_eval_duration": 30_000_000, "eval_duration": 70_000_000},
+    )
+    assert t4.latency.prompt_eval_duration_ms == 30.0
+    assert t4.latency.eval_duration_ms == 70.0
+    assert t4.latency.inference_duration_ms == 100.0  # 30 + 70
+    assert t4.latency.wall_time_ms == wall_ms
+

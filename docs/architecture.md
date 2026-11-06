@@ -340,10 +340,11 @@ All execution data is sourced directly from native Ollama completion responses:
 
 ### 7.4 Latency Measurement & Paired Alternating Trials
 
-- **Warm-Up Ping**: Before timing begins, a warm-up inference (`prompt="warmup", num_predict=1`) ensures weights are resident in memory, eliminating cold-start bias.
+- **Warm-Up Ping & Status Tracking**: Before timing begins, a warm-up inference (`prompt="warmup", num_predict=1`) ensures weights are resident in memory, eliminating cold-start bias. Warm-up is never reported as successful unless the warm-up call actually completes. `warmup_attempted`, `warmup_succeeded`, and `warmup_error` are tracked and returned in the comparison response. If warm-up fails, the failure is reported and latency diagnostics explicitly warn that measurements may include cold-start overhead.
+- **Generation Settings Equality**: Equality of generation conditions (`generation_parameters_identical`) is calculated directly from the effective settings applied to the downstream Ollama calls (`num_ctx`, `temperature`, `num_predict`, `top_p`, `system_instruction`). When independent context demands differ, both executions snap to the shared `common_num_ctx = max(budget_a, budget_b)`, guaranteeing parameter parity.
 - **Alternating Execution Order**: Paired trials alternate execution order (`[A, B], [B, A]`) to neutralize KV-cache and execution sequence biases.
 - **No Single-Pair Proof Claims**: Single-pair runs are explicitly documented as illustrative individual measurements. When multi-trial benchmarks run (`trials > 1`), individual trial telemetry and aggregate statistics (`mean`, `median`, `min`, `max`, `std_dev`) are computed and returned.
-- **Duration Separation**: Model load duration, prompt evaluation duration, token generation duration, and queue wait duration are tracked separately. Pure inference duration excludes cold-start model load time.
+- **Duration Separation & Missing Telemetry Safeguard**: Model load duration, prompt evaluation duration, token generation duration, and queue wait duration are tracked separately. `inference_duration_ms` is set to `None` unless the required native measurements (`prompt_eval_duration` and `eval_duration`) are present, never falling back to wall-clock time. `wall_time_ms` is preserved separately.
 
 ### 7.4 Zero-Fabrication Guarantees
 
