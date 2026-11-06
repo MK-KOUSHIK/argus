@@ -1,11 +1,14 @@
 """API route handlers for agent execution trajectory reduction (Phase 6)."""
 
+import logging
 from fastapi import APIRouter, HTTPException, status
 from app.schemas.trajectory import (
     ReduceTrajectoryRequest,
     ReduceTrajectoryResponse,
 )
 from app.services.trajectory_reduction_service import TrajectoryReductionService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/trajectory", tags=["Agent History Reduction"])
 
@@ -26,8 +29,8 @@ async def reduce_trajectory(request: ReduceTrajectoryRequest) -> ReduceTrajector
     try:
         return TrajectoryReductionService.reduce_trajectory(request)
     except Exception as exc:
-        # Catastrophic fallback if unexpected exception escapes service layer
+        logger.exception("Failed to process trajectory reduction: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process trajectory reduction: {str(exc)}",
+            detail="Failed to process trajectory reduction.",
         ) from exc

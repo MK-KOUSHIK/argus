@@ -135,18 +135,25 @@ def validate_trajectory_integrity(messages: List[TrajectoryMessage]) -> None:
     resolved_call_ids: set[str] = set()
 
     for idx, msg in enumerate(messages):
-        if msg.role == "assistant" and msg.tool_calls:
-            # If there were already pending tool calls that weren't resolved, that's an unfulfilled sequence
+        if msg.role == "assistant":
+            # If there were already pending tool calls that weren't resolved, assistant cannot speak or issue new tool calls
             if pending_call_ids:
-                raise TrajectoryValidationError(
-                    f"Message at index {idx} issued new tool calls while previous tool call(s) "
-                    f"{sorted(pending_call_ids)} remain unfulfilled."
-                )
-            for tc in msg.tool_calls:
-                if tc.id in declared_calls:
-                    raise TrajectoryValidationError(f"Duplicate tool_call id '{tc.id}' detected at index {idx}.")
-                declared_calls[tc.id] = tc
-                pending_call_ids.add(tc.id)
+                if msg.tool_calls:
+                    raise TrajectoryValidationError(
+                        f"Message at index {idx} issued new tool calls while previous tool call(s) "
+                        f"{sorted(pending_call_ids)} remain unfulfilled."
+                    )
+                else:
+                    raise TrajectoryValidationError(
+                        f"Assistant message at index {idx} issued an ordinary response while previous tool call(s) "
+                        f"{sorted(pending_call_ids)} remain unfulfilled."
+                    )
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    if tc.id in declared_calls:
+                        raise TrajectoryValidationError(f"Duplicate tool_call id '{tc.id}' detected at index {idx}.")
+                    declared_calls[tc.id] = tc
+                    pending_call_ids.add(tc.id)
 
         elif msg.role == "tool":
             if not msg.tool_call_id:

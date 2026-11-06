@@ -218,6 +218,78 @@ def test_duplicate_tool_resolution_raises_error():
     assert "Duplicate resolution for tool_call_id" in str(exc_info.value)
 
 
+def test_assistant_response_before_pending_tool_results_raises_error():
+    """An assistant message cannot issue an ordinary response while earlier tool calls remain unresolved."""
+    invalid_trajectory = [
+        TrajectoryMessage(role="system", content="System instruction"),
+        TrajectoryMessage(role="user", content="Execute function"),
+        TrajectoryMessage(
+            role="assistant",
+            content="Invoking tool now",
+            tool_calls=[
+                ToolCall(
+                    id="call_pending_1",
+                    type="function",
+                    function=ToolCallFunction(name="fetch_data", arguments={"id": 1}),
+                )
+            ],
+        ),
+        TrajectoryMessage(
+            role="assistant",
+            content="I am responding before the tool returned its result.",
+        ),
+    ]
+    with pytest.raises(TrajectoryValidationError) as exc_info:
+        validate_trajectory_integrity(invalid_trajectory)
+    assert "issued an ordinary response while previous tool call(s)" in str(exc_info.value)
+    assert "call_pending_1" in str(exc_info.value)
+
+
+def test_multiple_simultaneous_tool_calls_and_results_valid():
+    """An assistant issuing multiple tool calls simultaneously, followed by matching results, is valid."""
+    valid_trajectory = [
+        TrajectoryMessage(role="system", content="System instruction"),
+        TrajectoryMessage(role="user", content="Fetch profile and orders"),
+        TrajectoryMessage(
+            role="assistant",
+            content="Fetching both simultaneously",
+            tool_calls=[
+                ToolCall(
+                    id="call_profile",
+                    type="function",
+                    function=ToolCallFunction(name="get_profile", arguments={"user_id": 10}),
+                ),
+                ToolCall(
+                    id="call_orders",
+                    type="function",
+                    function=ToolCallFunction(name="get_orders", arguments={"user_id": 10}),
+                ),
+            ],
+        ),
+        TrajectoryMessage(
+            role="tool",
+            tool_call_id="call_profile",
+            name="get_profile",
+            content='{"name": "Alice"}',
+        ),
+        TrajectoryMessage(
+            role="tool",
+            tool_call_id="call_orders",
+            name="get_orders",
+            content='[{"order_id": 101, "total": 99.50}]',
+        ),
+        TrajectoryMessage(
+            role="assistant",
+            content="Alice has 1 order totaling $99.50.",
+        ),
+    ]
+    validate_trajectory_integrity(valid_trajectory)
+    req = ReduceTrajectoryRequest(messages=valid_trajectory)
+    res = TrajectoryReductionService.reduce_trajectory(req)
+    assert res.fallback_used is False
+    assert len(res.reduced_messages) == len(valid_trajectory)
+
+
 def test_empty_trajectory_raises_error():
     """An empty trajectory list must raise TrajectoryValidationError."""
     with pytest.raises(TrajectoryValidationError) as exc_info:
@@ -679,6 +751,27 @@ def test_api_reduce_trajectory_orphaned_tool_graceful_fallback(app_client: TestC
     assert len(data["reduced_messages"]) == 4
 
 
+def test_api_generic_error_response_no_leakage(app_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    """API endpoint returns a generic 500 message without leaking internal exceptions or secrets."""
+    def _exploding_reduce(_request):
+        raise RuntimeError("CRITICAL_INTERNAL_DB_SECRET_XYZ: connection failed at /var/secret/credentials.key")
+
+    monkeypatch.setattr(TrajectoryReductionService, "reduce_trajectory", _exploding_reduce)
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "Execute operation"},
+        ]
+    }
+    resp = app_client.post("/api/trajectory/reduce", json=payload)
+    assert resp.status_code == 500
+    data = resp.json()
+    assert data["error"]["message"] == "Failed to process trajectory reduction."
+    assert "CRITICAL_INTERNAL_DB_SECRET_XYZ" not in resp.text
+    assert "credentials.key" not in resp.text
+
+
 def test_existing_optimizer_endpoint_regression(app_client: TestClient):
     """Verify that adding trajectory reduction does not break existing /api/optimize endpoint."""
     # Test with empty prompt to verify standard 422 validation behavior on existing endpoint
@@ -962,3 +1055,94 @@ def test_empty_and_single_turn_boundaries():
     assert res.telemetry.messages_pruned_count == 0
     assert res.telemetry.estimated_token_savings == 0
     assert all(d.action == "retained" for d in res.telemetry.decisions)
+
+
+def test_trajectory_ending_with_tool_result():
+    """A trajectory ending with a tool result must preserve the active user task and trailing tool event."""
+    trajectory = [
+        TrajectoryMessage(role="system", content="System instruction"),
+        TrajectoryMessage(role="user", content="Can we explore various possibilities and brainstorm?"),
+        TrajectoryMessage(role="assistant", content="Sure, here are some preliminary thoughts."),
+        TrajectoryMessage(role="user", content="Second user greeting"),
+        TrajectoryMessage(role="assistant", content="Hello again!"),
+        TrajectoryMessage(role="user", content="Calculate discount for active orders."),
+        TrajectoryMessage(
+            role="assistant",
+            content="Querying orders",
+            tool_calls=[
+                ToolCall(
+                    id="call_orders_latest",
+                    type="function",
+                    function=ToolCallFunction(name="fetch_orders", arguments={}),
+                )
+            ],
+        ),
+        TrajectoryMessage(
+            role="tool",
+            tool_call_id="call_orders_latest",
+            name="fetch_orders",
+            content='[{"id": 1, "amount": 100}]',
+        ),
+    ]
+    validate_trajectory_integrity(trajectory)
+    req = ReduceTrajectoryRequest(messages=trajectory, preserve_recent_turns=1)
+    res = TrajectoryReductionService.reduce_trajectory(req)
+
+    assert res.fallback_used is False
+    decisions = {d.message_index: d for d in res.telemetry.decisions}
+
+    # Active user task at index 5 is preserved as anchor
+    assert decisions[5].action == "retained"
+    assert decisions[5].action_detail == "preserved_anchor"
+    assert "Active user prompt must be preserved" in decisions[5].reason
+
+    # Trailing assistant and tool events must be preserved
+    assert decisions[6].action == "retained"
+    assert decisions[6].action_detail == "preserved_trailing_event"
+    assert decisions[7].action == "retained"
+    assert decisions[7].action_detail == "preserved_trailing_event"
+
+    # End of reduced trajectory must be the tool result
+    assert res.reduced_messages[-1].role == "tool"
+    assert res.reduced_messages[-1].tool_call_id == "call_orders_latest"
+
+
+def test_latest_user_task_preservation_when_conservative_retention_disabled(monkeypatch: pytest.MonkeyPatch):
+    """Latest user request must be preserved as anchor even when conservative retention is disabled."""
+    monkeypatch.setattr(settings, "TRAJECTORY_CONSERVATIVE_RETENTION", False)
+    trajectory = [
+        TrajectoryMessage(role="system", content="System instruction"),
+        TrajectoryMessage(role="user", content="Can we explore various possibilities and brainstorm?"),
+        TrajectoryMessage(role="assistant", content="Sure, here are some preliminary thoughts."),
+        TrajectoryMessage(role="user", content="Second turn without explicit constraints"),
+        TrajectoryMessage(role="assistant", content="Acknowledged, let me know when ready."),
+        TrajectoryMessage(role="user", content="Now please implement the final sorting function."),
+        TrajectoryMessage(
+            role="assistant",
+            content="Here is the implementation of the sorting function.",
+        ),
+    ]
+    req = ReduceTrajectoryRequest(messages=trajectory, preserve_recent_turns=1)
+    res = TrajectoryReductionService.reduce_trajectory(req)
+
+    assert res.fallback_used is False
+    decisions = {d.message_index: d for d in res.telemetry.decisions}
+
+    # Historical unconstrained user message at index 1 is pruned
+    assert decisions[1].action == "removed"
+    assert decisions[1].action_detail == "pruned_redundant_turn"
+    assert "conservative retention disabled" in decisions[1].reason
+
+    # Active user task at index 5 MUST be preserved as anchor
+    assert decisions[5].action == "retained"
+    assert decisions[5].action_detail == "preserved_anchor"
+
+    # Trailing assistant response at index 6 is preserved
+    assert decisions[6].action == "retained"
+    assert decisions[6].action_detail == "preserved_trailing_event"
+
+    # Verify reduced trajectory contains active task and trailing assistant response
+    roles = [m.role for m in res.reduced_messages]
+    assert "system" in roles
+    assert res.reduced_messages[-2].content == "Now please implement the final sorting function."
+    assert res.reduced_messages[-1].content == "Here is the implementation of the sorting function."

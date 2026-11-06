@@ -429,23 +429,35 @@ class TrajectoryReductionService:
             while system_end_idx < total_count and original_messages[system_end_idx].role == "system":
                 system_end_idx += 1
 
-            active_task_idx = total_count - 1
+            # Identify the active user task: the latest user message in the trajectory
+            user_msg_indices = [
+                i for i in range(system_end_idx, total_count)
+                if original_messages[i].role == "user"
+            ]
+            if user_msg_indices:
+                active_task_idx = user_msg_indices[-1]
+            else:
+                # If there are no user messages, anchor to the final message
+                active_task_idx = total_count - 1
+
             active_task_msg = original_messages[active_task_idx]
 
             # Detect if active task or recent turns have numerical/aggregation intent
             active_has_numerical_intent = cls.has_numerical_or_aggregation_intent(active_task_msg.content or "")
 
             # Count user turns prior to active task to establish recent turn window
-            user_indices = [
+            prior_user_indices = [
                 i for i in range(system_end_idx, active_task_idx)
                 if original_messages[i].role == "user"
             ]
-            if user_indices:
-                cutoff_count = min(len(user_indices), preserve_recent_turns)
-                recent_turns_threshold = user_indices[-cutoff_count]
-            else:
+            if prior_user_indices and preserve_recent_turns > 0:
+                cutoff_count = min(len(prior_user_indices), preserve_recent_turns)
+                recent_turns_threshold = prior_user_indices[-cutoff_count]
+            elif preserve_recent_turns > 0:
                 recent_turns_span = max(1, preserve_recent_turns * 2)
                 recent_turns_threshold = max(system_end_idx, active_task_idx - recent_turns_span)
+            else:
+                recent_turns_threshold = active_task_idx
 
             # Check if any recent turn or active task requires numerical evidence
             trajectory_requires_numerical_evidence = active_has_numerical_intent or any(
@@ -569,6 +581,23 @@ class TrajectoryReductionService:
                     )
                     continue
 
+                # Rule B2: Dependent Trailing Events (events after active user request)
+                if idx > active_task_idx:
+                    reduced.append(msg)
+                    decisions.append(
+                        ReductionDecision(
+                            message_index=idx,
+                            role=msg.role,
+                            action="retained",
+                            action_detail="preserved_trailing_event",
+                            reason="Preserved trailing event dependent on the active user request",
+                            original_char_count=orig_c,
+                            reduced_char_count=orig_c,
+                            dependency_info=dep_info,
+                        )
+                    )
+                    continue
+
                 # Rule C: Pruned Superseded Error Cycles or Exploratory Chatter
                 if idx in pruned_message_indices:
                     superseded_errors_pruned += 1
@@ -683,6 +712,26 @@ class TrajectoryReductionService:
                             )
                         )
                         continue
+
+                    # If phatic or conservative retention is disabled, prune the unconstrained historical user statement
+                    pruned_reason = (
+                        "Pruned historical conversational phatic acknowledgement"
+                        if cls.is_phatic_acknowledgement(msg_content)
+                        else "Pruned unconstrained historical user statement (conservative retention disabled)"
+                    )
+                    decisions.append(
+                        ReductionDecision(
+                            message_index=idx,
+                            role=msg.role,
+                            action="removed",
+                            action_detail="pruned_redundant_turn",
+                            reason=pruned_reason,
+                            original_char_count=orig_c,
+                            reduced_char_count=0,
+                            dependency_info=dep_info,
+                        )
+                    )
+                    continue
 
                 # Rule G: Historical Tool Message Compaction (with Evidence Preservation)
                 if msg.role == "tool":

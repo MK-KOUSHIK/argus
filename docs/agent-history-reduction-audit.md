@@ -301,7 +301,31 @@ Evaluated against local Ollama daemon (`qwen2.5:1.5b`) across 10 paired alternat
 - **Overall:** 6 criterion-level regressions and 13 improvements across 120 total evaluations. Sub-millisecond reduction overhead on normal trajectories; sub-5ms on deep 50-turn trajectories.
 
 ### 8.4 Test Isolation & Integrity
-- **Default Offline Suite:** `pytest backend/tests` runs 272 tests offline without daemon connection.
+- **Default Offline Suite:** `pytest backend/tests` runs 272+ tests offline without daemon connection.
 - **Live Integration Suite:** `pytest -m ollama_integration backend/tests` tests live execution against Ollama and skips cleanly if unreachable.
 - **Static Analysis:** `pyright` passes with 0 errors, 0 warnings.
 - **Frontend Suite:** 27 unit tests pass; production build completes cleanly.
+
+### 8.5 Standalone API Status & Pipeline Independence
+> [!IMPORTANT]
+> `/api/trajectory/reduce` is currently a dedicated **standalone trajectory API** and is **not** automatically integrated into the existing single-prompt optimization pipeline (`/api/optimize` or `CompressionOrchestrator`).
+>
+> - **Purpose:** Designed specifically for multi-turn agent execution loops (e.g., custom tool-use agents, LangChain/AutoGen agent orchestrators) that manage sequences of observable `system`, `user`, `assistant`, and `tool` messages.
+> - **Independence:** The single-prompt optimization pipeline operates on unstructured prompt strings performing AST minification, JSON compaction, and log folding. `/api/trajectory/reduce` operates on structured message trajectories. They remain decoupled subsystems to prevent conflating single-prompt token limits with multi-turn conversation and tool state lifecycles.
+
+### 8.6 Reconciliation of Benchmark Reporting & Token Metrics
+Benchmark reporting across Phase 6 documentation and telemetry records two distinct measurement sets that must not be conflated:
+
+1. **Native Ollama Telemetry (`prompt_eval_count`):**
+   - **Source:** Directly queried from local Ollama runtime responses (`/api/chat`) using Qwen2.5's native BPE tokenizer.
+   - **Measured Performance (10 Paired Alternating Trials):**
+     - *Coding Fixture:* Reduced from **394** to **273** native tokens (**-30.71% token savings**).
+     - *SQL Exploration Fixture:* Preserved at **570** native tokens (**0.0% reduction**; all 5 database rows and query filters intentionally safeguarded to guarantee 100% calculation accuracy on `$5,552.10`).
+     - *Research Fixture:* Reduced from **506** to **398** native tokens (**-21.34% token savings**).
+   - **Usage:** Used exclusively in `agent_history_reduction_validation.json` and `agent_history_reduction_validation.md` for ground-truth LLM inference benchmarks and prefill latency evaluations.
+
+2. **Heuristic Character-Based Token Estimates (`len(text) // 4`):**
+   - **Source:** Calculated via conservative integer division (`orig_chars // 4`) within `TrajectoryReductionService` and `AdaptiveContextManager`.
+   - **Purpose:** Enables sub-millisecond context budgeting, tier snapping ($2048, 4096, 6144, 8192$), and telemetry generation without incurring the latency overhead of spawning local tokenizers on every intermediate turn.
+   - **Labeling:** Explicitly tracked and serialized in API responses as `token_estimation_source="estimated_conservative_heuristic"`.
+   - **Baseline Fixture Raw Text Estimates:** Early exploratory baseline runs reported higher token counts (e.g., 1,809 to 1,149 tokens) because raw unparsed fixture structures (including Python code strings and raw DB dumps) were measured before chat serialization into Ollama's native prompt template. Native token counts reflect the exact tokens ingested by the model's prefill engine.

@@ -9,6 +9,10 @@
 
 > [!NOTE]
 > **Latency & Scheduling Disclaimer:** Token savings do not guarantee latency reduction on small models due to GPU/CPU scheduling noise, CUDA driver context switches, and kernel launch overheads. Native duration metrics are reported with mean, median, and standard deviation across 10 paired trials to provide rigorous statistical transparency.
+>
+> **Token Metric Distinction:** Metrics in this report reflect **native Ollama token counts** (`prompt_eval_count` from Ollama `/api/chat`), which accurately capture the BPE tokenization applied by the model. These differ from heuristic character-based estimates (`len(text) // 4`, labeled as `token_estimation_source="estimated_conservative_heuristic"`) used inside the API for zero-latency context budgeting and tier snapping.
+>
+> **Standalone Subsystem Architecture:** The `/api/trajectory/reduce` endpoint is currently a dedicated standalone API for agent execution trajectories and is **not** automatically integrated into the existing single-prompt optimization pipeline (`/api/optimize` or `CompressionOrchestrator`).
 
 ## 1. Executive Summary & Verification Highlights
 
