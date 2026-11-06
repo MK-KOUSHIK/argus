@@ -258,7 +258,7 @@ sequenceDiagram
     participant OptSvc as OllamaService (Optimizer)
     participant Ollama as Ollama Daemon (/api/generate)
 
-    User->>API: POST /api/compare {prompt, downstream_model, mode, ...}
+    User->>API: POST /api/compare {prompt, downstream_model, mode, trials, ...}
     API->>CompSvc: compare(request)
     CompSvc->>Reg: get_model(downstream_model)
     alt Model not installed
@@ -268,39 +268,56 @@ sequenceDiagram
     end
     Reg-->>CompSvc: DiscoveredModel (pinned_model)
 
-    rect rgb(10, 20, 35)
-        Note over CompSvc,Ollama: Execution A (Original Prompt)
-        CompSvc->>Ollama: POST /api/generate {model: pinned_model, prompt: original_prompt}
-        Ollama-->>CompSvc: raw_response_a + native telemetry (prompt_eval_count, eval_count, durations)
-    end
-
     rect rgb(15, 30, 45)
-        Note over CompSvc,OptSvc: Argus Prompt Optimization Pipeline
+        Note over CompSvc,OptSvc: Step 1: Argus Prompt Optimization Pipeline
         CompSvc->>OptSvc: optimize_prompt(OptimizeRequest(...))
         OptSvc-->>CompSvc: OptimizeResponse (optimized_prompt, strategy, metrics)
     end
 
-    rect rgb(10, 20, 35)
-        Note over CompSvc,Ollama: Execution B (Optimized Prompt)
-        CompSvc->>Ollama: POST /api/generate {model: pinned_model, prompt: optimized_prompt}
-        Ollama-->>CompSvc: raw_response_b + native telemetry (prompt_eval_count, eval_count, durations)
+    rect rgb(10, 25, 40)
+        Note over CompSvc,Ollama: Step 2: Downstream Model Warm-Up (Eliminates Cold Start Bias)
+        CompSvc->>Ollama: POST /api/generate {model: pinned_model, prompt: "warmup", num_predict: 1}
+        Ollama-->>CompSvc: Warm-up completed (weights resident in VRAM/RAM)
     end
 
-    CompSvc->>CompSvc: calculate_metrics(exec_a, exec_b)
+    rect rgb(20, 20, 35)
+        Note over CompSvc: Step 3: Shared Context Window Alignment
+        CompSvc->>CompSvc: common_num_ctx = max(budget_a["selected_num_ctx"], budget_b["selected_num_ctx"])
+    end
+
+    rect rgb(10, 20, 35)
+        Note over CompSvc,Ollama: Step 4: Paired Inference Trials with Alternating Order ([A, B], [B, A], ...)
+        loop For each trial i in 1..trials
+            alt Even Trial (i % 2 == 0): Execute A then B
+                CompSvc->>Ollama: Execution A (Original Prompt, num_ctx: common_num_ctx)
+                Ollama-->>CompSvc: raw_response_a + native telemetry
+                CompSvc->>Ollama: Execution B (Optimized Prompt, num_ctx: common_num_ctx)
+                Ollama-->>CompSvc: raw_response_b + native telemetry
+            else Odd Trial (i % 2 == 1): Execute B then A
+                CompSvc->>Ollama: Execution B (Optimized Prompt, num_ctx: common_num_ctx)
+                Ollama-->>CompSvc: raw_response_b + native telemetry
+                CompSvc->>Ollama: Execution A (Original Prompt, num_ctx: common_num_ctx)
+                Ollama-->>CompSvc: raw_response_a + native telemetry
+            end
+        end
+    end
+
+    CompSvc->>CompSvc: calculate_metrics(exec_a, exec_b, trial_measurements, aggregate_latency)
     CompSvc-->>API: ComparisonResponse
-    API-->>User: HTTP 200 {original_execution, optimized_execution, metrics, optimizer_details}
+    API-->>User: HTTP 200 {original_execution, optimized_execution, metrics, trial_measurements, aggregate_latency}
 ```
 
 ### 7.2 Downstream Model Pinning & Parameter Parity
 
-- **Model Pinning**: Both Execution A and Execution B run against the exact same pinned downstream model. Independent routing to different models is forbidden to guarantee a fair comparison.
+- **Model Pinning**: Both Execution A and Execution B run against the exact same pinned downstream model. Independent routing to different models is strictly forbidden.
 - **Model Availability Gate**: The model is validated using `LocalModelRegistry.get_model(downstream_model, force_refresh=True)`. If uninstalled, the call fails immediately with HTTP 400 (`DownstreamModelNotFoundError`). No silent fallback or model substitution is permitted.
 - **Identical Generation Conditions**:
   - `temperature`: Applied identically to both calls (default: `OLLAMA_TEMPERATURE`).
   - `top_p`: Applied identically to both calls (default: `OLLAMA_TOP_P`).
   - `num_predict`: Applied identically to both calls (default: `OLLAMA_NUM_PREDICT` or user `max_tokens`).
   - `system_instruction`: If supplied, passed identically to both calls as `system`.
-  - `num_ctx`: Dynamically snapped using `AdaptiveContextManager` based on prompt token demands.
+  - `num_ctx`: Snapped to a shared context tier `common_num_ctx = max(budget_a["selected_num_ctx"], budget_b["selected_num_ctx"])` to prevent context length discrepancy between calls.
+  - `effective_settings`: Formally returned in response diagnostics (`num_ctx`, `temperature`, `num_predict`, `top_p`, `system_instruction`).
 
 ### 7.3 Telemetry Capture & Honest Metrics Standards
 
@@ -311,13 +328,22 @@ All execution data is sourced directly from native Ollama completion responses:
 | **Prompt Tokens** | `data["prompt_eval_count"]` | Returned as `null`, rendered as `N/A` |
 | **Output Tokens** | `data["eval_count"]` | Returned as `null`, rendered as `N/A` |
 | **Total Tokens** | `prompt_tokens + output_tokens` | Returned as `null`, rendered as `N/A` |
-| **Inference Latency** | Measured wall-clock time (`time.perf_counter()`) | Returned as `null`, rendered as `N/A` |
-| **Time to First Token (TTFT)** | `round(data["prompt_eval_duration"] / 1e6, 2)` ms | Returned as `null`, rendered as `N/A` |
+| **Inference Duration** | Pure inference time: `round((prompt_eval_duration + eval_duration) / 1e6, 2)` ms | Returned as `null`, rendered as `N/A` |
+| **Prompt Eval Duration** | `round(data["prompt_eval_duration"] / 1e6, 2)` ms (`prompt_eval_duration_ms`). Never labeled as TTFT. | Returned as `null`, rendered as `N/A` |
+| **Model Load Duration** | `round(data["load_duration"] / 1e6, 2)` ms (`model_load_duration_ms`) | Returned as `0.0`, rendered as `N/A` if unavailable |
+| **Queue Wait Duration** | `round(max(0, wall_time - pure_inference - load_duration), 2)` ms | Returned as `0.0` |
 | **Completion Reason** | `data["done_reason"]` (`"stop"` vs `"length"`) | Returned as `null`, rendered as `N/A` |
-| **Prompt Token Reduction** | `round(((orig_p - opt_p) / orig_p) * 100, 2)` | If `orig_p <= 0`: `0.0`. If missing: `null` |
+| **Prompt Token Reduction** | `round(((orig_p - opt_p) / orig_p) * 100, 2)` | If `orig_p <= 0`: `null` (N/A). If missing: `null` |
 | **Output Token Delta** | `opt_o - orig_o` | Returned as `null`, rendered as `N/A` |
 | **Total Token Delta** | `orig_t - opt_t` | Returned as `null`, rendered as `N/A` |
 | **Semantic Quality** | Fixed to `"not_evaluated"` | Explanatory note: automated judge not configured |
+
+### 7.4 Latency Measurement & Paired Alternating Trials
+
+- **Warm-Up Ping**: Before timing begins, a warm-up inference (`prompt="warmup", num_predict=1`) ensures weights are resident in memory, eliminating cold-start bias.
+- **Alternating Execution Order**: Paired trials alternate execution order (`[A, B], [B, A]`) to neutralize KV-cache and execution sequence biases.
+- **No Single-Pair Proof Claims**: Single-pair runs are explicitly documented as illustrative individual measurements. When multi-trial benchmarks run (`trials > 1`), individual trial telemetry and aggregate statistics (`mean`, `median`, `min`, `max`, `std_dev`) are computed and returned.
+- **Duration Separation**: Model load duration, prompt evaluation duration, token generation duration, and queue wait duration are tracked separately. Pure inference duration excludes cold-start model load time.
 
 ### 7.4 Zero-Fabrication Guarantees
 

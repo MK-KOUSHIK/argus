@@ -11,6 +11,8 @@ import {
   Cpu,
   FileText,
   Info,
+  Clock,
+  Layers,
 } from 'lucide-react';
 
 export interface OutputComparisonViewProps {
@@ -21,6 +23,7 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
   const [copiedOrig, setCopiedOrig] = useState<boolean>(false);
   const [copiedOpt, setCopiedOpt] = useState<boolean>(false);
   const [showTelemetry, setShowTelemetry] = useState<boolean>(false);
+  const [showTrials, setShowTrials] = useState<boolean>(false);
 
   const { originalExecution, optimizedExecution, metrics, downstreamModel } = comparison;
 
@@ -51,6 +54,8 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
     return `${val} ms`;
   };
 
+  const trialsCount = originalExecution.trials?.length || 1;
+
   return (
     <div className="space-y-6" data-testid="output-comparison-view">
       {/* Overview Banner */}
@@ -66,7 +71,7 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
                 </span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Both prompts were evaluated by local Ollama model <code className="text-cyan-300">{downstreamModel}</code> under identical generation parameters.
+                Both prompts were evaluated by local Ollama model <code className="text-cyan-300">{downstreamModel}</code> with shared context window ({originalExecution.effective_settings?.num_ctx || 2048} tokens) and identical generation settings.
               </p>
             </div>
           </div>
@@ -74,21 +79,21 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-900 text-slate-300 border border-white/10 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              2/2 Executions Completed
+              {trialsCount > 1 ? `${trialsCount} Paired Trials (Alternating)` : 'Completed (Warm-Up + Paired Run)'}
             </span>
           </div>
         </div>
 
         {/* 4-Stat Metric Cards Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {/* Prompt Token Reduction */}
+          {/* Prompt Token Reduction (Finding 3: positive label, no negative sign) */}
           <div className="p-3 rounded-lg bg-[#060a12] border border-white/5 space-y-1">
             <span className="text-[10px] uppercase font-mono text-slate-400 tracking-wider">
               Prompt Token Reduction
             </span>
             <div className="text-lg font-bold font-mono text-cyan-300">
               {metrics.prompt_token_reduction_percent !== null && metrics.prompt_token_reduction_percent !== undefined
-                ? `-${metrics.prompt_token_reduction_percent}%`
+                ? `${metrics.prompt_token_reduction_percent}% saved`
                 : 'N/A'}
             </div>
             <div className="text-[11px] text-slate-400 font-mono">
@@ -133,7 +138,7 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
             </div>
             <div className="text-[11px] text-slate-400 font-mono">
               {metrics.total_token_reduction_percent !== null && metrics.total_token_reduction_percent !== undefined
-                ? `-${metrics.total_token_reduction_percent}% footprint`
+                ? `${metrics.total_token_reduction_percent}% saved`
                 : 'Telemetry unavailable'}
             </div>
           </div>
@@ -141,7 +146,7 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
           {/* Latency Delta */}
           <div className="p-3 rounded-lg bg-[#060a12] border border-white/5 space-y-1">
             <span className="text-[10px] uppercase font-mono text-slate-400 tracking-wider">
-              Inference Latency Delta
+              Pure Inference Latency Delta
             </span>
             <div
               className={`text-lg font-bold font-mono ${
@@ -162,13 +167,24 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
           </div>
         </div>
 
-        {/* Semantic Quality Banner (Honest Report) */}
+        {/* Latency Methodology & Variance Notice (Finding 1) */}
+        {metrics.latency_note && (
+          <div className="p-2.5 rounded-lg bg-[#060a12] border border-white/5 flex items-start gap-2 text-xs text-slate-400">
+            <Clock className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" />
+            <div className="space-y-0.5">
+              <span className="font-semibold text-slate-300">Latency Measurement Methodology:</span>
+              <p className="text-[11px] leading-relaxed">{metrics.latency_note}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Semantic Quality Banner (Finding 6: Honest Report) */}
         <div className="p-2.5 rounded-lg bg-[#070d18] border border-white/5 flex items-start gap-2.5 text-xs text-slate-300">
           <Info className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" />
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-slate-200">Semantic Equivalence & Output Quality:</span>
-              <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-amber-500/20">
+              <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-amber-500/20 font-bold">
                 {metrics.semantic_quality}
               </span>
             </div>
@@ -203,7 +219,7 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
             </div>
           </Card>
 
-          {/* Execution B Prompt */}
+          {/* Execution B Prompt (Finding 3: positive saved badge) */}
           <Card
             title="Execution B: Argus-Optimized Prompt"
             subtitle="Rewritten prompt dispatched to the same downstream LLM"
@@ -211,7 +227,7 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
               <div className="flex items-center gap-2">
                 {metrics.prompt_token_reduction_percent !== null && (
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-500/30 font-semibold">
-                    -{metrics.prompt_token_reduction_percent}%
+                    {metrics.prompt_token_reduction_percent}% saved
                   </span>
                 )}
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/30 font-semibold">
@@ -271,19 +287,19 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
               {originalExecution.response}
             </div>
 
-            {/* Execution A Telemetry Footer */}
+            {/* Execution A Telemetry Footer (Finding 1 & 2: separated durations, Prompt Eval instead of TTFT) */}
             <div className="mt-3 pt-2.5 border-t border-white/5 grid grid-cols-3 gap-2 text-[10px] font-mono text-slate-400">
               <div>
-                <span className="text-slate-500">Latency: </span>
+                <span className="text-slate-500">Inference: </span>
                 <span className="text-slate-300">{formatMs(originalExecution.duration_ms)}</span>
               </div>
               <div>
-                <span className="text-slate-500">TTFT: </span>
-                <span className="text-slate-300">{formatMs(originalExecution.ttft_ms)}</span>
+                <span className="text-slate-500">Prompt Eval: </span>
+                <span className="text-slate-300">{formatMs(originalExecution.prompt_eval_duration_ms)}</span>
               </div>
               <div>
-                <span className="text-slate-500">Stop: </span>
-                <span className="text-slate-300">{originalExecution.done_reason || 'stop'}</span>
+                <span className="text-slate-500">Model Load: </span>
+                <span className="text-slate-300">{formatMs(originalExecution.latency_breakdown?.model_load_duration_ms)}</span>
               </div>
             </div>
           </Card>
@@ -323,24 +339,76 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
               {optimizedExecution.response}
             </div>
 
-            {/* Execution B Telemetry Footer */}
+            {/* Execution B Telemetry Footer (Finding 1 & 2) */}
             <div className="mt-3 pt-2.5 border-t border-cyan-500/20 grid grid-cols-3 gap-2 text-[10px] font-mono text-cyan-300/80">
               <div>
-                <span className="text-slate-500">Latency: </span>
+                <span className="text-slate-500">Inference: </span>
                 <span className="text-cyan-300">{formatMs(optimizedExecution.duration_ms)}</span>
               </div>
               <div>
-                <span className="text-slate-500">TTFT: </span>
-                <span className="text-cyan-300">{formatMs(optimizedExecution.ttft_ms)}</span>
+                <span className="text-slate-500">Prompt Eval: </span>
+                <span className="text-cyan-300">{formatMs(optimizedExecution.prompt_eval_duration_ms)}</span>
               </div>
               <div>
-                <span className="text-slate-500">Stop: </span>
-                <span className="text-cyan-300">{optimizedExecution.done_reason || 'stop'}</span>
+                <span className="text-slate-500">Model Load: </span>
+                <span className="text-cyan-300">{formatMs(optimizedExecution.latency_breakdown?.model_load_duration_ms)}</span>
               </div>
             </div>
           </Card>
         </div>
       </div>
+
+      {/* Repeated Trials Breakdown (Finding 1: when trials > 1) */}
+      {originalExecution.trials && originalExecution.trials.length > 1 && (
+        <div className="border border-white/5 rounded-xl bg-[#080d19] overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowTrials(!showTrials)}
+            className="w-full px-4 py-3 flex items-center justify-between text-xs font-mono text-slate-300 hover:bg-white/5 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Multi-Trial Measurements ({originalExecution.trials.length} Paired Alternating Trials)</span>
+            </span>
+            {showTrials ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+
+          {showTrials && (
+            <div className="p-4 border-t border-white/5 space-y-3 overflow-x-auto text-xs font-mono">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-white/10 text-slate-400 text-[11px]">
+                    <th className="py-2 px-2">Trial #</th>
+                    <th className="py-2 px-2">Exec A Order</th>
+                    <th className="py-2 px-2">Exec A Inf. Latency</th>
+                    <th className="py-2 px-2">Exec B Order</th>
+                    <th className="py-2 px-2">Exec B Inf. Latency</th>
+                    <th className="py-2 px-2">Latency Delta</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5 text-slate-300">
+                  {originalExecution.trials.map((trialA, idx) => {
+                    const trialB = optimizedExecution.trials?.[idx];
+                    const latA = trialA.latency.inference_duration_ms;
+                    const latB = trialB?.latency.inference_duration_ms;
+                    const delta = latA !== null && latB !== null && latA !== undefined && latB !== undefined ? round(latB - latA, 2) : 'N/A';
+                    return (
+                      <tr key={trialA.trial_index}>
+                        <td className="py-2 px-2">Trial {trialA.trial_index + 1}</td>
+                        <td className="py-2 px-2">Order {trialA.execution_order}</td>
+                        <td className="py-2 px-2">{formatMs(latA)}</td>
+                        <td className="py-2 px-2">Order {trialB?.execution_order}</td>
+                        <td className="py-2 px-2 text-cyan-300">{formatMs(latB)}</td>
+                        <td className="py-2 px-2 font-bold">{delta} ms</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Raw Ollama Telemetry Breakdown (Expandable) */}
       <div className="border border-white/5 rounded-xl bg-[#080d19] overflow-hidden">
@@ -376,3 +444,8 @@ export const OutputComparisonView: React.FC<OutputComparisonViewProps> = ({ comp
     </div>
   );
 };
+
+function round(val: number, decimals: number): number {
+  const factor = Math.pow(10, decimals);
+  return Math.round(val * factor) / factor;
+}

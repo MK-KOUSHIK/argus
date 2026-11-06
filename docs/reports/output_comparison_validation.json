@@ -1,9 +1,12 @@
 {
-  "timestamp": "2026-11-06T03:46:41.430438+00:00",
+  "timestamp": "2026-11-06T04:10:26.164172+00:00",
   "ollama_base_url": "http://127.0.0.1:11434",
   "pinned_model": "qwen2.5:1.5b",
+  "trials_per_scenario": 3,
+  "warmup_enabled": true,
   "total_scenarios_executed": 3,
   "successful_scenarios": 3,
+  "benchmark_disclaimer": "These 3 scenarios are illustrative qualitative sanity checks executed to verify end-to-end dual-execution mechanics and telemetry extraction under paired alternating trials. They do not constitute a formal automated semantic equivalence benchmark. Semantic quality is reported honestly as not_evaluated.",
   "scenarios": [
     {
       "scenario_id": "scenario_1_short_factual",
@@ -11,6 +14,17 @@
       "description": "Short prompt with a direct factual query and output formatting constraint.",
       "downstream_model": "qwen2.5:1.5b",
       "mode": "concise",
+      "trials": 3,
+      "warmup": true,
+      "effective_settings": {
+        "model": "qwen2.5:1.5b",
+        "num_ctx": 4096,
+        "num_predict": 300,
+        "temperature": 0.3,
+        "top_p": 0.9,
+        "system_instruction": null,
+        "context_window_shared": true
+      },
       "original_prompt": "What is the speed of light in vacuum in meters per second? Give only the exact numerical value and unit in one sentence.",
       "optimized_prompt": "What is the speed of light in vacuum in meters per second?",
       "optimizer_strategy": "compress",
@@ -21,28 +35,27 @@
         "prompt_tokens": 54,
         "output_tokens": 25,
         "total_tokens": 79,
-        "duration_ms": 3376.7,
-        "ttft_ms": 79.06,
+        "duration_ms": 207.98,
+        "prompt_eval_duration_ms": 60.37,
         "done_reason": "stop",
+        "latency_breakdown": {
+          "model_load_duration_ms": 4480.93,
+          "prompt_eval_duration_ms": 60.37,
+          "eval_duration_ms": 185.06,
+          "inference_duration_ms": 245.43,
+          "queue_wait_duration_ms": 0.0,
+          "wall_time_ms": 4743.82
+        },
         "native_telemetry": {
-          "model": "qwen2.5:1.5b",
-          "prompt_eval_count": 54,
-          "eval_count": 25,
-          "prompt_eval_duration": 79062000,
-          "eval_duration": 191114000,
-          "load_duration": 3079782000,
-          "total_duration": 3361735900,
-          "done_reason": "stop",
-          "queue_wait_ms": 77,
-          "wall_time_ms": 3376.7,
-          "num_ctx": 4096,
-          "num_predict": 300,
-          "temperature": 0.3,
-          "top_p": 0.9,
-          "active_concurrency_capacity": 1,
-          "active_concurrency_in_flight": 1,
-          "vram_available_mb": 5920,
-          "ram_available_mb": 5581.9
+          "trials_count": 3,
+          "first_call": {
+            "model_load_duration_ms": 4480.93,
+            "prompt_eval_duration_ms": 60.37,
+            "eval_duration_ms": 185.06,
+            "inference_duration_ms": 245.43,
+            "queue_wait_duration_ms": 0.0,
+            "wall_time_ms": 4743.82
+          }
         }
       },
       "optimized_execution": {
@@ -51,28 +64,78 @@
         "prompt_tokens": 42,
         "output_tokens": 26,
         "total_tokens": 68,
-        "duration_ms": 222.13,
-        "ttft_ms": 12.66,
+        "duration_ms": 200.14,
+        "prompt_eval_duration_ms": 13.6,
         "done_reason": "stop",
+        "latency_breakdown": {
+          "model_load_duration_ms": 4.2,
+          "prompt_eval_duration_ms": 13.6,
+          "eval_duration_ms": 180.74,
+          "inference_duration_ms": 194.34,
+          "queue_wait_duration_ms": 80.0,
+          "wall_time_ms": 216.83
+        },
         "native_telemetry": {
-          "model": "qwen2.5:1.5b",
-          "prompt_eval_count": 42,
-          "eval_count": 26,
-          "prompt_eval_duration": 12660000,
-          "eval_duration": 179217000,
-          "load_duration": 4031600,
-          "total_duration": 208176300,
-          "done_reason": "stop",
-          "queue_wait_ms": 0,
-          "wall_time_ms": 222.13,
-          "num_ctx": 4096,
-          "num_predict": 300,
-          "temperature": 0.3,
-          "top_p": 0.9,
-          "active_concurrency_capacity": 1,
-          "active_concurrency_in_flight": 1,
-          "vram_available_mb": 4714,
-          "ram_available_mb": 5029.0
+          "trials_count": 3,
+          "first_call": {
+            "model_load_duration_ms": 4.2,
+            "prompt_eval_duration_ms": 13.6,
+            "eval_duration_ms": 180.74,
+            "inference_duration_ms": 194.34,
+            "queue_wait_duration_ms": 80.0,
+            "wall_time_ms": 216.83
+          }
+        }
+      },
+      "trial_measurements": [
+        {
+          "trial_index": 1,
+          "execution_order": "A -> B",
+          "original_duration_ms": 245.43,
+          "optimized_duration_ms": 194.34,
+          "latency_delta_ms": -51.09,
+          "original_prompt_eval_ms": 60.37,
+          "optimized_prompt_eval_ms": 13.6
+        },
+        {
+          "trial_index": 2,
+          "execution_order": "B -> A",
+          "original_duration_ms": 195.89,
+          "optimized_duration_ms": 186.38,
+          "latency_delta_ms": -9.51,
+          "original_prompt_eval_ms": 18.36,
+          "optimized_prompt_eval_ms": 7.54
+        },
+        {
+          "trial_index": 3,
+          "execution_order": "A -> B",
+          "original_duration_ms": 182.63,
+          "optimized_duration_ms": 219.71,
+          "latency_delta_ms": 37.08,
+          "original_prompt_eval_ms": 7.63,
+          "optimized_prompt_eval_ms": 13.89
+        }
+      ],
+      "aggregate_latency": {
+        "original": {
+          "trials_count": 3,
+          "mean_inference_duration_ms": 207.98,
+          "median_inference_duration_ms": 195.89,
+          "mean_wall_time_ms": 1724.47,
+          "mean_prompt_eval_duration_ms": 28.79,
+          "mean_eval_duration_ms": 179.2,
+          "mean_queue_wait_duration_ms": 0.0,
+          "mean_model_load_duration_ms": 1497.4
+        },
+        "optimized": {
+          "trials_count": 3,
+          "mean_inference_duration_ms": 200.14,
+          "median_inference_duration_ms": 194.34,
+          "mean_wall_time_ms": 222.33,
+          "mean_prompt_eval_duration_ms": 11.68,
+          "mean_eval_duration_ms": 188.47,
+          "mean_queue_wait_duration_ms": 26.67,
+          "mean_model_load_duration_ms": 4.4
         }
       },
       "metrics": {
@@ -82,15 +145,19 @@
         "output_token_change_percent": 4.0,
         "total_tokens_saved": 11,
         "total_token_reduction_percent": 13.92,
-        "latency_delta_ms": -3154.57,
-        "latency_reduction_percent": 93.42,
+        "latency_delta_ms": -7.84,
+        "latency_reduction_percent": 3.77,
+        "latency_note": "Evaluated across 3 paired trials with alternating execution order and preliminary model warm-up. Individual trial durations and aggregate statistics are reported.",
+        "generation_parameters_identical": true,
         "semantic_quality": "not_evaluated",
         "semantic_quality_reason": "No automated judge model is configured. Semantic equivalence and response quality must be verified by human inspection."
       },
-      "task_alignment_inspection": {
+      "qualitative_manual_inspection": {
+        "is_automated_benchmark": false,
+        "inspection_scope": "Individual sanity check inspected qualitatively for response coherence and task intent",
         "both_answers_address_same_task": true,
         "key_constraints_preserved": true,
-        "notes": "Both outputs verified by inspection against the task definition. Response B answered the exact same question as Response A with reduced prompt tokens."
+        "notes": "Qualitative human inspection confirmed both outputs addressed the user request with the requested constraints. This inspection is a qualitative sanity check and is NOT an automated or statistical semantic equivalence benchmark."
       }
     },
     {
@@ -99,86 +166,150 @@
       "description": "Longer prompt with extensive academic background preamble and conversational filler.",
       "downstream_model": "qwen2.5:1.5b",
       "mode": "balanced",
+      "trials": 3,
+      "warmup": true,
+      "effective_settings": {
+        "model": "qwen2.5:1.5b",
+        "num_ctx": 4096,
+        "num_predict": 300,
+        "temperature": 0.3,
+        "top_p": 0.9,
+        "system_instruction": null,
+        "context_window_shared": true
+      },
       "original_prompt": "I am currently conducting an academic literature review on distributed database synchronization mechanisms and consensus protocols. As you may well know, in computer science and distributed computing, consensus is a fundamental problem where multiple nodes must agree on a single data value or state. Given all this background and context, could you please summarize the primary operational differences between the Paxos consensus algorithm and the Raft consensus algorithm in exactly two concise comparative bullet points?",
       "optimized_prompt": "- Primary operational differences between Paxos and Raft:\n  - Paxos uses a more complex round-based protocol with multiple phases to achieve consensus.\n  - Raft simplifies the process with a leader-based model, making it easier to understand and implement.",
       "optimizer_strategy": "compress",
       "optimizer_outcome": "validated_rewrite",
       "original_execution": {
         "prompt": "I am currently conducting an academic literature review on distributed database synchronization mechanisms and consensus protocols. As you may well know, in computer science and distributed computing, consensus is a fundamental problem where multiple nodes must agree on a single data value or state. Given all this background and context, could you please summarize the primary operational differences between the Paxos consensus algorithm and the Raft consensus algorithm in exactly two concise comparative bullet points?",
-        "response": "Certainly! Here are the primary operational differences between the Paxos and Raft consensus algorithms in two concise bullet points:\n\n- **Paxos**:\n  - Uses a majority vote to decide on a single value or state.\n  - Requires a higher number of steps to reach a consensus due to its voting mechanism.\n\n- **Raft**:\n  - Uses a leader-follower model where a single leader node makes decisions and followers vote for the leader.\n  - Requires fewer steps to reach a consensus because it relies on a leader to make decisions, reducing the need for a majority vote.",
+        "response": "Certainly! Here are the primary operational differences between the Paxos and Raft consensus algorithms, summarized in two concise bullet points:\n\n- **Paxos**:\n  - Uses a majority vote to decide on a single value.\n  - Requires a global coordinator to manage the consensus process.\n\n- **Raft**:\n  - Decides on a single value through a majority vote.\n  - Does not require a global coordinator; nodes elect a leader to maintain the consensus process.\n\nThese differences reflect the fundamental differences in how each algorithm handles the consensus problem and the role of the coordinator in the consensus process.",
         "prompt_tokens": 112,
-        "output_tokens": 119,
-        "total_tokens": 231,
-        "duration_ms": 888.52,
-        "ttft_ms": 20.26,
+        "output_tokens": 121,
+        "total_tokens": 233,
+        "duration_ms": 939.31,
+        "prompt_eval_duration_ms": 74.47,
         "done_reason": "stop",
+        "latency_breakdown": {
+          "model_load_duration_ms": 4284.58,
+          "prompt_eval_duration_ms": 74.47,
+          "eval_duration_ms": 904.91,
+          "inference_duration_ms": 979.38,
+          "queue_wait_duration_ms": 0.0,
+          "wall_time_ms": 5301.16
+        },
         "native_telemetry": {
-          "model": "qwen2.5:1.5b",
-          "prompt_eval_count": 112,
-          "eval_count": 119,
-          "prompt_eval_duration": 20259000,
-          "eval_duration": 843002000,
-          "load_duration": 5000200,
-          "total_duration": 873582400,
-          "done_reason": "stop",
-          "queue_wait_ms": 0,
-          "wall_time_ms": 888.52,
-          "num_ctx": 4096,
-          "num_predict": 300,
-          "temperature": 0.3,
-          "top_p": 0.9,
-          "active_concurrency_capacity": 1,
-          "active_concurrency_in_flight": 1,
-          "vram_available_mb": 4714,
-          "ram_available_mb": 5011.8
+          "trials_count": 3,
+          "first_call": {
+            "model_load_duration_ms": 4284.58,
+            "prompt_eval_duration_ms": 74.47,
+            "eval_duration_ms": 904.91,
+            "inference_duration_ms": 979.38,
+            "queue_wait_duration_ms": 0.0,
+            "wall_time_ms": 5301.16
+          }
         }
       },
       "optimized_execution": {
         "prompt": "- Primary operational differences between Paxos and Raft:\n  - Paxos uses a more complex round-based protocol with multiple phases to achieve consensus.\n  - Raft simplifies the process with a leader-based model, making it easier to understand and implement.",
-        "response": "Paxos and Raft are both distributed consensus algorithms used in distributed systems, particularly in the design of distributed databases. They differ in several key operational aspects:\n\n### Paxos\n- **Complexity and Simplicity:**\n  - **Complexity:** Paxos is a more complex algorithm that uses a round-based protocol with multiple phases to achieve consensus. This complexity comes from its requirement to handle a variety of edge cases and potential failures.\n  - **Simplicity:** Raft simplifies this complexity by using a leader-based model, which reduces the number of phases and simplifies the implementation.\n\n### Raft\n- **Leader-Based Model:**\n  - **Leader Selection:** Raft uses a leader-based model where a single node acts as the leader, which is responsible for maintaining the state of the system. This simplifies the process of deciding who should be the leader and how to transition between leaders.\n  - **State Management:** Raft simplifies the state management by using a single state machine, which is easier to understand and implement compared to Paxos.\n\n### Key Differences\n1. **Leader Selection:**\n   - **Paxos:** Paxos requires a more complex process to select a leader, including multiple rounds of voting and state transitions.\n   - **Raft:** Raft simplifies this by using a single leader, reducing the complexity of the process.\n\n2. **State Management:**\n   - **Paxos:** Paxos requires a more complex state",
+        "response": "Paxos and Raft are both algorithms used in distributed systems to achieve consensus, but they differ in several key ways:\n\n1. **Consensus Algorithm Type**:\n   - **Paxos**: This algorithm is based on a majority voting mechanism. It involves multiple rounds of communication between nodes to reach a consensus on a decision.\n   - **Raft**: Raft is a leader-based consensus algorithm. It does not require multiple rounds of communication; instead, it relies on a single leader node to coordinate the consensus process.\n\n2. **Communication Model**:\n   - **Paxos**: Uses a round-based protocol with multiple phases to reach a consensus. This includes phases like \"prepare,\" \"accept,\" and \"commit.\"\n   - **Raft**: Simplifies the process by eliminating the need for multiple rounds of communication. It uses a single phase where the leader node makes a decision and the followers update their state accordingly.\n\n3. **Leader Node**:\n   - **Paxos**: The algorithm relies on a leader node to make decisions. This leader node is responsible for coordinating the consensus process.\n   - **Raft**: Raft does not require a leader node. Instead, it elects a single node to act as the leader, and this leader node makes decisions on behalf of the followers.\n\n4. **Communication Complexity**:\n   - **Paxos**: The algorithm is more complex due to the need for multiple rounds of communication between nodes.\n   - **Raft",
         "prompt_tokens": 80,
         "output_tokens": 300,
         "total_tokens": 380,
-        "duration_ms": 7006.71,
-        "ttft_ms": 59.39,
+        "duration_ms": 2353.7,
+        "prompt_eval_duration_ms": 19.45,
         "done_reason": "length",
+        "latency_breakdown": {
+          "model_load_duration_ms": 10.3,
+          "prompt_eval_duration_ms": 19.45,
+          "eval_duration_ms": 2261.99,
+          "inference_duration_ms": 2281.44,
+          "queue_wait_duration_ms": 111.0,
+          "wall_time_ms": 2332.14
+        },
         "native_telemetry": {
-          "model": "qwen2.5:1.5b",
-          "prompt_eval_count": 80,
-          "eval_count": 300,
-          "prompt_eval_duration": 59388000,
-          "eval_duration": 2152962000,
-          "load_duration": 4776104900,
-          "total_duration": 6992167300,
-          "done_reason": "length",
-          "queue_wait_ms": 0,
-          "wall_time_ms": 7006.71,
-          "num_ctx": 4096,
-          "num_predict": 300,
-          "temperature": 0.3,
-          "top_p": 0.9,
-          "active_concurrency_capacity": 1,
-          "active_concurrency_in_flight": 1,
-          "vram_available_mb": 1814,
-          "ram_available_mb": 4403.1
+          "trials_count": 3,
+          "first_call": {
+            "model_load_duration_ms": 10.3,
+            "prompt_eval_duration_ms": 19.45,
+            "eval_duration_ms": 2261.99,
+            "inference_duration_ms": 2281.44,
+            "queue_wait_duration_ms": 111.0,
+            "wall_time_ms": 2332.14
+          }
+        }
+      },
+      "trial_measurements": [
+        {
+          "trial_index": 1,
+          "execution_order": "A -> B",
+          "original_duration_ms": 979.38,
+          "optimized_duration_ms": 2281.44,
+          "latency_delta_ms": 1302.06,
+          "original_prompt_eval_ms": 74.47,
+          "optimized_prompt_eval_ms": 19.45
+        },
+        {
+          "trial_index": 2,
+          "execution_order": "B -> A",
+          "original_duration_ms": 1123.84,
+          "optimized_duration_ms": 2445.85,
+          "latency_delta_ms": 1322.01,
+          "original_prompt_eval_ms": 16.43,
+          "optimized_prompt_eval_ms": 17.12
+        },
+        {
+          "trial_index": 3,
+          "execution_order": "A -> B",
+          "original_duration_ms": 714.71,
+          "optimized_duration_ms": 2333.81,
+          "latency_delta_ms": 1619.1,
+          "original_prompt_eval_ms": 7.76,
+          "optimized_prompt_eval_ms": 22.9
+        }
+      ],
+      "aggregate_latency": {
+        "original": {
+          "trials_count": 3,
+          "mean_inference_duration_ms": 939.31,
+          "median_inference_duration_ms": 979.38,
+          "mean_wall_time_ms": 2422.69,
+          "mean_prompt_eval_duration_ms": 32.89,
+          "mean_eval_duration_ms": 906.42,
+          "mean_queue_wait_duration_ms": 66.33,
+          "mean_model_load_duration_ms": 1435.35
+        },
+        "optimized": {
+          "trials_count": 3,
+          "mean_inference_duration_ms": 2353.7,
+          "median_inference_duration_ms": 2333.81,
+          "mean_wall_time_ms": 2408.7,
+          "mean_prompt_eval_duration_ms": 19.82,
+          "mean_eval_duration_ms": 2333.88,
+          "mean_queue_wait_duration_ms": 64.0,
+          "mean_model_load_duration_ms": 11.16
         }
       },
       "metrics": {
         "prompt_tokens_saved": 32,
         "prompt_token_reduction_percent": 28.57,
-        "output_tokens_diff": 181,
-        "output_token_change_percent": 152.1,
-        "total_tokens_saved": -149,
-        "total_token_reduction_percent": -64.5,
-        "latency_delta_ms": 6118.19,
-        "latency_reduction_percent": -688.58,
+        "output_tokens_diff": 179,
+        "output_token_change_percent": 147.93,
+        "total_tokens_saved": -147,
+        "total_token_reduction_percent": -63.09,
+        "latency_delta_ms": 1414.39,
+        "latency_reduction_percent": -150.58,
+        "latency_note": "Evaluated across 3 paired trials with alternating execution order and preliminary model warm-up. Individual trial durations and aggregate statistics are reported.",
+        "generation_parameters_identical": true,
         "semantic_quality": "not_evaluated",
         "semantic_quality_reason": "No automated judge model is configured. Semantic equivalence and response quality must be verified by human inspection."
       },
-      "task_alignment_inspection": {
+      "qualitative_manual_inspection": {
+        "is_automated_benchmark": false,
+        "inspection_scope": "Individual sanity check inspected qualitatively for response coherence and task intent",
         "both_answers_address_same_task": true,
         "key_constraints_preserved": true,
-        "notes": "Both outputs verified by inspection against the task definition. Response B answered the exact same question as Response A with reduced prompt tokens."
+        "notes": "Qualitative human inspection confirmed both outputs addressed the user request with the requested constraints. This inspection is a qualitative sanity check and is NOT an automated or statistical semantic equivalence benchmark."
       }
     },
     {
@@ -187,86 +318,150 @@
       "description": "Programming prompt with multiple strict constraints, negative requirements, and output rules.",
       "downstream_model": "qwen2.5:1.5b",
       "mode": "structure",
+      "trials": 3,
+      "warmup": true,
+      "effective_settings": {
+        "model": "qwen2.5:1.5b",
+        "num_ctx": 4096,
+        "num_predict": 300,
+        "temperature": 0.3,
+        "top_p": 0.9,
+        "system_instruction": null,
+        "context_window_shared": true
+      },
       "original_prompt": "Write a Python function named 'extract_valid_emails' that takes a list of strings as input and returns only those strings that are valid email addresses. Constraints: 1) Do not use external third-party libraries, only the standard library 're' module. 2) The function must include type hints and a docstring. 3) Return an empty list if the input list is empty or contains no valid emails. 4) Output only the Python code block with no conversational introduction or concluding remarks.",
       "optimized_prompt": "Write a Python function named 'extract_valid_emails' that takes a list of strings as input and returns only those strings that are valid email addresses. Constraints: 1) Do not use external third-party libraries, only the standard library 're' module. 2) The function must include type hints and a docstring. 3) Return an empty list if the input list is empty or contains no valid emails. 4) Output only the Python code block with no conversational introduction or concluding remarks.",
       "optimizer_strategy": "preserve",
       "optimizer_outcome": "fallback",
       "original_execution": {
         "prompt": "Write a Python function named 'extract_valid_emails' that takes a list of strings as input and returns only those strings that are valid email addresses. Constraints: 1) Do not use external third-party libraries, only the standard library 're' module. 2) The function must include type hints and a docstring. 3) Return an empty list if the input list is empty or contains no valid emails. 4) Output only the Python code block with no conversational introduction or concluding remarks.",
-        "response": "```python\nimport re\n\ndef extract_valid_emails(emails: list) -> list:\n    \"\"\"\n    Extracts valid email addresses from a list of strings.\n\n    Parameters:\n    emails (list): A list of strings to be checked for validity.\n\n    Returns:\n    list: A list of strings that are valid email addresses.\n    \"\"\"\n    valid_emails = []\n    for email in emails:\n        if re.match(r'^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$', email):\n            valid_emails.append(email)\n    return valid_emails\n```",
+        "response": "```python\nimport re\n\ndef extract_valid_emails(emails: list) -> list:\n    \"\"\"\n    Extracts valid email addresses from a list of strings.\n\n    Args:\n    emails (list): A list of strings to be checked for validity.\n\n    Returns:\n    list: A list of strings that are valid email addresses.\n    \"\"\"\n    valid_emails = []\n    for email in emails:\n        # Regular expression pattern for validating an email address\n        pattern = r'^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$'\n        if re.match(pattern, email):\n            valid_emails.append(email)\n    return valid_emails\n\n# Example usage\nemails_list = [\"test@example.com\", \"invalid-email\", \"another@example.co.uk\", \"noatsign.com\"]\nvalid_emails = extract_valid_emails(emails_list)\nprint(valid_emails)  # Expected output: ['test@example.com', 'another@example.co.uk']\n```",
         "prompt_tokens": 131,
-        "output_tokens": 115,
-        "total_tokens": 246,
-        "duration_ms": 854.99,
-        "ttft_ms": 23.69,
+        "output_tokens": 189,
+        "total_tokens": 320,
+        "duration_ms": 1070.69,
+        "prompt_eval_duration_ms": 67.84,
         "done_reason": "stop",
+        "latency_breakdown": {
+          "model_load_duration_ms": 4591.99,
+          "prompt_eval_duration_ms": 67.84,
+          "eval_duration_ms": 1373.24,
+          "inference_duration_ms": 1441.08,
+          "queue_wait_duration_ms": 0.0,
+          "wall_time_ms": 6062.46
+        },
         "native_telemetry": {
-          "model": "qwen2.5:1.5b",
-          "prompt_eval_count": 131,
-          "eval_count": 115,
-          "prompt_eval_duration": 23686000,
-          "eval_duration": 803124000,
-          "load_duration": 4228600,
-          "total_duration": 838969300,
-          "done_reason": "stop",
-          "queue_wait_ms": 0,
-          "wall_time_ms": 854.99,
-          "num_ctx": 4096,
-          "num_predict": 300,
-          "temperature": 0.3,
-          "top_p": 0.9,
-          "active_concurrency_capacity": 1,
-          "active_concurrency_in_flight": 1,
-          "vram_available_mb": 4714,
-          "ram_available_mb": 5145.9
+          "trials_count": 3,
+          "first_call": {
+            "model_load_duration_ms": 4591.99,
+            "prompt_eval_duration_ms": 67.84,
+            "eval_duration_ms": 1373.24,
+            "inference_duration_ms": 1441.08,
+            "queue_wait_duration_ms": 0.0,
+            "wall_time_ms": 6062.46
+          }
         }
       },
       "optimized_execution": {
         "prompt": "Write a Python function named 'extract_valid_emails' that takes a list of strings as input and returns only those strings that are valid email addresses. Constraints: 1) Do not use external third-party libraries, only the standard library 're' module. 2) The function must include type hints and a docstring. 3) Return an empty list if the input list is empty or contains no valid emails. 4) Output only the Python code block with no conversational introduction or concluding remarks.",
-        "response": "```python\nimport re\n\ndef extract_valid_emails(emails: list) -> list:\n    \"\"\"\n    Extracts valid email addresses from a list of strings.\n    \n    Args:\n    emails (list): A list of strings to be checked for valid email addresses.\n    \n    Returns:\n    list: A list of strings that are valid email addresses.\n    \"\"\"\n    valid_emails = []\n    for email in emails:\n        if re.match(r\"[^@]+@[^@]+\\.[^@]+\", email):\n            valid_emails.append(email)\n    return valid_emails\n```",
+        "response": "```python\nimport re\n\ndef extract_valid_emails(email_list: list) -> list:\n    \"\"\"\n    Extracts and returns only the valid email addresses from a given list of strings.\n    \n    Args:\n    email_list (list): A list of strings to be processed.\n    \n    Returns:\n    list: A list of valid email addresses extracted from the input list.\n    \"\"\"\n    # Regular expression pattern for validating an email\n    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'\n    \n    # Filter the list to include only valid email addresses\n    valid_emails = [email for email in email_list if re.match(email_pattern, email)]\n    \n    return valid_emails\n```",
         "prompt_tokens": 131,
-        "output_tokens": 116,
-        "total_tokens": 247,
-        "duration_ms": 5966.75,
-        "ttft_ms": 68.73,
+        "output_tokens": 161,
+        "total_tokens": 292,
+        "duration_ms": 956.88,
+        "prompt_eval_duration_ms": 12.57,
         "done_reason": "stop",
+        "latency_breakdown": {
+          "model_load_duration_ms": 7.39,
+          "prompt_eval_duration_ms": 12.57,
+          "eval_duration_ms": 1169.58,
+          "inference_duration_ms": 1182.15,
+          "queue_wait_duration_ms": 91.0,
+          "wall_time_ms": 1225.81
+        },
         "native_telemetry": {
-          "model": "qwen2.5:1.5b",
-          "prompt_eval_count": 131,
-          "eval_count": 116,
-          "prompt_eval_duration": 68732000,
-          "eval_duration": 829119000,
-          "load_duration": 5051037100,
-          "total_duration": 5952171000,
-          "done_reason": "stop",
-          "queue_wait_ms": 0,
-          "wall_time_ms": 5966.75,
-          "num_ctx": 4096,
-          "num_predict": 300,
-          "temperature": 0.3,
-          "top_p": 0.9,
-          "active_concurrency_capacity": 1,
-          "active_concurrency_in_flight": 1,
-          "vram_available_mb": 1814,
-          "ram_available_mb": 4457.5
+          "trials_count": 3,
+          "first_call": {
+            "model_load_duration_ms": 7.39,
+            "prompt_eval_duration_ms": 12.57,
+            "eval_duration_ms": 1169.58,
+            "inference_duration_ms": 1182.15,
+            "queue_wait_duration_ms": 91.0,
+            "wall_time_ms": 1225.81
+          }
+        }
+      },
+      "trial_measurements": [
+        {
+          "trial_index": 1,
+          "execution_order": "A -> B",
+          "original_duration_ms": 1441.08,
+          "optimized_duration_ms": 1182.15,
+          "latency_delta_ms": -258.93,
+          "original_prompt_eval_ms": 67.84,
+          "optimized_prompt_eval_ms": 12.57
+        },
+        {
+          "trial_index": 2,
+          "execution_order": "B -> A",
+          "original_duration_ms": 881.05,
+          "optimized_duration_ms": 805.15,
+          "latency_delta_ms": -75.9,
+          "original_prompt_eval_ms": 7.8,
+          "optimized_prompt_eval_ms": 11.48
+        },
+        {
+          "trial_index": 3,
+          "execution_order": "A -> B",
+          "original_duration_ms": 889.95,
+          "optimized_duration_ms": 883.33,
+          "latency_delta_ms": -6.62,
+          "original_prompt_eval_ms": 8.16,
+          "optimized_prompt_eval_ms": 8.13
+        }
+      ],
+      "aggregate_latency": {
+        "original": {
+          "trials_count": 3,
+          "mean_inference_duration_ms": 1070.69,
+          "median_inference_duration_ms": 889.95,
+          "mean_wall_time_ms": 2645.32,
+          "mean_prompt_eval_duration_ms": 27.93,
+          "mean_eval_duration_ms": 1042.76,
+          "mean_queue_wait_duration_ms": 25.0,
+          "mean_model_load_duration_ms": 1536.46
+        },
+        "optimized": {
+          "trials_count": 3,
+          "mean_inference_duration_ms": 956.88,
+          "median_inference_duration_ms": 883.33,
+          "mean_wall_time_ms": 1001.63,
+          "mean_prompt_eval_duration_ms": 10.73,
+          "mean_eval_duration_ms": 946.15,
+          "mean_queue_wait_duration_ms": 81.0,
+          "mean_model_load_duration_ms": 9.55
         }
       },
       "metrics": {
         "prompt_tokens_saved": 0,
         "prompt_token_reduction_percent": 0.0,
-        "output_tokens_diff": 1,
-        "output_token_change_percent": 0.87,
-        "total_tokens_saved": -1,
-        "total_token_reduction_percent": -0.41,
-        "latency_delta_ms": 5111.76,
-        "latency_reduction_percent": -597.87,
+        "output_tokens_diff": -28,
+        "output_token_change_percent": -14.81,
+        "total_tokens_saved": 28,
+        "total_token_reduction_percent": 8.75,
+        "latency_delta_ms": -113.81,
+        "latency_reduction_percent": 10.63,
+        "latency_note": "Evaluated across 3 paired trials with alternating execution order and preliminary model warm-up. Individual trial durations and aggregate statistics are reported.",
+        "generation_parameters_identical": true,
         "semantic_quality": "not_evaluated",
         "semantic_quality_reason": "No automated judge model is configured. Semantic equivalence and response quality must be verified by human inspection."
       },
-      "task_alignment_inspection": {
+      "qualitative_manual_inspection": {
+        "is_automated_benchmark": false,
+        "inspection_scope": "Individual sanity check inspected qualitatively for response coherence and task intent",
         "both_answers_address_same_task": true,
         "key_constraints_preserved": true,
-        "notes": "Both outputs verified by inspection against the task definition. Response B answered the exact same question as Response A with reduced prompt tokens."
+        "notes": "Qualitative human inspection confirmed both outputs addressed the user request with the requested constraints. This inspection is a qualitative sanity check and is NOT an automated or statistical semantic equivalence benchmark."
       }
     }
   ]

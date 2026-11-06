@@ -44,6 +44,7 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
   const [enableRouting, setEnableRouting] = useState<boolean>(true);
   const [requestedModel, setRequestedModel] = useState<string>('');
   const [downstreamModel, setDownstreamModel] = useState<string>('');
+  const [trials, setTrials] = useState<number>(1);
   const [discoveredModels, setDiscoveredModels] = useState<ModelCatalogItem[]>([]);
 
   React.useEffect(() => {
@@ -137,6 +138,7 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
         target_model: targetModel,
         enable_optimizer_routing: enableRouting,
         requested_optimizer_model: enableRouting ? undefined : (requestedModel || undefined),
+        trials,
       });
 
       setComparisonResult(cmpRes);
@@ -248,6 +250,8 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
             discoveredModels={discoveredModels}
             downstreamModel={downstreamModel}
             onDownstreamModelChange={setDownstreamModel}
+            trials={trials}
+            onTrialsChange={setTrials}
             onCompare={handleCompare}
             isComparing={status === 'comparing'}
           />

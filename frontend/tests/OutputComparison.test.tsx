@@ -28,7 +28,7 @@ const mockComparisonResult: ComparisonResult = {
     output_tokens: 22,
     total_tokens: 50,
     duration_ms: 180.5,
-    ttft_ms: 45.2,
+    prompt_eval_duration_ms: 45.2,
     status: 'completed',
     done_reason: 'stop',
     native_telemetry: {
@@ -45,7 +45,7 @@ const mockComparisonResult: ComparisonResult = {
     output_tokens: 18,
     total_tokens: 32,
     duration_ms: 125.0,
-    ttft_ms: 22.0,
+    prompt_eval_duration_ms: 22.0,
     status: 'completed',
     done_reason: 'stop',
     native_telemetry: {
@@ -106,8 +106,8 @@ describe('OutputComparisonView Component', () => {
     render(<OutputComparisonView comparison={mockComparisonResult} />);
 
     expect(screen.getByText(/Pinned Model: qwen2.5:1.5b/i)).toBeInTheDocument();
-    expect(screen.getByText(/2\/2 Executions Completed/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/-50%/).length).toBeGreaterThanOrEqual(1); // Prompt token reduction
+    expect(screen.getByText(/Completed \(Warm-Up \+ Paired Run\)/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/50% saved/).length).toBeGreaterThanOrEqual(1); // Prompt token reduction
     expect(screen.getByText('-4')).toBeInTheDocument(); // Output token delta
     expect(screen.getByText('18')).toBeInTheDocument(); // Total tokens saved
   });
@@ -209,6 +209,7 @@ describe('WorkspacePage Output Comparison Flow', () => {
         target_model: 'gemini-1-5-flash',
         enable_optimizer_routing: true,
         requested_optimizer_model: undefined,
+        trials: 1,
       });
     });
 

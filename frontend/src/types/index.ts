@@ -351,6 +351,47 @@ export interface OllamaStatus {
    End-to-End Original vs Optimized LLM Output Comparison
    ========================================================================= */
 
+export interface LatencyBreakdown {
+  model_load_duration_ms: number | null;
+  prompt_eval_duration_ms: number | null;
+  eval_duration_ms: number | null;
+  inference_duration_ms: number | null;
+  queue_wait_duration_ms: number | null;
+  wall_time_ms: number | null;
+}
+
+export interface EffectiveGenerationSettings {
+  model: string;
+  num_ctx: number;
+  num_predict: number;
+  temperature: number;
+  top_p: number;
+  system_instruction?: string | null;
+  context_window_shared: boolean;
+}
+
+export interface TrialTelemetry {
+  trial_index: number;
+  execution_order: number;
+  prompt_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  latency: LatencyBreakdown;
+  done_reason: string | null;
+  response: string;
+}
+
+export interface AggregateLatency {
+  trials_count: number;
+  mean_inference_duration_ms: number | null;
+  median_inference_duration_ms: number | null;
+  mean_wall_time_ms: number | null;
+  mean_prompt_eval_duration_ms: number | null;
+  mean_eval_duration_ms: number | null;
+  mean_queue_wait_duration_ms: number | null;
+  mean_model_load_duration_ms: number | null;
+}
+
 export interface ComparisonExecutionTelemetry {
   prompt: string;
   response: string;
@@ -360,9 +401,13 @@ export interface ComparisonExecutionTelemetry {
   output_tokens: number | null;
   total_tokens: number | null;
   duration_ms: number | null;
-  ttft_ms: number | null;
+  prompt_eval_duration_ms: number | null; // Renamed from ttft_ms (Finding 2)
+  latency_breakdown?: LatencyBreakdown | null;
   status: string;
   done_reason: string | null;
+  effective_settings?: EffectiveGenerationSettings | null;
+  trials?: TrialTelemetry[] | null;
+  aggregate_latency?: AggregateLatency | null;
   native_telemetry?: Record<string, unknown> | null;
 }
 
@@ -375,6 +420,8 @@ export interface ComparisonMetrics {
   total_token_reduction_percent: number | null;
   latency_delta_ms: number | null;
   latency_reduction_percent: number | null;
+  latency_note?: string;
+  generation_parameters_identical?: boolean;
   semantic_quality: string;
   semantic_quality_reason: string;
 }
@@ -390,6 +437,8 @@ export interface ComparisonRequestPayload {
   top_p?: number;
   enable_optimizer_routing?: boolean;
   requested_optimizer_model?: string;
+  trials?: number;
+  warmup?: boolean;
 }
 
 export interface ComparisonResult {

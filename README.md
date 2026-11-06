@@ -272,7 +272,7 @@ Checks whether the local Ollama instance is running and verifies model availabil
 ```
 
 ### 3. End-to-End Downstream Output Comparison (`POST /api/compare`)
-Executes two genuine downstream LLM inferences (Execution A on original prompt, Execution B on optimized prompt) pinned to the same model, capturing native Ollama telemetry and comparative metrics:
+Executes two genuine downstream LLM inferences (Execution A on original prompt, Execution B on optimized prompt) pinned to the same model, with model warm-up, alternating paired trials, granular latency separation, and native Ollama telemetry:
 
 ```json
 {
@@ -280,7 +280,9 @@ Executes two genuine downstream LLM inferences (Execution A on original prompt, 
   "downstream_model": "qwen2.5:1.5b",
   "mode": "concise",
   "temperature": 0.3,
-  "max_tokens": 300
+  "max_tokens": 300,
+  "trials": 3,
+  "warmup": true
 }
 ```
 
@@ -295,9 +297,17 @@ Executes two genuine downstream LLM inferences (Execution A on original prompt, 
     "prompt_tokens": 54,
     "output_tokens": 25,
     "total_tokens": 79,
-    "duration_ms": 3376.7,
-    "ttft_ms": 79.06,
-    "done_reason": "stop"
+    "duration_ms": 286.5,
+    "prompt_eval_duration_ms": 45.2,
+    "done_reason": "stop",
+    "latency_breakdown": {
+      "model_load_duration_ms": 0.0,
+      "prompt_eval_duration_ms": 45.2,
+      "eval_duration_ms": 241.3,
+      "inference_duration_ms": 286.5,
+      "queue_wait_duration_ms": 1.2,
+      "wall_time_ms": 287.7
+    }
   },
   "optimized_execution": {
     "prompt": "What is the speed of light in vacuum in meters per second?",
@@ -308,21 +318,41 @@ Executes two genuine downstream LLM inferences (Execution A on original prompt, 
     "output_tokens": 26,
     "total_tokens": 68,
     "duration_ms": 222.13,
-    "ttft_ms": 12.66,
-    "done_reason": "stop"
+    "prompt_eval_duration_ms": 12.66,
+    "done_reason": "stop",
+    "latency_breakdown": {
+      "model_load_duration_ms": 0.0,
+      "prompt_eval_duration_ms": 12.66,
+      "eval_duration_ms": 209.47,
+      "inference_duration_ms": 222.13,
+      "queue_wait_duration_ms": 0.8,
+      "wall_time_ms": 222.93
+    }
   },
   "metrics": {
     "prompt_tokens_saved": 12,
     "prompt_token_reduction_percent": 22.22,
     "output_tokens_diff": 1,
+    "output_token_change_percent": 4.0,
     "total_tokens_saved": 11,
     "total_token_reduction_percent": 13.92,
-    "latency_delta_ms": -3154.57,
-    "latency_reduction_percent": 93.42,
+    "latency_delta_ms": -64.37,
+    "latency_reduction_percent": 22.47,
+    "latency_note": "Averaged across 3 paired trials with alternating execution order ([A, B], [B, A]).",
+    "generation_parameters_identical": true,
     "semantic_quality": "not_evaluated",
     "semantic_quality_reason": "No automated judge model is configured. Semantic equivalence and response quality must be verified by human inspection."
   },
   "downstream_model": "qwen2.5:1.5b",
+  "effective_settings": {
+    "num_ctx": 2048,
+    "temperature": 0.3,
+    "num_predict": 300,
+    "top_p": 0.9,
+    "system_instruction": null
+  },
+  "trials": 3,
+  "warmup": true,
   "timestamp": "2026-11-06T03:46:41Z"
 }
 ```

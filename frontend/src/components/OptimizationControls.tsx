@@ -21,6 +21,8 @@ export interface OptimizationControlsProps {
   discoveredModels?: ModelCatalogItem[];
   downstreamModel?: string;
   onDownstreamModelChange?: (model: string) => void;
+  trials?: number;
+  onTrialsChange?: (trials: number) => void;
   onCompare?: () => void;
   isComparing?: boolean;
 }
@@ -41,6 +43,8 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
   discoveredModels = [],
   downstreamModel = '',
   onDownstreamModelChange,
+  trials = 1,
+  onTrialsChange,
   onCompare,
   isComparing = false,
 }) => {
@@ -249,6 +253,35 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
               <p className="text-[10px] text-slate-400 leading-tight">
                 Both original & optimized prompts will be evaluated against this exact model.
               </p>
+            </div>
+
+            {/* Finding 1: Measurement Trials Selector */}
+            <div className="flex items-center justify-between text-xs pt-1 border-t border-white/5">
+              <span className="text-[11px] font-mono text-slate-300">Measurement Trials:</span>
+              <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => onTrialsChange && onTrialsChange(1)}
+                  className={`px-2 py-0.5 rounded border transition-colors ${
+                    trials === 1
+                      ? 'bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold'
+                      : 'bg-[#080d19] text-slate-400 border-white/10 hover:text-slate-200'
+                  }`}
+                >
+                  1 (Single)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onTrialsChange && onTrialsChange(3)}
+                  className={`px-2 py-0.5 rounded border transition-colors ${
+                    trials === 3
+                      ? 'bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold'
+                      : 'bg-[#080d19] text-slate-400 border-white/10 hover:text-slate-200'
+                  }`}
+                >
+                  3 (Paired alternating)
+                </button>
+              </div>
             </div>
           </div>
 

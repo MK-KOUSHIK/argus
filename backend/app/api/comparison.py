@@ -55,3 +55,4 @@ async def compare_outputs(request: ComparisonRequest) -> ComparisonResponse:
             status_code=exc.status_code,
             detail=exc.message,
         ) from exc
+

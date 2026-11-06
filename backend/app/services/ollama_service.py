@@ -453,6 +453,7 @@ class OllamaService:
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
         num_predict: Optional[int] = None,
+        num_ctx: Optional[int] = None,
     ) -> Tuple[str, float, dict]:
         """Execute a genuine downstream LLM inference call with exact prompt and native telemetry.
 
@@ -465,17 +466,19 @@ class OllamaService:
         target_top_p = top_p if top_p is not None else settings.OLLAMA_TOP_P
         effective_system = system_instruction or ""
 
-        # Adaptive Context Budgeting (snapped to stable tiers for KV prefix cache reuse)
-        try:
-            budget = AdaptiveContextManager.calculate_budget(
-                system_instruction=effective_system,
-                formatted_prompt=prompt,
-                output_budget=target_num_predict,
-            )
-        except ContextOverflowError as exc:
-            raise OllamaServiceError(exc.message, status_code=exc.status_code) from exc
-
-        selected_num_ctx = budget["selected_num_ctx"]
+        # Adaptive Context Budgeting: use common context window if provided, else snap via manager
+        if num_ctx is not None:
+            selected_num_ctx = num_ctx
+        else:
+            try:
+                budget = AdaptiveContextManager.calculate_budget(
+                    system_instruction=effective_system,
+                    formatted_prompt=prompt,
+                    output_budget=target_num_predict,
+                )
+            except ContextOverflowError as exc:
+                raise OllamaServiceError(exc.message, status_code=exc.status_code) from exc
+            selected_num_ctx = budget["selected_num_ctx"]
         payload = {
             "model": model,
             "system": effective_system,
