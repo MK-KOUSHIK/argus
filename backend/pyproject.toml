@@ -31,3 +31,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
+addopts = "-m 'not ollama_integration'"
+markers = [
+    "ollama_integration: tests that execute live against the local Ollama daemon",
+]

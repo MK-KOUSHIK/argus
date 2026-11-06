@@ -1,0 +1,624 @@
+{
+  "timestamp": "2026-11-06T05:06:46.729854+00:00",
+  "git_commit_sha": "ea0bb47872ecec90519b1bbdba42ca71667db7e9",
+  "ollama_version": "0.40.8",
+  "ollama_base_url": "http://127.0.0.1:11434",
+  "model_name": "qwen2.5:1.5b",
+  "model_digest": "65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b",
+  "model_size_bytes": 986061892,
+  "model_details": {
+    "parent_model": "",
+    "format": "gguf",
+    "family": "qwen2",
+    "families": [
+      "qwen2"
+    ],
+    "parameter_size": "1.5B",
+    "quantization_level": "Q4_K_M",
+    "context_length": 32768,
+    "embedding_length": 1536,
+    "runner": "ggml"
+  },
+  "generation_options": {
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "num_ctx": 4096,
+    "num_predict": 512
+  },
+  "trials_per_scenario": 3,
+  "warmup_telemetry": {
+    "warmup_attempted": true,
+    "warmup_succeeded": true,
+    "warmup_error": null,
+    "warmup_wall_time_ms": 189.27,
+    "warmup_total_duration_ns": 176564500,
+    "warmup_total_duration_ms": 176.56,
+    "warmup_load_duration_ns": 4523000,
+    "warmup_load_duration_ms": 4.52,
+    "warmup_prompt_eval_duration_ns": 149881000,
+    "warmup_prompt_eval_duration_ms": 149.88,
+    "warmup_eval_duration_ns": 1000,
+    "warmup_eval_duration_ms": 0.0
+  },
+  "scenarios": [
+    {
+      "scenario_id": "synthetic_fixture_coding_debug_trajectory",
+      "scenario_name": "Synthetic Fixture 1: Multi-Turn Coding & Debugging Trajectory",
+      "fixture_type": "synthetic_deterministic_test_fixture",
+      "fixture_sha256": "9029b715110e5d488ed8b9d974500bf2b9c1fcb560a0fbbc738543d4e195fe52",
+      "description": "Models a Python software engineering agent session with code drafting, tool execution errors, developer feedback, corrective modification, and a final request for pytest unit tests.",
+      "task_domain": "coding",
+      "messages_count": 8,
+      "baseline_trials": [
+        {
+          "trial": 1,
+          "status": "completed",
+          "prompt_eval_count": 394,
+          "eval_count": 346,
+          "total_tokens": 740,
+          "total_duration_ns": 2741948700,
+          "total_duration_ms": 2741.95,
+          "load_duration_ns": 4665000,
+          "load_duration_ms": 4.67,
+          "prompt_eval_duration_ns": 148805000,
+          "prompt_eval_duration_ms": 148.81,
+          "eval_duration_ns": 2563106000,
+          "eval_duration_ms": 2563.11,
+          "pure_inference_duration_ms": 2711.92,
+          "wall_time_ms": 2756.4,
+          "done_reason": "stop",
+          "rubric_evaluation": [
+            {
+              "criterion_id": "req_pytest_functions",
+              "description": "Must generate pytest unit tests for format_currency function.",
+              "status": "pass",
+              "rationale": "Pytest definitions found: True, target function format_currency referenced: True."
+            },
+            {
+              "criterion_id": "req_currencies_and_decimals",
+              "description": "Must test USD, EUR, and JPY (with 0 decimal places).",
+              "status": "fail",
+              "rationale": "USD tested: True, EUR tested: True, JPY tested: True, JPY 0-decimal places assertion verified: False."
+            },
+            {
+              "criterion_id": "req_negative_and_zero",
+              "description": "Must test negative amounts and zero.",
+              "status": "pass",
+              "rationale": "Negative amounts tested: True, zero value tested: True."
+            },
+            {
+              "criterion_id": "req_no_locale_module",
+              "description": "Must maintain prohibition against using the external 'locale' module.",
+              "status": "pass",
+              "rationale": "Implementation is self-contained without 'locale'."
+            },
+            {
+              "criterion_id": "req_code_block_only",
+              "description": "Must output only Python test code in a code block.",
+              "status": "fail",
+              "rationale": "Code-only format verified. (Preamble: False, Postscript: True)"
+            }
+          ],
+          "response_preview": "```python import pytest  def format_currency(amount: float, currency_code: str) -> str:     \"\"\"     Formats a number as...",
+          "full_response": "```python\nimport pytest\n\ndef format_currency(amount: float, currency_code: str) -> str:\n    \"\"\"\n    Formats a number as currency, including the currency symbol.\n    \"\"\"\n    if amount < 0:\n        sign = '-'\n        amount = abs(amount)\n    else:\n        sign = ''\n    \n    # Format the amount with two decimal places\n    formatted_amount = f\"{amount:.2f}\"\n    \n    # Add the currency symbol\n    return f\"{sign}{currency_code} {formatted_amount}\"\n\n# Test cases\n@pytest.mark.parametrize(\n    \"amount, currency_code, expected\", [\n        (1234.5, 'USD', '$1,234.50'),\n        (1234.5, 'EUR', '\u20ac1,234.50'),\n        (1234.5, 'JPY', '\u00a51,234.50'),\n        (-45.2, 'USD', '-$45.20'),\n        (0, 'USD', '$0.00'),\n        (0, 'EUR', '\u20ac0.00'),\n        (0, 'JPY', '\u00a50.00')\n    ]\n)\ndef test_format_currency(amount, currency_code, expected):\n    assert format_currency(amount, currency_code) == expected\n\n# Run the tests\nif __name__ == \"__main__\":\n    pytest.main()\n```\n\nThis code block contains the implementation of `format_currency` and a set of unit tests using the `pytest` framework. The tests cover various scenarios, including negative amounts, zero, and different currency codes, ensuring the function behaves as expected."
+        },
+        {
+          "trial": 2,
+          "status": "completed",
+          "prompt_eval_count": 394,
+          "eval_count": 274,
+          "total_tokens": 668,
+          "total_duration_ns": 2000317400,
+          "total_duration_ms": 2000.32,
+          "load_duration_ns": 4635400,
+          "load_duration_ms": 4.64,
+          "prompt_eval_duration_ns": 12794000,
+          "prompt_eval_duration_ms": 12.79,
+          "eval_duration_ns": 1978037000,
+          "eval_duration_ms": 1978.04,
+          "pure_inference_duration_ms": 1990.83,
+          "wall_time_ms": 2015.08,
+          "done_reason": "stop",
+          "rubric_evaluation": [
+            {
+              "criterion_id": "req_pytest_functions",
+              "description": "Must generate pytest unit tests for format_currency function.",
+              "status": "pass",
+              "rationale": "Pytest definitions found: True, target function format_currency referenced: True."
+            },
+            {
+              "criterion_id": "req_currencies_and_decimals",
+              "description": "Must test USD, EUR, and JPY (with 0 decimal places).",
+              "status": "fail",
+              "rationale": "USD tested: True, EUR tested: True, JPY tested: True, JPY 0-decimal places assertion verified: False."
+            },
+            {
+              "criterion_id": "req_negative_and_zero",
+              "description": "Must test negative amounts and zero.",
+              "status": "pass",
+              "rationale": "Negative amounts tested: True, zero value tested: True."
+            },
+            {
+              "criterion_id": "req_no_locale_module",
+              "description": "Must maintain prohibition against using the external 'locale' module.",
+              "status": "pass",
+              "rationale": "Implementation is self-contained without 'locale'."
+            },
+            {
+              "criterion_id": "req_code_block_only",
+              "description": "Must output only Python test code in a code block.",
+              "status": "pass",
+              "rationale": "Code-only format verified. (Preamble: False, Postscript: False)"
+            }
+          ],
+          "response_preview": "```python import pytest  def format_currency(amount: float, currency_code: str) -> str:     \"\"\"     Formats a given amou...",
+          "full_response": "```python\nimport pytest\n\ndef format_currency(amount: float, currency_code: str) -> str:\n    \"\"\"\n    Formats a given amount into a standard currency representation.\n    \"\"\"\n    # Handle negative amounts by adding the minus sign before the currency symbol\n    sign = '-' if amount < 0 else ''\n    # Format the magnitude with two decimal places\n    magnitude = f'{abs(amount):.2f}'\n    # Combine the sign, currency code, and magnitude\n    return f'{sign}{currency_code} {magnitude}'\n\n# Test cases\n@pytest.mark.parametrize(\n    \"amount, currency_code, expected\",\n    [\n        (0, 'USD', '0.00'),\n        (1234.5, 'USD', '$1,234.50'),\n        (-45.2, 'USD', '-$45.20'),\n        (0.99, 'EUR', '0.99'),\n        (100, 'JPY', '100.00'),\n        (0, 'JPY', '0.00'),\n    ]\n)\ndef test_format_currency(amount, currency_code, expected):\n    assert format_currency(amount, currency_code) == expected\n\n# Run the tests\nif __name__ == \"__main__\":\n    pytest.main()\n```"
+        },
+        {
+          "trial": 3,
+          "status": "completed",
+          "prompt_eval_count": 394,
+          "eval_count": 395,
+          "total_tokens": 789,
+          "total_duration_ns": 2875446900,
+          "total_duration_ms": 2875.45,
+          "load_duration_ns": 4216500,
+          "load_duration_ms": 4.22,
+          "prompt_eval_duration_ns": 11350000,
+          "prompt_eval_duration_ms": 11.35,
+          "eval_duration_ns": 2854973000,
+          "eval_duration_ms": 2854.97,
+          "pure_inference_duration_ms": 2866.32,
+          "wall_time_ms": 2891.21,
+          "done_reason": "stop",
+          "rubric_evaluation": [
+            {
+              "criterion_id": "req_pytest_functions",
+              "description": "Must generate pytest unit tests for format_currency function.",
+              "status": "pass",
+              "rationale": "Pytest definitions found: True, target function format_currency referenced: True."
+            },
+            {
+              "criterion_id": "req_currencies_and_decimals",
+              "description": "Must test USD, EUR, and JPY (with 0 decimal places).",
+              "status": "fail",
+              "rationale": "USD tested: True, EUR tested: True, JPY tested: True, JPY 0-decimal places assertion verified: False."
+            },
+            {
+              "criterion_id": "req_negative_and_zero",
+              "description": "Must test negative amounts and zero.",
+              "status": "pass",
+              "rationale": "Negative amounts tested: True, zero value tested: True."
+            },
+            {
+              "criterion_id": "req_no_locale_module",
+              "description": "Must maintain prohibition against using the external 'locale' module.",
+              "status": "pass",
+              "rationale": "Implementation is self-contained without 'locale'."
+            },
+            {
+              "criterion_id": "req_code_block_only",
+              "description": "Must output only Python test code in a code block.",
+              "status": "fail",
+              "rationale": "Code-only format verified. (Preamble: False, Postscript: True)"
+            }
+          ],
+          "response_preview": "```python import pytest  def format_currency(amount: float, currency_code: str) -> str:     \"\"\"     Formats a number int...",
+          "full_response": "```python\nimport pytest\n\ndef format_currency(amount: float, currency_code: str) -> str:\n    \"\"\"\n    Formats a number into a standard currency representation.\n    \"\"\"\n    if amount < 0:\n        sign = '-'\n        amount = abs(amount)\n    else:\n        sign = ''\n    \n    # Format the amount with two decimal places\n    formatted_amount = f\"{amount:.2f}\"\n    \n    # Add currency symbol\n    currency_symbol = f\"{currency_code} \"\n    if currency_symbol in \"USD\":\n        currency_symbol += \"$\"\n    elif currency_symbol in \"EUR\":\n        currency_symbol += \"\u20ac\"\n    elif currency_symbol in \"JPY\":\n        currency_symbol += \"\u00a5\"\n\n    # Combine sign, amount, and currency symbol\n    return f\"{sign}{currency_symbol}{formatted_amount}\"\n\n# Test cases\n@pytest.mark.parametrize(\n    \"amount, currency_code, expected\",\n    [\n        (1234.5, \"USD\", \"$1,234.50\"),\n        (1234.5, \"EUR\", \"\u20ac1,234.50\"),\n        (1234.5, \"JPY\", \"\u00a51,234.50\"),\n        (-45.2, \"USD\", \"-$45.20\"),\n        (0, \"USD\", \"$0.00\"),\n        (0, \"EUR\", \"\u20ac0.00\"),\n        (0, \"JPY\", \"\u00a50.00\")\n    ]\n)\ndef test_format_currency(amount, currency_code, expected):\n    assert format_currency(amount, currency_code) == expected\n\n# Run the tests\nif __name__ == \"__main__\":\n    pytest.main()\n```\n\nThis code block contains the implementation of `format_currency` and a series of pytest tests to ensure it works correctly with different currencies and amounts, including negative values and zero."
+        }
+      ],
+      "aggregate_statistics": {
+        "completed_trials": 3,
+        "mean_prompt_eval_count": 394,
+        "mean_eval_count": 338.3,
+        "mean_pure_inference_duration_ms": 2523.02,
+        "mean_prompt_eval_duration_ms": 57.65,
+        "mean_load_duration_ms": 4.51,
+        "mean_total_duration_ms": 2539.24,
+        "mean_wall_time_ms": 2554.23,
+        "rubric_summary": {
+          "total_checks": 15,
+          "passed_checks": 10,
+          "failed_checks": 5,
+          "unverifiable_checks": 0,
+          "pass_rate_percent": 66.7
+        }
+      },
+      "representative_response": "```python\nimport pytest\n\ndef format_currency(amount: float, currency_code: str) -> str:\n    \"\"\"\n    Formats a number as currency, including the currency symbol.\n    \"\"\"\n    if amount < 0:\n        sign = '-'\n        amount = abs(amount)\n    else:\n        sign = ''\n    \n    # Format the amount with two decimal places\n    formatted_amount = f\"{amount:.2f}\"\n    \n    # Add the currency symbol\n    return f\"{sign}{currency_code} {formatted_amount}\"\n\n# Test cases\n@pytest.mark.parametrize(\n    \"amount, currency_code, expected\", [\n        (1234.5, 'USD', '$1,234.50'),\n        (1234.5, 'EUR', '\u20ac1,234.50'),\n        (1234.5, 'JPY', '\u00a51,234.50'),\n        (-45.2, 'USD', '-$45.20'),\n        (0, 'USD', '$0.00'),\n        (0, 'EUR', '\u20ac0.00'),\n        (0, 'JPY', '\u00a50.00')\n    ]\n)\ndef test_format_currency(amount, currency_code, expected):\n    assert format_currency(amount, currency_code) == expected\n\n# Run the tests\nif __name__ == \"__main__\":\n    pytest.main()\n```\n\nThis code block contains the implementation of `format_currency` and a set of unit tests using the `pytest` framework. The tests cover various scenarios, including negative amounts, zero, and different currency codes, ensuring the function behaves as expected.",
+      "representative_rubric_evaluation": [
+        {
+          "criterion_id": "req_pytest_functions",
+          "description": "Must generate pytest unit tests for format_currency function.",
+          "status": "pass",
+          "rationale": "Pytest definitions found: True, target function format_currency referenced: True."
+        },
+        {
+          "criterion_id": "req_currencies_and_decimals",
+          "description": "Must test USD, EUR, and JPY (with 0 decimal places).",
+          "status": "fail",
+          "rationale": "USD tested: True, EUR tested: True, JPY tested: True, JPY 0-decimal places assertion verified: False."
+        },
+        {
+          "criterion_id": "req_negative_and_zero",
+          "description": "Must test negative amounts and zero.",
+          "status": "pass",
+          "rationale": "Negative amounts tested: True, zero value tested: True."
+        },
+        {
+          "criterion_id": "req_no_locale_module",
+          "description": "Must maintain prohibition against using the external 'locale' module.",
+          "status": "pass",
+          "rationale": "Implementation is self-contained without 'locale'."
+        },
+        {
+          "criterion_id": "req_code_block_only",
+          "description": "Must output only Python test code in a code block.",
+          "status": "fail",
+          "rationale": "Code-only format verified. (Preamble: False, Postscript: True)"
+        }
+      ]
+    },
+    {
+      "scenario_id": "synthetic_fixture_sql_data_exploration_trajectory",
+      "scenario_name": "Synthetic Fixture 2: Data Exploration & SQL Querying Trajectory",
+      "fixture_type": "synthetic_deterministic_test_fixture",
+      "fixture_sha256": "57d4a5640b3f3b28716355440e301b91ded3d431c64e6cbc473bf9346f2819ef",
+      "description": "Models a database analyst agent session with schema inspection, multi-row tabular query results, intermediate commentary, and a final quantitative synthesis request.",
+      "task_domain": "data_analysis",
+      "messages_count": 9,
+      "baseline_trials": [
+        {
+          "trial": 1,
+          "status": "completed",
+          "prompt_eval_count": 570,
+          "eval_count": 60,
+          "total_tokens": 630,
+          "total_duration_ns": 465738400,
+          "total_duration_ms": 465.74,
+          "load_duration_ns": 8276800,
+          "load_duration_ms": 8.28,
+          "prompt_eval_duration_ns": 10923000,
+          "prompt_eval_duration_ms": 10.92,
+          "eval_duration_ns": 428061000,
+          "eval_duration_ms": 428.06,
+          "pure_inference_duration_ms": 438.98,
+          "wall_time_ms": 481.16,
+          "done_reason": "stop",
+          "rubric_evaluation": [
+            {
+              "criterion_id": "req_average_order_value",
+              "description": "Must calculate the average order value from the 5 retrieved orders ($5,552.10).",
+              "status": "pass",
+              "rationale": "Expected average ($5,552.10) detected in response: True."
+            },
+            {
+              "criterion_id": "req_west_region_and_2025",
+              "description": "Must reference the West region and 2025 timeline.",
+              "status": "fail",
+              "rationale": "West region referenced: False, 2025 timeline referenced: False."
+            },
+            {
+              "criterion_id": "req_two_sentences_and_formula",
+              "description": "Must state the mathematical formula and final answer in exactly two concise sentences.",
+              "status": "pass",
+              "rationale": "Mathematical calculation formula present: True, sentence count detected: 2 (expected 2)."
+            }
+          ],
+          "response_preview": "The average order value for the top 5 orders is calculated by summing the amounts of these orders and dividing by 5. The...",
+          "full_response": "The average order value for the top 5 orders is calculated by summing the amounts of these orders and dividing by 5. The exact average order value is $5,552.10, which is $27,760.50 divided by 5."
+        },
+        {
+          "trial": 2,
+          "status": "completed",
+          "prompt_eval_count": 570,
+          "eval_count": 159,
+          "total_tokens": 729,
+          "total_duration_ns": 1183605800,
+          "total_duration_ms": 1183.61,
+          "load_duration_ns": 4810500,
+          "load_duration_ms": 4.81,
+          "prompt_eval_duration_ns": 9198000,
+          "prompt_eval_duration_ms": 9.2,
+          "eval_duration_ns": 1164762000,
+          "eval_duration_ms": 1164.76,
+          "pure_inference_duration_ms": 1173.96,
+          "wall_time_ms": 1196.88,
+          "done_reason": "stop",
+          "rubric_evaluation": [
+            {
+              "criterion_id": "req_average_order_value",
+              "description": "Must calculate the average order value from the 5 retrieved orders ($5,552.10).",
+              "status": "fail",
+              "rationale": "Expected average ($5,552.10) detected in response: False."
+            },
+            {
+              "criterion_id": "req_west_region_and_2025",
+              "description": "Must reference the West region and 2025 timeline.",
+              "status": "pass",
+              "rationale": "West region referenced: True, 2025 timeline referenced: True."
+            },
+            {
+              "criterion_id": "req_two_sentences_and_formula",
+              "description": "Must state the mathematical formula and final answer in exactly two concise sentences.",
+              "status": "fail",
+              "rationale": "Mathematical calculation formula present: True, sentence count detected: 5 (expected 2)."
+            }
+          ],
+          "response_preview": "The average order value for the top 5 orders in the West region for 2025 is calculated as follows:  1. Sum the amounts o...",
+          "full_response": "The average order value for the top 5 orders in the West region for 2025 is calculated as follows: \n1. Sum the amounts of the top 5 orders: $8,450.00 + $6,120.50 + $4,980.00 + $4,320.00 + $3,890.00 = $28,860.50.\n2. Divide the total sum by the number of orders (5): $28,860.50 / 5 = $5,772.10.\nThe average order value for these top 5 orders is $5,772.10."
+        },
+        {
+          "trial": 3,
+          "status": "completed",
+          "prompt_eval_count": 570,
+          "eval_count": 43,
+          "total_tokens": 613,
+          "total_duration_ns": 328913100,
+          "total_duration_ms": 328.91,
+          "load_duration_ns": 4776800,
+          "load_duration_ms": 4.78,
+          "prompt_eval_duration_ns": 8227000,
+          "prompt_eval_duration_ms": 8.23,
+          "eval_duration_ns": 310042000,
+          "eval_duration_ms": 310.04,
+          "pure_inference_duration_ms": 318.27,
+          "wall_time_ms": 343.91,
+          "done_reason": "stop",
+          "rubric_evaluation": [
+            {
+              "criterion_id": "req_average_order_value",
+              "description": "Must calculate the average order value from the 5 retrieved orders ($5,552.10).",
+              "status": "pass",
+              "rationale": "Expected average ($5,552.10) detected in response: True."
+            },
+            {
+              "criterion_id": "req_west_region_and_2025",
+              "description": "Must reference the West region and 2025 timeline.",
+              "status": "fail",
+              "rationale": "West region referenced: False, 2025 timeline referenced: False."
+            },
+            {
+              "criterion_id": "req_two_sentences_and_formula",
+              "description": "Must state the mathematical formula and final answer in exactly two concise sentences.",
+              "status": "pass",
+              "rationale": "Mathematical calculation formula present: True, sentence count detected: 2 (expected 2)."
+            }
+          ],
+          "response_preview": "The average order value for the top 5 orders is calculated by summing the amounts of these orders and dividing by 5. The...",
+          "full_response": "The average order value for the top 5 orders is calculated by summing the amounts of these orders and dividing by 5. The exact average order value is $5,552.10."
+        }
+      ],
+      "aggregate_statistics": {
+        "completed_trials": 3,
+        "mean_prompt_eval_count": 570,
+        "mean_eval_count": 87.3,
+        "mean_pure_inference_duration_ms": 643.74,
+        "mean_prompt_eval_duration_ms": 9.45,
+        "mean_load_duration_ms": 5.96,
+        "mean_total_duration_ms": 659.42,
+        "mean_wall_time_ms": 673.98,
+        "rubric_summary": {
+          "total_checks": 9,
+          "passed_checks": 5,
+          "failed_checks": 4,
+          "unverifiable_checks": 0,
+          "pass_rate_percent": 55.6
+        }
+      },
+      "representative_response": "The average order value for the top 5 orders is calculated by summing the amounts of these orders and dividing by 5. The exact average order value is $5,552.10, which is $27,760.50 divided by 5.",
+      "representative_rubric_evaluation": [
+        {
+          "criterion_id": "req_average_order_value",
+          "description": "Must calculate the average order value from the 5 retrieved orders ($5,552.10).",
+          "status": "pass",
+          "rationale": "Expected average ($5,552.10) detected in response: True."
+        },
+        {
+          "criterion_id": "req_west_region_and_2025",
+          "description": "Must reference the West region and 2025 timeline.",
+          "status": "fail",
+          "rationale": "West region referenced: False, 2025 timeline referenced: False."
+        },
+        {
+          "criterion_id": "req_two_sentences_and_formula",
+          "description": "Must state the mathematical formula and final answer in exactly two concise sentences.",
+          "status": "pass",
+          "rationale": "Mathematical calculation formula present: True, sentence count detected: 2 (expected 2)."
+        }
+      ]
+    },
+    {
+      "scenario_id": "synthetic_fixture_multi_step_research_constraints_trajectory",
+      "scenario_name": "Synthetic Fixture 3: Multi-Step Research & Refined Constraints",
+      "fixture_type": "synthetic_deterministic_test_fixture",
+      "fixture_sha256": "acacf424dfa8f32a034e95b60ea5c4faa0a7171c4d34b7801d419c86312b277f",
+      "description": "Models a systems architecture consultation where early broad discussion is progressively narrowed into strict operational constraints (16GB RAM limit, air-gapped, SQ8 quantization, <50ms P99 latency).",
+      "task_domain": "research",
+      "messages_count": 6,
+      "baseline_trials": [
+        {
+          "trial": 1,
+          "status": "completed",
+          "prompt_eval_count": 506,
+          "eval_count": 72,
+          "total_tokens": 578,
+          "total_duration_ns": 561826400,
+          "total_duration_ms": 561.83,
+          "load_duration_ns": 6268000,
+          "load_duration_ms": 6.27,
+          "prompt_eval_duration_ns": 11433000,
+          "prompt_eval_duration_ms": 11.43,
+          "eval_duration_ns": 526376000,
+          "eval_duration_ms": 526.38,
+          "pure_inference_duration_ms": 537.81,
+          "wall_time_ms": 578.62,
+          "done_reason": "stop",
+          "rubric_evaluation": [
+            {
+              "criterion_id": "req_three_bullet_points",
+              "description": "Must provide exactly three concise bullet points.",
+              "status": "pass",
+              "rationale": "Detected 3 bullet items (expected exactly 3)."
+            },
+            {
+              "criterion_id": "req_16gb_ram_and_sq8",
+              "description": "Must explicitly mention the 16GB RAM constraint and SQ8 quantization strategy.",
+              "status": "pass",
+              "rationale": "16GB RAM limit mentioned: True, SQ8 quantization mentioned: True."
+            },
+            {
+              "criterion_id": "req_air_gapped_requirement",
+              "description": "Must adhere to the air-gapped requirement (no cloud/external APIs).",
+              "status": "fail",
+              "rationale": "Air-gapped / on-premises constraint explicitly referenced: False."
+            },
+            {
+              "criterion_id": "req_no_marketing_filler",
+              "description": "Must not include generic marketing advantages or filler.",
+              "status": "pass",
+              "rationale": "Output contains concise technical recommendations without promotional buzzwords."
+            }
+          ],
+          "response_preview": "- Deploy a dedicated Qdrant server container with 8 GB RAM limit to avoid OOM crashes. - Use SQ8 quantization to reduce...",
+          "full_response": "- Deploy a dedicated Qdrant server container with 8 GB RAM limit to avoid OOM crashes.\n- Use SQ8 quantization to reduce vector memory footprint to 400 MB, staying within 16 GB RAM constraints.\n- Pre-load SQ8 index into system page cache to achieve deterministic <15ms P99 search latency."
+        },
+        {
+          "trial": 2,
+          "status": "completed",
+          "prompt_eval_count": 506,
+          "eval_count": 98,
+          "total_tokens": 604,
+          "total_duration_ns": 730122600,
+          "total_duration_ms": 730.12,
+          "load_duration_ns": 4969100,
+          "load_duration_ms": 4.97,
+          "prompt_eval_duration_ns": 11446000,
+          "prompt_eval_duration_ms": 11.45,
+          "eval_duration_ns": 708696000,
+          "eval_duration_ms": 708.7,
+          "pure_inference_duration_ms": 720.15,
+          "wall_time_ms": 743.49,
+          "done_reason": "stop",
+          "rubric_evaluation": [
+            {
+              "criterion_id": "req_three_bullet_points",
+              "description": "Must provide exactly three concise bullet points.",
+              "status": "pass",
+              "rationale": "Detected 3 bullet items (expected exactly 3)."
+            },
+            {
+              "criterion_id": "req_16gb_ram_and_sq8",
+              "description": "Must explicitly mention the 16GB RAM constraint and SQ8 quantization strategy.",
+              "status": "pass",
+              "rationale": "16GB RAM limit mentioned: True, SQ8 quantization mentioned: True."
+            },
+            {
+              "criterion_id": "req_air_gapped_requirement",
+              "description": "Must adhere to the air-gapped requirement (no cloud/external APIs).",
+              "status": "fail",
+              "rationale": "Air-gapped / on-premises constraint explicitly referenced: False."
+            },
+            {
+              "criterion_id": "req_no_marketing_filler",
+              "description": "Must not include generic marketing advantages or filler.",
+              "status": "pass",
+              "rationale": "Output contains concise technical recommendations without promotional buzzwords."
+            }
+          ],
+          "response_preview": "- Deploy a dedicated Qdrant server containerized process with 8 GB RAM limit to stay within 16 GB host RAM. - Use SQ8 qu...",
+          "full_response": "- Deploy a dedicated Qdrant server containerized process with 8 GB RAM limit to stay within 16 GB host RAM.\n- Use SQ8 quantization to reduce vector memory footprint by 75% to 400 MB, ensuring compliance with the 16 GB RAM constraint.\n- Pre-load SQ8 index into system page cache to achieve deterministic <15ms P99 search latency, meeting the 50ms P99 query latency requirement."
+        },
+        {
+          "trial": 3,
+          "status": "completed",
+          "prompt_eval_count": 506,
+          "eval_count": 72,
+          "total_tokens": 578,
+          "total_duration_ns": 538582800,
+          "total_duration_ms": 538.58,
+          "load_duration_ns": 5027300,
+          "load_duration_ms": 5.03,
+          "prompt_eval_duration_ns": 10845000,
+          "prompt_eval_duration_ms": 10.85,
+          "eval_duration_ns": 517772000,
+          "eval_duration_ms": 517.77,
+          "pure_inference_duration_ms": 528.62,
+          "wall_time_ms": 551.03,
+          "done_reason": "stop",
+          "rubric_evaluation": [
+            {
+              "criterion_id": "req_three_bullet_points",
+              "description": "Must provide exactly three concise bullet points.",
+              "status": "pass",
+              "rationale": "Detected 3 bullet items (expected exactly 3)."
+            },
+            {
+              "criterion_id": "req_16gb_ram_and_sq8",
+              "description": "Must explicitly mention the 16GB RAM constraint and SQ8 quantization strategy.",
+              "status": "pass",
+              "rationale": "16GB RAM limit mentioned: True, SQ8 quantization mentioned: True."
+            },
+            {
+              "criterion_id": "req_air_gapped_requirement",
+              "description": "Must adhere to the air-gapped requirement (no cloud/external APIs).",
+              "status": "pass",
+              "rationale": "Air-gapped / on-premises constraint explicitly referenced: True."
+            },
+            {
+              "criterion_id": "req_no_marketing_filler",
+              "description": "Must not include generic marketing advantages or filler.",
+              "status": "pass",
+              "rationale": "Output contains concise technical recommendations without promotional buzzwords."
+            }
+          ],
+          "response_preview": "- Deploy a dedicated Qdrant server container with 8 GB RAM limit to prevent air-gapped crashes. - Use SQ8 quantization t...",
+          "full_response": "- Deploy a dedicated Qdrant server container with 8 GB RAM limit to prevent air-gapped crashes.\n- Use SQ8 quantization to reduce vector memory footprint by 75%, fitting within 16 GB of host RAM.\n- Pre-load SQ8 index into system page cache to ensure deterministic <15ms P99 query latency."
+        }
+      ],
+      "aggregate_statistics": {
+        "completed_trials": 3,
+        "mean_prompt_eval_count": 506,
+        "mean_eval_count": 80.7,
+        "mean_pure_inference_duration_ms": 595.53,
+        "mean_prompt_eval_duration_ms": 11.24,
+        "mean_load_duration_ms": 5.42,
+        "mean_total_duration_ms": 610.18,
+        "mean_wall_time_ms": 624.38,
+        "rubric_summary": {
+          "total_checks": 12,
+          "passed_checks": 10,
+          "failed_checks": 2,
+          "unverifiable_checks": 0,
+          "pass_rate_percent": 83.3
+        }
+      },
+      "representative_response": "- Deploy a dedicated Qdrant server container with 8 GB RAM limit to avoid OOM crashes.\n- Use SQ8 quantization to reduce vector memory footprint to 400 MB, staying within 16 GB RAM constraints.\n- Pre-load SQ8 index into system page cache to achieve deterministic <15ms P99 search latency.",
+      "representative_rubric_evaluation": [
+        {
+          "criterion_id": "req_three_bullet_points",
+          "description": "Must provide exactly three concise bullet points.",
+          "status": "pass",
+          "rationale": "Detected 3 bullet items (expected exactly 3)."
+        },
+        {
+          "criterion_id": "req_16gb_ram_and_sq8",
+          "description": "Must explicitly mention the 16GB RAM constraint and SQ8 quantization strategy.",
+          "status": "pass",
+          "rationale": "16GB RAM limit mentioned: True, SQ8 quantization mentioned: True."
+        },
+        {
+          "criterion_id": "req_air_gapped_requirement",
+          "description": "Must adhere to the air-gapped requirement (no cloud/external APIs).",
+          "status": "fail",
+          "rationale": "Air-gapped / on-premises constraint explicitly referenced: False."
+        },
+        {
+          "criterion_id": "req_no_marketing_filler",
+          "description": "Must not include generic marketing advantages or filler.",
+          "status": "pass",
+          "rationale": "Output contains concise technical recommendations without promotional buzzwords."
+        }
+      ]
+    }
+  ]
+}
