@@ -276,6 +276,10 @@ The architectural integration planned in this audit was implemented and validate
 2. **Stage 3 & 4 Implementation:** Built `TrajectoryReductionService`, schemas (`backend/app/schemas/trajectory.py`), API router (`backend/app/api/trajectory.py`), and settings (`backend/app/core/config.py`).
 3. **Stage 5 Validation:** Added 34 offline unit and integration tests (`backend/tests/test_trajectory_reduction.py`), verified deep scalability, context budget tier snapping, and subsystem decoupling.
 4. **Stage 6 Verification:** Reconciled documentation, verified test isolation, and prepared clean Git changeset.
+5. **Git Commit Lineage & Provenance:**
+   - *Benchmark Execution Base Commit (HEAD during trial run):* `ea0bb47872ecec90519b1bbdba42ca71667db7e9` (captured at `2026-11-06T05:45:08.081374+00:00` against working tree Stage 4 production implementation).
+   - *Phase 6 Initial Feature Commit:* `7c28c9465b053eb376afa37ac7a326ffede4b449` (`feat: add agent trajectory history reduction`).
+   - *Review-Fix Commit:* `44a6d791e31631da4482db2a28a2bd18aa35c181` (`fix: resolve review findings for trajectory integrity, task anchoring, and error handling`).
 
 ---
 
@@ -296,15 +300,15 @@ The architectural integration planned in this audit was implemented and validate
 ### 8.3 10-Trial Empirical Validation Summary
 Evaluated against local Ollama daemon (`qwen2.5:1.5b`) across 10 paired alternating trials per fixture (60 live inferences total):
 - **Fixture 1 (Coding & Debugging):** Input tokens reduced from 394 to 273 (**-30.71% token savings**); prefill latency reduced from 25.53ms to 11.26ms; 1 formatting regression vs 3 code-block improvements.
-- **Fixture 2 (SQL Data Exploration):** Input tokens preserved at 570 (**0.0% reduction** to protect all 5 database rows and query filters); calculation accuracy on `$5,552.10` reached **100% (10/10 passes)** vs 80% on baseline; 4 sentence-count regressions vs 4 improvements.
+- **Fixture 2 (SQL Data Exploration):** Input tokens preserved at 570 (**0.0% reduction** to protect all 5 database rows and query filters); calculation accuracy on `$5,552.10` reached **100% (10/10 passes)** vs 80% on baseline; aggregate 3-criterion pass rate remained stable at **40.0%** (12/30 total passes) due to 4 sentence-count regressions vs 4 improvements.
 - **Fixture 3 (Multi-Step Research):** Input tokens reduced from 506 to 398 (**-21.34% token savings**); pass rate improved from 70.0% to 82.5%; 1 wording regression vs 6 improvements.
 - **Overall:** 6 criterion-level regressions and 13 improvements across 120 total evaluations. Sub-millisecond reduction overhead on normal trajectories; sub-5ms on deep 50-turn trajectories.
 
 ### 8.4 Test Isolation & Integrity
-- **Default Offline Suite:** `pytest backend/tests` runs 272+ tests offline without daemon connection.
-- **Live Integration Suite:** `pytest -m ollama_integration backend/tests` tests live execution against Ollama and skips cleanly if unreachable.
-- **Static Analysis:** `pyright` passes with 0 errors, 0 warnings.
-- **Frontend Suite:** 27 unit tests pass; production build completes cleanly.
+- **Default Offline Suite:** `pytest backend/tests` runs **279 offline tests** completely decoupled from daemon state (with 1 daemon test deselected).
+- **Live Integration Suite:** `pytest -m ollama_integration backend/tests` runs **1 live daemon integration test** against local `qwen2.5:1.5b` (skipping gracefully if daemon is absent).
+- **Static Analysis:** `pyright` passes with 0 errors, 0 warnings across all production modules, schemas, endpoints, tests, and scripts.
+- **Frontend Suite:** `vitest` runs **27 unit tests** across 5 test suites (all passing); production build completes cleanly.
 
 ### 8.5 Standalone API Status & Pipeline Independence
 > [!IMPORTANT]

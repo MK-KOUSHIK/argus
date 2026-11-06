@@ -1146,3 +1146,101 @@ def test_latest_user_task_preservation_when_conservative_retention_disabled(monk
     assert "system" in roles
     assert res.reduced_messages[-2].content == "Now please implement the final sorting function."
     assert res.reduced_messages[-1].content == "Here is the implementation of the sorting function."
+
+
+def test_tool_call_integrity_preserved_with_multiple_trailing_tool_calls_and_results():
+    """Verify tool-call integrity is valid after reduction when the latest user task has multiple tool calls and results."""
+    trajectory = [
+        TrajectoryMessage(role="system", content="You are a data processing assistant."),
+        TrajectoryMessage(role="user", content="Initial conversational chatter without constraints."),
+        TrajectoryMessage(role="assistant", content="Understood, I am ready."),
+        TrajectoryMessage(
+            role="user",
+            content="Active task: Fetch both active customer profile and latest invoices.",
+        ),
+        TrajectoryMessage(
+            role="assistant",
+            content="Fetching customer profile and invoices simultaneously.",
+            tool_calls=[
+                ToolCall(
+                    id="call_cust_001",
+                    type="function",
+                    function=ToolCallFunction(name="get_customer", arguments={"customer_id": "C42"}),
+                ),
+                ToolCall(
+                    id="call_inv_002",
+                    type="function",
+                    function=ToolCallFunction(name="get_invoices", arguments={"customer_id": "C42"}),
+                ),
+            ],
+        ),
+        TrajectoryMessage(
+            role="tool",
+            tool_call_id="call_cust_001",
+            name="get_customer",
+            content='{"customer_id": "C42", "name": "Acme Corp", "status": "active"}',
+        ),
+        TrajectoryMessage(
+            role="tool",
+            tool_call_id="call_inv_002",
+            name="get_invoices",
+            content='[{"invoice_id": "INV-101", "amount": 1450.00}, {"invoice_id": "INV-102", "amount": 850.50}]',
+        ),
+        TrajectoryMessage(
+            role="assistant",
+            content="Acme Corp has 2 invoices totaling $2,300.50.",
+        ),
+    ]
+
+    # Validate original integrity passes
+    validate_trajectory_integrity(trajectory)
+
+    # Execute reduction
+    req = ReduceTrajectoryRequest(
+        messages=trajectory,
+        preserve_recent_turns=1,
+    )
+    res = TrajectoryReductionService.reduce_trajectory(req)
+
+    # Reduction must succeed with zero fallback
+    assert res.fallback_used is False
+
+    # The reduced trajectory must strictly pass post-reduction integrity validation
+    validate_trajectory_integrity(res.reduced_messages)
+
+    # Decisions check: active user task at index 3 is preserved as anchor
+    decisions = {d.message_index: d for d in res.telemetry.decisions}
+    assert decisions[3].action == "retained"
+    assert decisions[3].action_detail == "preserved_anchor"
+    assert "Active user prompt must be preserved" in decisions[3].reason
+
+    # Trailing multiple tool-call and tool-result events must be preserved
+    assert decisions[4].action == "retained"
+    assert decisions[4].action_detail == "preserved_trailing_event"
+    assert decisions[5].action == "retained"
+    assert decisions[5].action_detail == "preserved_trailing_event"
+    assert decisions[6].action == "retained"
+    assert decisions[6].action_detail == "preserved_trailing_event"
+    assert decisions[7].action == "retained"
+    assert decisions[7].action_detail == "preserved_trailing_event"
+
+    # Verify tool calls and bindings exist in the reduced message sequence
+    asst_tool_msg = next(m for m in res.reduced_messages if m.role == "assistant" and m.tool_calls)
+    assert asst_tool_msg.tool_calls is not None
+    assert len(asst_tool_msg.tool_calls) == 2
+    tool_call_ids = {tc.id for tc in asst_tool_msg.tool_calls}
+    assert tool_call_ids == {"call_cust_001", "call_inv_002"}
+
+    tool_result_ids = {m.tool_call_id for m in res.reduced_messages if m.role == "tool"}
+    assert tool_result_ids == {"call_cust_001", "call_inv_002"}
+
+    # Also verify when trajectory ends immediately after the multiple tool results
+    trajectory_ending_with_tools = trajectory[:-1]
+    validate_trajectory_integrity(trajectory_ending_with_tools)
+    req_end_tool = ReduceTrajectoryRequest(messages=trajectory_ending_with_tools, preserve_recent_turns=1)
+    res_end_tool = TrajectoryReductionService.reduce_trajectory(req_end_tool)
+
+    assert res_end_tool.fallback_used is False
+    validate_trajectory_integrity(res_end_tool.reduced_messages)
+    assert res_end_tool.reduced_messages[-1].role == "tool"
+    assert res_end_tool.reduced_messages[-1].tool_call_id == "call_inv_002"

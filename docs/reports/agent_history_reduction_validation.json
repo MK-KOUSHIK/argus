@@ -1,6 +1,10 @@
 {
   "timestamp": "2026-11-06T05:45:08.081374+00:00",
   "git_commit_sha": "ea0bb47872ecec90519b1bbdba42ca71667db7e9",
+  "execution_base_commit_sha": "ea0bb47872ecec90519b1bbdba42ca71667db7e9",
+  "implementation_commit_sha": "7c28c9465b053eb376afa37ac7a326ffede4b449",
+  "review_fix_commit_sha": "44a6d791e31631da4482db2a28a2bd18aa35c181",
+  "provenance_note": "Benchmark measurements were captured during live Ollama execution at timestamp 2026-11-06T05:45:08.081374+00:00 with HEAD at ea0bb47872ecec90519b1bbdba42ca71667db7e9. They are not attributed to subsequent review-fix commits.",
   "ollama_version": "0.40.8",
   "model_name": "qwen2.5:1.5b",
   "model_digest": "65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b",

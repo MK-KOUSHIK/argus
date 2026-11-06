@@ -1,7 +1,11 @@
 # Argus Phase 6 – Agent History Reduction Stage 4 Production Validation Report
 
 - **Execution Timestamp:** `2026-11-06T05:45:08.081374+00:00`
-- **Git Commit SHA:** `ea0bb47872ecec90519b1bbdba42ca71667db7e9`
+- **Git Commit Provenance & Lineage:**
+  - **Benchmark Execution Base Commit (HEAD during trial run):** `ea0bb47872ecec90519b1bbdba42ca71667db7e9` (base commit on `main`, with working tree Phase 6 Stage 4 implementation)
+  - **Initial Implementation Commit:** `7c28c9465b053eb376afa37ac7a326ffede4b449` (`feat: add agent trajectory history reduction`)
+  - **Review-Fix Commit:** `44a6d791e31631da4482db2a28a2bd18aa35c181` (`fix: resolve review findings for trajectory integrity, task anchoring, and error handling`)
+- **Measurement Attribution Disclaimer:** The benchmark measurements, token counts, inference durations, and rubric pass rates in this report were captured during the live 60-inference benchmark on the local Ollama daemon at the execution timestamp above. They reflect that execution state and are not attributed to subsequent review-fix commits.
 - **Ollama Version:** `0.40.8`
 - **Model:** `qwen2.5:1.5b` (`65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b`)
 - **Generation Options:** `temperature=0.2`, `top_p=0.9`, `num_ctx=4096`, `num_predict=512`
@@ -194,6 +198,32 @@ def format_currency(amount: float, currency_code: str) -> str:
 ```
 The average order value for the top 5 orders is calculated by summing the total amount of $27,760.50 and dividing by 5, resulting in an average order value of $5,552.10.
 ```
+
+#### Detailed Rubric Reconciliation: 100% Financial Calculation Accuracy vs. 40.0% Aggregate Pass Rate
+
+The raw evaluation logs across all 10 paired trials reveal how a **100.0% financial calculation accuracy** coexists with a **40.0% overall rubric pass rate**:
+
+1. **Exact Financial Calculation Criterion (`req_average_order_value`):**
+   - **Baseline Unreduced:** Passed in **8 of 10 trials (80.0%)** (Trials 1 and 3 failed due to unreduced conversational distraction causing arithmetic hallucinations).
+   - **Reduced Trajectory:** Passed in **10 of 10 trials (100.0%)** ($5,552.10$ calculated accurately in every trial).
+   - **Transitions:** 2 improvements ($F \to P$, in Trials 1 and 3) and **0 regressions**.
+   - By pruning irrelevant conversational commentary while strictly safeguarding the 5 retrieved database records and filter criteria, reduction achieved a 100% success rate on the active financial task.
+
+2. **Domain Scope Criterion (`req_west_region_and_2025`):**
+   - **Baseline Unreduced:** Passed in **0 of 10 trials (0.0%)**.
+   - **Reduced Trajectory:** Passed in **1 of 10 trials (10.0%)** (Trial 5 passed).
+   - **Transitions:** 1 improvement ($F \to P$, in Trial 5) and **0 regressions**.
+
+3. **Output Formatting Criterion (`req_two_sentences_and_formula`):**
+   - **Baseline Unreduced:** Passed in **4 of 10 trials (40.0%)** (Trials 3, 4, 5, 10 met the exact two-sentence constraint).
+   - **Reduced Trajectory:** Passed in **1 of 10 trials (10.0%)** (Trial 6 passed; other trials generated 1 concise sentence instead of 2).
+   - **Transitions:** 4 regressions ($P \to F$, in Trials 3, 4, 5, 10) and 1 improvement ($F \to P$, in Trial 6).
+
+4. **Aggregate Pass Rate Accounting:**
+   - 3 criteria $\times$ 10 trials = **30 total criterion evaluations**.
+   - **Baseline Total Passes:** $8 + 0 + 4 = 12$ passes out of 30 (**40.0%**).
+   - **Reduced Total Passes:** $10 + 1 + 1 = 12$ passes out of 30 (**40.0%**).
+   - **Reconciliation:** The 40.0% aggregate pass rate measures compliance across all 3 criteria simultaneously (including formatting sentence length). The 100.0% calculation accuracy reflects the specific domain task criterion (`req_average_order_value`), where all 10 trials succeeded.
 
 ---
 
