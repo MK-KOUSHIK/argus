@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { PromptEditor } from '@/components/PromptEditor';
 import { OptimizationControls } from '@/components/OptimizationControls';
 import { ComparisonView } from '@/components/ComparisonView';
+import { OutputComparisonView } from '@/components/OutputComparisonView';
 import { MetricsPanel } from '@/components/MetricsPanel';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -15,6 +16,7 @@ import {
   ExamplePrompt,
   OllamaStatus,
   ModelCatalogItem,
+  ComparisonResult,
 } from '@/types';
 import {
   Sparkles,
@@ -22,6 +24,8 @@ import {
   AlertTriangle,
   Clock,
   Cpu,
+  Bot,
+  Layers,
 } from 'lucide-react';
 
 export interface WorkspacePageProps {
@@ -34,9 +38,13 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
   const [targetModel, setTargetModel] = useState<TargetModel>('gemini-1-5-flash');
   const [status, setStatus] = useState<OptimizationStatus>('idle');
   const [result, setResult] = useState<OptimizationResult | null>(null);
+  const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
+  const [resultTab, setResultTab] = useState<'comparison' | 'prompt'>('comparison');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [enableRouting, setEnableRouting] = useState<boolean>(true);
   const [requestedModel, setRequestedModel] = useState<string>('');
+  const [downstreamModel, setDownstreamModel] = useState<string>('');
+  const [trials, setTrials] = useState<number>(1);
   const [discoveredModels, setDiscoveredModels] = useState<ModelCatalogItem[]>([]);
 
   React.useEffect(() => {
@@ -48,6 +56,9 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
           setDiscoveredModels(data.models);
           if (!requestedModel && data.models.length > 0) {
             setRequestedModel(data.models[0].name);
+          }
+          if (!downstreamModel && data.models.length > 0) {
+            setDownstreamModel(data.models[0].name);
           }
         }
       })
@@ -67,6 +78,7 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
   const handleClear = () => {
     setRawPrompt('');
     setResult(null);
+    setComparisonResult(null);
     setStatus('idle');
     setErrorMessage(null);
   };
@@ -93,12 +105,51 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
       });
 
       setResult(optimizationResult);
+      setComparisonResult(null);
+      setResultTab('prompt');
       setStatus('success');
     } catch (err) {
       setErrorMessage(
         err instanceof Error
           ? err.message
           : 'An unexpected error occurred during prompt optimization'
+      );
+      setStatus('error');
+    }
+  };
+
+  const handleCompare = async () => {
+    const trimmed = rawPrompt.trim();
+    if (!trimmed) {
+      setErrorMessage('Please enter or select a prompt before running output comparison.');
+      setStatus('error');
+      return;
+    }
+
+    setErrorMessage(null);
+    setStatus('comparing');
+
+    try {
+      const targetDownstream = downstreamModel || requestedModel || ollamaStatus?.model || 'qwen2.5:1.5b';
+      const cmpRes = await apiService.compareOutputs({
+        prompt: trimmed,
+        downstream_model: targetDownstream,
+        mode,
+        target_model: targetModel,
+        enable_optimizer_routing: enableRouting,
+        requested_optimizer_model: enableRouting ? undefined : (requestedModel || undefined),
+        trials,
+      });
+
+      setComparisonResult(cmpRes);
+      setResult(cmpRes.optimizerDetails);
+      setResultTab('comparison');
+      setStatus('success');
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'An unexpected error occurred during output comparison'
       );
       setStatus('error');
     }
@@ -197,11 +248,17 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
             requestedModel={requestedModel}
             onRequestedModelChange={setRequestedModel}
             discoveredModels={discoveredModels}
+            downstreamModel={downstreamModel}
+            onDownstreamModelChange={setDownstreamModel}
+            trials={trials}
+            onTrialsChange={setTrials}
+            onCompare={handleCompare}
+            isComparing={status === 'comparing'}
           />
         </div>
       </div>
 
-      {/* Loading State Animation */}
+      {/* Loading State: Optimizing */}
       {status === 'optimizing' && (
         <Card className="p-8 text-center border-cyan-500/30 bg-[#091222]">
           <div className="max-w-md mx-auto space-y-4">
@@ -226,27 +283,86 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
         </Card>
       )}
 
+      {/* Loading State: Comparing */}
+      {status === 'comparing' && (
+        <Card className="p-8 text-center border-cyan-500/30 bg-[#091222]">
+          <div className="max-w-md mx-auto space-y-4">
+            <div className="w-12 h-12 mx-auto rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400 animate-pulse">
+              <Bot className="w-6 h-6 animate-bounce" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold text-slate-100">
+                Comparing Original vs Optimized Downstream Outputs...
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Executing Execution A (Original Prompt) and Execution B (Optimized Prompt) against local model{' '}
+                <code className="text-cyan-300 font-mono">{downstreamModel || requestedModel || 'qwen2.5:1.5b'}</code>.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-4 text-[11px] font-mono text-cyan-300">
+              <span className="flex items-center gap-1">
+                <Clock className="w-3 h-3 animate-spin" /> Sequential dual inference in progress
+              </span>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Success State: Results & Metrics */}
       {status === 'success' && result && (
         <section className="space-y-6 pt-2">
-          {/* Metrics Panel */}
-          <MetricsPanel result={result} />
+          {/* View Tab Switcher (if output comparison was run) */}
+          {comparisonResult && (
+            <div className="flex items-center justify-center sm:justify-start gap-2 p-1 rounded-xl bg-[#080d19] border border-white/5 w-fit">
+              <button
+                type="button"
+                onClick={() => setResultTab('comparison')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  resultTab === 'comparison'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Bot className="w-3.5 h-3.5" />
+                <span>Downstream Output Comparison</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setResultTab('prompt')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  resultTab === 'prompt'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Prompt Diff & Metrics</span>
+              </button>
+            </div>
+          )}
 
-          {/* Comparison View */}
-          <ComparisonView
-            originalPrompt={result.originalPrompt}
-            optimizedPrompt={result.optimizedPrompt}
-            onOptimizedPromptChange={handleOptimizedPromptChange}
-            originalMetrics={result.originalMetrics}
-            optimizedMetrics={result.optimizedMetrics}
-            tokenReductionPercent={result.tokenReductionPercent}
-            tokenSavings={result.tokenSavings}
-            tokenChangePercent={result.tokenChangePercent}
-            strategy={result.strategy}
-            isPreserved={result.isPreserved}
-            validationStatus={result.validationStatus}
-            model={result.model}
-          />
+          {/* Render selected view */}
+          {comparisonResult && resultTab === 'comparison' ? (
+            <OutputComparisonView comparison={comparisonResult} />
+          ) : (
+            <div className="space-y-6">
+              <MetricsPanel result={result} />
+              <ComparisonView
+                originalPrompt={result.originalPrompt}
+                optimizedPrompt={result.optimizedPrompt}
+                onOptimizedPromptChange={handleOptimizedPromptChange}
+                originalMetrics={result.originalMetrics}
+                optimizedMetrics={result.optimizedMetrics}
+                tokenReductionPercent={result.tokenReductionPercent}
+                tokenSavings={result.tokenSavings}
+                tokenChangePercent={result.tokenChangePercent}
+                strategy={result.strategy}
+                isPreserved={result.isPreserved}
+                validationStatus={result.validationStatus}
+                model={result.model}
+              />
+            </div>
+          )}
         </section>
       )}
 

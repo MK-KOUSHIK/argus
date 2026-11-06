@@ -1,5 +1,15 @@
 """Pydantic schemas for request and response validation."""
 
+from .comparison import (
+    AggregateLatency,
+    ComparisonExecutionTelemetry,
+    ComparisonMetrics,
+    ComparisonRequest,
+    ComparisonResponse,
+    EffectiveGenerationSettings,
+    LatencyBreakdown,
+    TrialTelemetry,
+)
 from .health import HealthResponse
 from .optimizer import (
     OptimizationMode,
@@ -23,8 +33,15 @@ from .routing import (
 )
 
 __all__ = [
+    "AggregateLatency",
+    "ComparisonExecutionTelemetry",
+    "ComparisonMetrics",
+    "ComparisonRequest",
+    "ComparisonResponse",
     "ComplexityTelemetry",
+    "EffectiveGenerationSettings",
     "HealthResponse",
+    "LatencyBreakdown",
     "ModelCatalogItem",
     "ModelCatalogResponse",
     "ModelTier",
@@ -39,5 +56,6 @@ __all__ = [
     "RoutingStatus",
     "TaskCategory",
     "TokenEstimation",
+    "TrialTelemetry",
     "ValidationStatus",
 ]

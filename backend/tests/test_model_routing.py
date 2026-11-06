@@ -1119,6 +1119,7 @@ async def test_route_manual_override_unavailable_telemetry(mock_two_models):
             prompt="Simple summary request",
             requested_model="qwen2.5:1.5b",
             allow_override_fallback=False,
+            gpu_telemetry=None,
             ram_telemetry=None,
         )
     assert "both gpu and host ram telemetry are missing" in str(exc_info.value).lower()
@@ -1129,6 +1130,7 @@ async def test_route_manual_override_unavailable_telemetry(mock_two_models):
             prompt="Simple summary request",
             requested_model="qwen2.5:1.5b",
             allow_override_fallback=True,
+            gpu_telemetry=None,
             ram_telemetry=None,
         )
     assert "no alternative safe fallback" in str(exc_info.value).lower()

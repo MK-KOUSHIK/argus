@@ -271,6 +271,95 @@ Checks whether the local Ollama instance is running and verifies model availabil
 }
 ```
 
+### 3. End-to-End Downstream Output Comparison (`POST /api/compare`)
+Executes two genuine downstream LLM inferences (Execution A on original prompt, Execution B on optimized prompt) pinned to the same model, with model warm-up, alternating paired trials, granular latency separation, and native Ollama telemetry:
+
+```json
+{
+  "prompt": "What is the speed of light in vacuum in meters per second? Give only the exact numerical value and unit in one sentence.",
+  "downstream_model": "qwen2.5:1.5b",
+  "mode": "concise",
+  "temperature": 0.3,
+  "max_tokens": 300,
+  "trials": 3,
+  "warmup": true
+}
+```
+
+**Response (`200 OK`)**:
+```json
+{
+  "original_execution": {
+    "prompt": "What is the speed of light in vacuum in meters per second? Give only the exact numerical value and unit in one sentence.",
+    "response": "The speed of light in vacuum is exactly 299,792,458 meters per second.",
+    "model": "qwen2.5:1.5b",
+    "provider": "ollama",
+    "prompt_tokens": 54,
+    "output_tokens": 25,
+    "total_tokens": 79,
+    "duration_ms": 286.5,
+    "prompt_eval_duration_ms": 45.2,
+    "done_reason": "stop",
+    "latency_breakdown": {
+      "model_load_duration_ms": 0.0,
+      "prompt_eval_duration_ms": 45.2,
+      "eval_duration_ms": 241.3,
+      "inference_duration_ms": 286.5,
+      "queue_wait_duration_ms": 1.2,
+      "wall_time_ms": 287.7
+    }
+  },
+  "optimized_execution": {
+    "prompt": "What is the speed of light in vacuum in meters per second?",
+    "response": "The speed of light in a vacuum is approximately 299,792,458 meters per second.",
+    "model": "qwen2.5:1.5b",
+    "provider": "ollama",
+    "prompt_tokens": 42,
+    "output_tokens": 26,
+    "total_tokens": 68,
+    "duration_ms": 222.13,
+    "prompt_eval_duration_ms": 12.66,
+    "done_reason": "stop",
+    "latency_breakdown": {
+      "model_load_duration_ms": 0.0,
+      "prompt_eval_duration_ms": 12.66,
+      "eval_duration_ms": 209.47,
+      "inference_duration_ms": 222.13,
+      "queue_wait_duration_ms": 0.8,
+      "wall_time_ms": 222.93
+    }
+  },
+  "metrics": {
+    "prompt_tokens_saved": 12,
+    "prompt_token_reduction_percent": 22.22,
+    "output_tokens_diff": 1,
+    "output_token_change_percent": 4.0,
+    "total_tokens_saved": 11,
+    "total_token_reduction_percent": 13.92,
+    "latency_delta_ms": -64.37,
+    "latency_reduction_percent": 22.47,
+    "latency_note": "Averaged across 3 paired trials with alternating execution order ([A, B], [B, A]).",
+    "generation_parameters_identical": true,
+    "semantic_quality": "not_evaluated",
+    "semantic_quality_reason": "No automated judge model is configured. Semantic equivalence and response quality must be verified by human inspection."
+  },
+  "downstream_model": "qwen2.5:1.5b",
+  "effective_settings": {
+    "num_ctx": 2048,
+    "temperature": 0.3,
+    "num_predict": 300,
+    "top_p": 0.9,
+    "system_instruction": null
+  },
+  "trials": 3,
+  "warmup": true,
+  "warmup_attempted": true,
+  "warmup_succeeded": true,
+  "warmup_error": null,
+  "timestamp": "2026-11-06T03:46:41Z"
+}
+```
+
 ---
 
 ## 🧠 Task-Aware Optimization Pipeline
@@ -305,14 +394,14 @@ Argus implements a modular 4-stage optimization pipeline:
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 ```
-- **118 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, dynamic context tier derivation, 413 overflow safeguards, hardware telemetry, independent process verification, dynamic concurrency capacity enforcement, **Output Budget Control**, and **Stage 0 Content-Aware Compression Engine** (specialized compressors, AST node parity, reversible registry lifecycle, prefix preservation, and 12 adversarial semantic-preservation tests).
+- **234 passing tests** covering health check, optimizer route, task analysis, strategy selection, candidate validation, semantic preservation, Ollama error handling, dynamic context tier derivation, 413 overflow safeguards, hardware telemetry, independent process verification, dynamic concurrency capacity enforcement, Output Budget Control, Stage 0 Content-Aware Compression Engine, Local Model Routing (Phase 5), and **End-to-End Downstream Output Comparison**.
 
 ### 2. Frontend Tests (Vitest)
 ```bash
 cd frontend
-npm.cmd test -- --run
+npm.cmd test
 ```
-- **19 passing tests** across `App.test.tsx`, `Workspace.test.tsx`, `useHealth.test.tsx`, and `useOllamaStatus.test.tsx` validating layout, tab navigation, user input, mode switching, diff rendering, Ollama status, telemetry display, and mock API integration.
+- **26 passing tests** across `App.test.tsx`, `Workspace.test.tsx`, `OutputComparison.test.tsx`, `useHealth.test.tsx`, and `useOllamaStatus.test.tsx` validating layout, tab navigation, user input, mode switching, diff rendering, downstream output comparison view, Ollama status, telemetry display, and API error handling.
 
 ### 3. Frontend Production Build
 ```bash
@@ -320,6 +409,13 @@ cd frontend
 npm.cmd run build
 ```
 - Executes TypeScript validation (`tsc -b`) and bundles production assets via Vite with zero type errors.
+
+### 4. Live Downstream Output Comparison Validation
+```bash
+cd D:\Projects\Argus
+.\backend\.venv\Scripts\python.exe scripts\validate_output_comparison_live.py
+```
+- Executes 3 real scenarios (short factual, redundant context, multi-constraint task) against the live Ollama daemon, pinning both Execution A (original prompt) and Execution B (optimized prompt) to the same local model (`qwen2.5:1.5b`), capturing real native telemetry without fabrication, and generating [`docs/reports/output_comparison_validation.md`](docs/reports/output_comparison_validation.md).
 
 ---
 

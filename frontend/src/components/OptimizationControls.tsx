@@ -3,7 +3,7 @@ import { Card } from './Card';
 import { Button } from './Button';
 import { ILLUSTRATIVE_MODELS } from '@/services/mockOptimizer';
 import { OptimizationMode, TargetModel, OllamaStatus, ModelCatalogItem } from '@/types';
-import { Zap, Sliders, ShieldAlert, AlertCircle, CheckCircle, Route } from 'lucide-react';
+import { Zap, Sliders, ShieldAlert, AlertCircle, CheckCircle, Route, Bot } from 'lucide-react';
 
 export interface OptimizationControlsProps {
   mode: OptimizationMode;
@@ -19,6 +19,12 @@ export interface OptimizationControlsProps {
   requestedModel?: string;
   onRequestedModelChange?: (model: string) => void;
   discoveredModels?: ModelCatalogItem[];
+  downstreamModel?: string;
+  onDownstreamModelChange?: (model: string) => void;
+  trials?: number;
+  onTrialsChange?: (trials: number) => void;
+  onCompare?: () => void;
+  isComparing?: boolean;
 }
 
 export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
@@ -35,6 +41,12 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
   requestedModel = '',
   onRequestedModelChange,
   discoveredModels = [],
+  downstreamModel = '',
+  onDownstreamModelChange,
+  trials = 1,
+  onTrialsChange,
+  onCompare,
+  isComparing = false,
 }) => {
   const isOllamaReady = Boolean(ollamaStatus?.connected && ollamaStatus?.model_installed);
 
@@ -178,54 +190,133 @@ export const OptimizationControls: React.FC<OptimizationControlsProps> = ({
           </div>
         </div>
 
-        {/* Target Frontier Model Selector & Execute Action */}
+        {/* Target Model, Downstream Model & Actions */}
         <div className="flex flex-col justify-between space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label htmlFor="target-model-select" className="text-xs font-semibold text-slate-200">
-                Target Model (Illustrative)
-              </label>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 bg-[#080d19] px-1.5 py-0.5 rounded border border-white/5">
-                Model Profile
-              </span>
+          <div className="space-y-3">
+            {/* Target Model (Illustrative) */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label htmlFor="target-model-select" className="text-xs font-semibold text-slate-200">
+                  Target Model (Illustrative)
+                </label>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 bg-[#080d19] px-1.5 py-0.5 rounded border border-white/5">
+                  Model Profile
+                </span>
+              </div>
+
+              <select
+                id="target-model-select"
+                value={targetModel}
+                onChange={(e) => onTargetModelChange(e.target.value as TargetModel)}
+                className="w-full p-2 rounded-lg bg-[#080d19] border border-white/10 text-slate-200 text-xs font-medium focus:outline-none focus:border-cyan-500/50"
+              >
+                {ILLUSTRATIVE_MODELS.map((model) => (
+                  <option key={model.id} value={model.id} className="bg-[#0b1324] text-slate-200">
+                    {model.name} ({model.provider}) &bull; {model.contextWindow}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <select
-              id="target-model-select"
-              value={targetModel}
-              onChange={(e) => onTargetModelChange(e.target.value as TargetModel)}
-              className="w-full p-2.5 rounded-lg bg-[#080d19] border border-white/10 text-slate-200 text-xs font-medium focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-all cursor-pointer"
-            >
-              {ILLUSTRATIVE_MODELS.map((model) => (
-                <option key={model.id} value={model.id} className="bg-[#0b1324] text-slate-200">
-                  {model.name} ({model.provider}) &bull; {model.contextWindow}
-                </option>
-              ))}
-            </select>
+            {/* Downstream Model (Pinned for Output Comparison) */}
+            <div className="space-y-1 pt-1 border-t border-white/5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="downstream-model-select" className="text-xs font-semibold text-cyan-300 flex items-center gap-1">
+                  <Bot className="w-3.5 h-3.5 text-cyan-400" />
+                  Downstream LLM (Pinned)
+                </label>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 bg-cyan-950/50 px-1.5 py-0.5 rounded border border-cyan-500/30">
+                  Dual Execution
+                </span>
+              </div>
 
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              Target profile for illustrative token estimation. Downstream task execution routing is not yet implemented.
-            </p>
+              <select
+                id="downstream-model-select"
+                value={downstreamModel || (ollamaStatus?.model || 'qwen2.5:1.5b')}
+                onChange={(e) => onDownstreamModelChange && onDownstreamModelChange(e.target.value)}
+                className="w-full p-2 rounded-lg bg-[#080d19] border border-cyan-500/30 text-cyan-100 text-xs font-mono focus:outline-none focus:border-cyan-400"
+              >
+                {discoveredModels.length > 0 ? (
+                  discoveredModels.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name} ({m.parameter_size || m.tier}) {m.is_loaded ? '• [VRAM loaded]' : ''}
+                    </option>
+                  ))
+                ) : (
+                  (ollamaStatus?.available_models || ['qwen2.5:1.5b']).map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))
+                )}
+              </select>
+              <p className="text-[10px] text-slate-400 leading-tight">
+                Both original & optimized prompts will be evaluated against this exact model.
+              </p>
+            </div>
+
+            {/* Finding 1: Measurement Trials Selector */}
+            <div className="flex items-center justify-between text-xs pt-1 border-t border-white/5">
+              <span className="text-[11px] font-mono text-slate-300">Measurement Trials:</span>
+              <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => onTrialsChange && onTrialsChange(1)}
+                  className={`px-2 py-0.5 rounded border transition-colors ${
+                    trials === 1
+                      ? 'bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold'
+                      : 'bg-[#080d19] text-slate-400 border-white/10 hover:text-slate-200'
+                  }`}
+                >
+                  1 (Single)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onTrialsChange && onTrialsChange(3)}
+                  className={`px-2 py-0.5 rounded border transition-colors ${
+                    trials === 3
+                      ? 'bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold'
+                      : 'bg-[#080d19] text-slate-400 border-white/10 hover:text-slate-200'
+                  }`}
+                >
+                  3 (Paired alternating)
+                </button>
+              </div>
+            </div>
           </div>
 
-          {/* Action Trigger */}
-          <div className="pt-2">
+          {/* Action Triggers: Compare Outputs and Optimize Prompt */}
+          <div className="pt-2 space-y-2">
+            {onCompare && (
+              <Button
+                variant="primary"
+                size="lg"
+                className="w-full font-semibold bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-navy-950"
+                onClick={onCompare}
+                disabled={disabled || isLoading || isComparing}
+                isLoading={isComparing}
+              >
+                <Bot className="w-4 h-4 text-navy-950" />
+                <span>{isComparing ? 'Running Output Comparison...' : 'Compare Downstream Outputs'}</span>
+              </Button>
+            )}
+
             <Button
-              variant="primary"
-              size="lg"
-              className="w-full font-semibold"
+              variant="outline"
+              size="md"
+              className="w-full font-medium text-xs text-slate-300 hover:text-white border-white/10"
               onClick={onOptimize}
-              disabled={disabled || isLoading}
+              disabled={disabled || isLoading || isComparing}
               isLoading={isLoading}
             >
-              <Zap className="w-4 h-4 text-navy-950" />
-              <span>{isLoading ? 'Optimizing with Local LLM...' : 'Optimize Prompt'}</span>
+              <Zap className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{isLoading ? 'Optimizing Prompt...' : 'Optimize Prompt Only'}</span>
             </Button>
 
-            {disabled && !isLoading && (
+            {disabled && !isLoading && !isComparing && (
               <p className="text-[11px] text-slate-500 text-center mt-2 flex items-center justify-center gap-1">
                 <ShieldAlert className="w-3 h-3 text-slate-500" />
-                Enter prompt text above to enable optimization
+                Enter prompt text above to enable execution
               </p>
             )}
           </div>
