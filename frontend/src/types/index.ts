@@ -67,7 +67,7 @@ export interface ModelOption {
   isIllustrative: true;
 }
 
-export type OptimizationStatus = 'idle' | 'optimizing' | 'success' | 'error';
+export type OptimizationStatus = 'idle' | 'optimizing' | 'comparing' | 'success' | 'error';
 
 export interface TokenEstimation {
   charCount: number;
@@ -346,3 +346,58 @@ export interface OllamaStatus {
     };
   } | null;
 }
+
+/* =========================================================================
+   End-to-End Original vs Optimized LLM Output Comparison
+   ========================================================================= */
+
+export interface ComparisonExecutionTelemetry {
+  prompt: string;
+  response: string;
+  model: string;
+  provider: string;
+  prompt_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  duration_ms: number | null;
+  ttft_ms: number | null;
+  status: string;
+  done_reason: string | null;
+  native_telemetry?: Record<string, unknown> | null;
+}
+
+export interface ComparisonMetrics {
+  prompt_tokens_saved: number | null;
+  prompt_token_reduction_percent: number | null;
+  output_tokens_diff: number | null;
+  output_token_change_percent: number | null;
+  total_tokens_saved: number | null;
+  total_token_reduction_percent: number | null;
+  latency_delta_ms: number | null;
+  latency_reduction_percent: number | null;
+  semantic_quality: string;
+  semantic_quality_reason: string;
+}
+
+export interface ComparisonRequestPayload {
+  prompt: string;
+  downstream_model?: string;
+  mode?: OptimizationMode;
+  target_model?: string;
+  system_instruction?: string;
+  temperature?: number;
+  max_tokens?: number;
+  top_p?: number;
+  enable_optimizer_routing?: boolean;
+  requested_optimizer_model?: string;
+}
+
+export interface ComparisonResult {
+  originalExecution: ComparisonExecutionTelemetry;
+  optimizedExecution: ComparisonExecutionTelemetry;
+  metrics: ComparisonMetrics;
+  optimizerDetails: OptimizationResult;
+  downstreamModel: string;
+  timestamp: string;
+}
+

@@ -237,3 +237,92 @@ The Phase 5 routing engine automatically selects the optimal local Ollama model 
 8. **Validation & Benchmarking Protocol**:
    - Live validation differentiates between **Scenario 3A: Policy Simulations** (artificially strict policy thresholds such as high safety margins to verify that fallback triggers when policies require it) and **Scenario 3B: Natural Hardware Resource Observations** (accurate reporting of physical hardware state without artificial exhaustion or crash risks).
    - In Scenario 3B: If physical hardware has sufficient headroom, the benchmark accurately reports `natural_fallback_triggered: false` and status `VERIFIED (NATURAL_HEADROOM_SUFFICIENT_NO_FALLBACK)`. Argus never fabricates or claims natural fallback when `is_fallback=false`.
+
+---
+
+## 7. End-to-End Downstream Output Comparison Architecture
+
+### 7.1 Overview & Dual Execution Flow
+
+Argus provides end-to-end downstream output comparison to evaluate real prompt token reduction and generation behavior across actual LLM completions.
+
+Unlike prompt-only rewriting or simulated metrics, Argus executes two genuine downstream inference requests against local Ollama models:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User / Client
+    participant API as FastAPI APIRouter (/api/compare)
+    participant CompSvc as ComparisonService
+    participant Reg as LocalModelRegistry
+    participant OptSvc as OllamaService (Optimizer)
+    participant Ollama as Ollama Daemon (/api/generate)
+
+    User->>API: POST /api/compare {prompt, downstream_model, mode, ...}
+    API->>CompSvc: compare(request)
+    CompSvc->>Reg: get_model(downstream_model)
+    alt Model not installed
+        Reg-->>CompSvc: None
+        CompSvc-->>API: raise DownstreamModelNotFoundError (HTTP 400)
+        API-->>User: HTTP 400 Model Not Installed
+    end
+    Reg-->>CompSvc: DiscoveredModel (pinned_model)
+
+    rect rgb(10, 20, 35)
+        Note over CompSvc,Ollama: Execution A (Original Prompt)
+        CompSvc->>Ollama: POST /api/generate {model: pinned_model, prompt: original_prompt}
+        Ollama-->>CompSvc: raw_response_a + native telemetry (prompt_eval_count, eval_count, durations)
+    end
+
+    rect rgb(15, 30, 45)
+        Note over CompSvc,OptSvc: Argus Prompt Optimization Pipeline
+        CompSvc->>OptSvc: optimize_prompt(OptimizeRequest(...))
+        OptSvc-->>CompSvc: OptimizeResponse (optimized_prompt, strategy, metrics)
+    end
+
+    rect rgb(10, 20, 35)
+        Note over CompSvc,Ollama: Execution B (Optimized Prompt)
+        CompSvc->>Ollama: POST /api/generate {model: pinned_model, prompt: optimized_prompt}
+        Ollama-->>CompSvc: raw_response_b + native telemetry (prompt_eval_count, eval_count, durations)
+    end
+
+    CompSvc->>CompSvc: calculate_metrics(exec_a, exec_b)
+    CompSvc-->>API: ComparisonResponse
+    API-->>User: HTTP 200 {original_execution, optimized_execution, metrics, optimizer_details}
+```
+
+### 7.2 Downstream Model Pinning & Parameter Parity
+
+- **Model Pinning**: Both Execution A and Execution B run against the exact same pinned downstream model. Independent routing to different models is forbidden to guarantee a fair comparison.
+- **Model Availability Gate**: The model is validated using `LocalModelRegistry.get_model(downstream_model, force_refresh=True)`. If uninstalled, the call fails immediately with HTTP 400 (`DownstreamModelNotFoundError`). No silent fallback or model substitution is permitted.
+- **Identical Generation Conditions**:
+  - `temperature`: Applied identically to both calls (default: `OLLAMA_TEMPERATURE`).
+  - `top_p`: Applied identically to both calls (default: `OLLAMA_TOP_P`).
+  - `num_predict`: Applied identically to both calls (default: `OLLAMA_NUM_PREDICT` or user `max_tokens`).
+  - `system_instruction`: If supplied, passed identically to both calls as `system`.
+  - `num_ctx`: Dynamically snapped using `AdaptiveContextManager` based on prompt token demands.
+
+### 7.3 Telemetry Capture & Honest Metrics Standards
+
+All execution data is sourced directly from native Ollama completion responses:
+
+| Metric | Source / Formula | Unavailable Handling |
+| :--- | :--- | :--- |
+| **Prompt Tokens** | `data["prompt_eval_count"]` | Returned as `null`, rendered as `N/A` |
+| **Output Tokens** | `data["eval_count"]` | Returned as `null`, rendered as `N/A` |
+| **Total Tokens** | `prompt_tokens + output_tokens` | Returned as `null`, rendered as `N/A` |
+| **Inference Latency** | Measured wall-clock time (`time.perf_counter()`) | Returned as `null`, rendered as `N/A` |
+| **Time to First Token (TTFT)** | `round(data["prompt_eval_duration"] / 1e6, 2)` ms | Returned as `null`, rendered as `N/A` |
+| **Completion Reason** | `data["done_reason"]` (`"stop"` vs `"length"`) | Returned as `null`, rendered as `N/A` |
+| **Prompt Token Reduction** | `round(((orig_p - opt_p) / orig_p) * 100, 2)` | If `orig_p <= 0`: `0.0`. If missing: `null` |
+| **Output Token Delta** | `opt_o - orig_o` | Returned as `null`, rendered as `N/A` |
+| **Total Token Delta** | `orig_t - opt_t` | Returned as `null`, rendered as `N/A` |
+| **Semantic Quality** | Fixed to `"not_evaluated"` | Explanatory note: automated judge not configured |
+
+### 7.4 Zero-Fabrication Guarantees
+
+1. **Downstream Isolation**: The downstream model receives raw, unmanipulated prompts without prompt-engineering rewrite directives or optimizer wrapping.
+2. **Distinct Output Logging**: Response A and Response B are independent LLM completions, never optimizer explanations or mock text.
+3. **Partial Execution Rejection**: If Execution A, the Optimizer, or Execution B encounters an error or timeout, the entire request fails with a structured error status (HTTP 500/502/503/504). No partial or fabricated comparison is returned.
+4. **Transparent Quality Labeling**: Quality is explicitly reported as `not_evaluated`. Argus never fabricates similarity scores, BLEU/ROUGE approximations, or automated judge verdicts without a configured evaluator.
+

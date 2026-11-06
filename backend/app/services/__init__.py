@@ -13,6 +13,11 @@ from .strategy_selector import StrategySelector
 from .prompt_rewriter import PromptRewriter
 from .candidate_validator import CandidateValidator, ValidationResult
 from .compression import CompressionOrchestrator, CompressionRegistry
+from .comparison_service import (
+    ComparisonService,
+    ComparisonServiceError,
+    DownstreamModelNotFoundError,
+)
 from .routing import LocalModelRegistry, ModelRouter, ModelRouterError, ModelNotInstalledError
 
 __all__ = [
@@ -27,6 +32,9 @@ __all__ = [
     "StrategySelector",
     "PromptRewriter",
     "CandidateValidator",
+    "ComparisonService",
+    "ComparisonServiceError",
+    "DownstreamModelNotFoundError",
     "ValidationResult",
     "CompressionOrchestrator",
     "CompressionRegistry",

@@ -4,6 +4,8 @@
  */
 
 import {
+  ComparisonRequestPayload,
+  ComparisonResult,
   HealthResponse,
   ModelCatalogResponse,
   OllamaStatus,
@@ -228,6 +230,129 @@ export class ApiService {
       compression: data.compression || null,
       routing: data.routing || null,
       kvRuntimePolicy: data.kv_runtime_policy || null,
+    };
+  }
+
+  /**
+   * Run end-to-end downstream output comparison (Original vs Optimized)
+   */
+  async compareOutputs(
+    payload: ComparisonRequestPayload,
+    signal?: AbortSignal
+  ): Promise<ComparisonResult> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/compare`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal,
+      });
+    } catch (networkErr) {
+      if ((networkErr as { name?: string })?.name === 'AbortError' || signal?.aborted) {
+        throw networkErr;
+      }
+      throw new Error(
+        `Failed to reach Argus backend at ${this.baseUrl}. Ensure the FastAPI server is running.`
+      );
+    }
+
+    if (!response.ok) {
+      let errorMessage = `Comparison failed (HTTP ${response.status})`;
+      try {
+        const errorJson = await response.json();
+        if (errorJson?.error?.message) {
+          errorMessage = errorJson.error.message;
+        } else if (errorJson?.detail) {
+          errorMessage =
+            typeof errorJson.detail === 'string'
+              ? errorJson.detail
+              : JSON.stringify(errorJson.detail);
+        }
+      } catch {
+        // Fall back to HTTP status message
+      }
+
+      if (response.status === 400) {
+        throw new Error(`Downstream Model Error: ${errorMessage}`);
+      }
+      if (response.status === 503) {
+        throw new Error(`Ollama service unreachable: ${errorMessage}`);
+      }
+      if (response.status === 504) {
+        throw new Error(`Downstream inference timed out: ${errorMessage}`);
+      }
+      if (response.status === 422) {
+        throw new Error(`Validation Error: ${errorMessage}`);
+      }
+
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    const opt = data.optimizer_details;
+
+    return {
+      originalExecution: data.original_execution,
+      optimizedExecution: data.optimized_execution,
+      metrics: data.metrics,
+      downstreamModel: data.downstream_model,
+      timestamp: data.timestamp,
+      optimizerDetails: {
+        originalPrompt: opt.original_prompt,
+        optimizedPrompt: opt.optimized_prompt,
+        mode: opt.mode,
+        targetModel: opt.target_model,
+        taskCategory: opt.task_category || 'general',
+        strategy: opt.strategy || 'compress',
+        appliedStrategy: opt.applied_strategy || opt.strategy || 'compress',
+        outcome:
+          opt.outcome ||
+          (opt.validation_status === 'fallback'
+            ? 'fallback'
+            : opt.is_preserved
+            ? 'unchanged_original'
+            : 'validated_rewrite'),
+        lengthResult:
+          opt.length_result ||
+          (opt.char_delta < 0 ? 'compressed' : opt.char_delta > 0 ? 'expanded' : 'unchanged'),
+        validationStatus: opt.validation_status || 'passed',
+        isPreserved: Boolean(opt.is_preserved),
+        primaryAction: opt.primary_action,
+        primaryDeliverable: opt.primary_deliverable,
+        explicitConstraints: opt.explicit_constraints || [],
+        requiredOperations: opt.required_operations || [],
+        originalMetrics: {
+          charCount: opt.original_metrics.char_count,
+          estimatedTokens: opt.original_metrics.estimated_tokens,
+        },
+        optimizedMetrics: {
+          charCount: opt.optimized_metrics.char_count,
+          estimatedTokens: opt.optimized_metrics.estimated_tokens,
+        },
+        tokenReductionPercent: opt.token_reduction_percent ?? 0,
+        tokenChangePercent: opt.token_change_percent ?? 0,
+        tokenSavings: opt.token_savings ?? 0,
+        charDelta: opt.char_delta ?? 0,
+        preservedConstraints: opt.preserved_constraints || [],
+        executionTimeMs: opt.execution_time_ms,
+        model: opt.model,
+        timestamp: opt.timestamp,
+        isSimulated: false,
+        inferenceTelemetry: opt.inference_telemetry
+          ? {
+              calls: opt.inference_telemetry.calls || [],
+              native_metrics_available: Boolean(opt.inference_telemetry.native_metrics_available),
+            }
+          : null,
+        outputBudget: opt.output_budget || null,
+        compression: opt.compression || null,
+        routing: opt.routing || null,
+        kvRuntimePolicy: opt.kv_runtime_policy || null,
+      },
     };
   }
 }

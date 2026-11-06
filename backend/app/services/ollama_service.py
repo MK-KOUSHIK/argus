@@ -445,6 +445,126 @@ class OllamaService:
         return raw_output, duration_ms, telemetry
 
     @classmethod
+    async def execute_downstream_call(
+        cls,
+        prompt: str,
+        model: str,
+        system_instruction: Optional[str] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        num_predict: Optional[int] = None,
+    ) -> Tuple[str, float, dict]:
+        """Execute a genuine downstream LLM inference call with exact prompt and native telemetry.
+
+        Unlike prompt rewriting calls, this does not wrap the prompt in rewriting directives
+        or optimizer prompts. It sends the exact prompt to the requested model.
+        """
+        url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+        target_num_predict = num_predict if num_predict is not None else settings.OLLAMA_NUM_PREDICT
+        target_temperature = temperature if temperature is not None else settings.OLLAMA_TEMPERATURE
+        target_top_p = top_p if top_p is not None else settings.OLLAMA_TOP_P
+        effective_system = system_instruction or ""
+
+        # Adaptive Context Budgeting (snapped to stable tiers for KV prefix cache reuse)
+        try:
+            budget = AdaptiveContextManager.calculate_budget(
+                system_instruction=effective_system,
+                formatted_prompt=prompt,
+                output_budget=target_num_predict,
+            )
+        except ContextOverflowError as exc:
+            raise OllamaServiceError(exc.message, status_code=exc.status_code) from exc
+
+        selected_num_ctx = budget["selected_num_ctx"]
+        payload = {
+            "model": model,
+            "system": effective_system,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": target_temperature,
+                "top_p": target_top_p,
+                "num_ctx": selected_num_ctx,
+                "num_predict": target_num_predict,
+            },
+        }
+
+        # Memory-Aware Concurrency Control
+        async with concurrency_controller.slot() as slot_telemetry:
+            start_time = time.perf_counter()
+            try:
+                async with httpx.AsyncClient(timeout=settings.OLLAMA_TIMEOUT_SECONDS) as client:
+                    response = await client.post(url, json=payload)
+
+            except httpx.ConnectError as exc:
+                raise OllamaConnectionError(
+                    f"Failed to connect to Ollama service at {settings.OLLAMA_BASE_URL}. "
+                    "Ensure Ollama is running on your machine ('ollama serve')."
+                ) from exc
+
+            except httpx.TimeoutException as exc:
+                raise OllamaTimeoutError(
+                    f"Downstream LLM inference timed out after {settings.OLLAMA_TIMEOUT_SECONDS}s. "
+                    "The local model took too long to generate a response."
+                ) from exc
+
+            except Exception as exc:
+                raise OllamaServiceError(
+                    f"Error communicating with Ollama: {str(exc)}", status_code=500
+                ) from exc
+
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+        if response.status_code != 200:
+            try:
+                err_detail = response.json().get("error", response.text)
+            except Exception:
+                err_detail = response.text
+            raise OllamaResponseError(
+                f"Ollama server returned error (HTTP {response.status_code}): {err_detail}"
+            )
+
+        try:
+            data = response.json()
+        except Exception as exc:
+            raise OllamaResponseError("Ollama returned invalid JSON response") from exc
+
+        raw_output = data.get("response")
+        if not isinstance(raw_output, str):
+            raise OllamaResponseError("Ollama response payload missing 'response' text field")
+
+        prompt_eval_count = data.get("prompt_eval_count")
+        eval_count = data.get("eval_count")
+        prompt_eval_duration = data.get("prompt_eval_duration")
+        eval_duration = data.get("eval_duration")
+        load_duration = data.get("load_duration")
+        total_duration = data.get("total_duration")
+        done_reason = data.get("done_reason")
+
+        native_telemetry = {
+            "model": model,
+            "prompt_eval_count": prompt_eval_count,
+            "eval_count": eval_count,
+            "prompt_eval_duration": prompt_eval_duration,
+            "eval_duration": eval_duration,
+            "load_duration": load_duration,
+            "total_duration": total_duration,
+            "done_reason": done_reason,
+            "queue_wait_ms": slot_telemetry.get("queue_wait_ms", 0),
+            "wall_time_ms": duration_ms,
+            "num_ctx": selected_num_ctx,
+            "num_predict": target_num_predict,
+            "temperature": target_temperature,
+            "top_p": target_top_p,
+            "active_concurrency_capacity": slot_telemetry.get("active_concurrency_capacity"),
+            "active_concurrency_in_flight": slot_telemetry.get("active_concurrency_in_flight"),
+            "vram_available_mb": slot_telemetry.get("vram_available_mb"),
+            "ram_available_mb": slot_telemetry.get("ram_available_mb"),
+        }
+
+        return raw_output, duration_ms, native_telemetry
+
+    @classmethod
     async def optimize_prompt(cls, request: OptimizeRequest) -> OptimizeResponse:
         """Task-aware prompt optimization pipeline orchestrating Stages 0 through D with dynamic routing."""
         # --- STAGE 0: Independent Content-Aware Compression (Phase 4.2) ---
