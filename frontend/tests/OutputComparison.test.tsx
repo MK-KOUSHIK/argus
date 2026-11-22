@@ -180,6 +180,121 @@ describe('OutputComparisonView Component', () => {
 
     expect(screen.getByText(/Cold-Start Warning \(Warm-Up Failed\)/i)).toBeInTheDocument();
   });
+
+  it('displays cold-start warning from raw backend comparison fixture when warm-up fails', async () => {
+    // Real raw backend ComparisonResponse fixture with warm-up timeout
+    const backendComparisonFixture = {
+      original_execution: {
+        prompt: 'Explain TCP handshake',
+        response: 'TCP handshake has three steps.',
+        model: 'qwen2.5:1.5b',
+        provider: 'ollama',
+        prompt_tokens: 15,
+        output_tokens: 10,
+        total_tokens: 25,
+        duration_ms: 120,
+        prompt_eval_duration_ms: 30,
+        status: 'completed',
+        done_reason: 'stop',
+      },
+      optimized_execution: {
+        prompt: 'Explain TCP handshake',
+        response: 'TCP handshake has three steps.',
+        model: 'qwen2.5:1.5b',
+        provider: 'ollama',
+        prompt_tokens: 15,
+        output_tokens: 10,
+        total_tokens: 25,
+        duration_ms: 115,
+        prompt_eval_duration_ms: 28,
+        status: 'completed',
+        done_reason: 'stop',
+      },
+      metrics: {
+        prompt_tokens_saved: 0,
+        prompt_token_reduction_percent: 0,
+        output_tokens_diff: 0,
+        output_token_change_percent: 0,
+        total_tokens_saved: 0,
+        total_token_reduction_percent: 0,
+        latency_delta_ms: -5,
+        latency_reduction_percent: 4.1,
+        semantic_quality: 'not_evaluated',
+        semantic_quality_reason: 'Human verification required',
+      },
+      downstream_model: 'qwen2.5:1.5b',
+      effective_settings: {
+        model: 'qwen2.5:1.5b',
+        num_ctx: 2048,
+        num_predict: 64,
+        temperature: 0.1,
+        top_p: 0.9,
+        context_window_shared: true,
+      },
+      trials: 1,
+      warmup: true,
+      warmup_attempted: true,
+      warmup_succeeded: false,
+      warmup_error: 'Ollama daemon connection timed out during warm-up phase.',
+      trial_measurements: [],
+      aggregate_latency: {},
+      timestamp: '2026-11-22T20:00:00Z',
+      optimizer_details: {
+        original_prompt: 'Explain TCP handshake',
+        optimized_prompt: 'Explain TCP handshake',
+        mode: 'balanced',
+        target_model: 'gemini-1-5-flash',
+        task_category: 'general',
+        strategy: 'preserve',
+        applied_strategy: 'preserve',
+        outcome: 'unchanged_original',
+        length_result: 'unchanged',
+        validation_status: 'passed',
+        is_preserved: true,
+        explicit_constraints: [],
+        preserved_constraints: [],
+        original_metrics: { char_count: 21, estimated_tokens: 5 },
+        optimized_metrics: { char_count: 21, estimated_tokens: 5 },
+        token_reduction_percent: 0,
+        token_change_percent: 0,
+        token_savings: 0,
+        char_delta: 0,
+        execution_time_ms: 45,
+        model: 'qwen2.5:1.5b',
+        timestamp: '2026-11-22T20:00:00Z',
+      },
+    };
+
+    // Construct mapped result as api.ts compareOutputs() does
+    const mappedResult: ComparisonResult = {
+      originalExecution: backendComparisonFixture.original_execution,
+      optimizedExecution: backendComparisonFixture.optimized_execution,
+      metrics: backendComparisonFixture.metrics,
+      downstreamModel: backendComparisonFixture.downstream_model,
+      effective_settings: backendComparisonFixture.effective_settings,
+      trials: backendComparisonFixture.trials,
+      warmup: backendComparisonFixture.warmup,
+      warmup_attempted: backendComparisonFixture.warmup_attempted,
+      warmup_succeeded: backendComparisonFixture.warmup_succeeded,
+      warmup_error: backendComparisonFixture.warmup_error,
+      trial_measurements: backendComparisonFixture.trial_measurements,
+      aggregate_latency: backendComparisonFixture.aggregate_latency,
+      timestamp: backendComparisonFixture.timestamp,
+      optimizerDetails: {
+        ...mockComparisonResult.optimizerDetails,
+        originalPrompt: backendComparisonFixture.optimizer_details.original_prompt,
+        optimizedPrompt: backendComparisonFixture.optimizer_details.optimized_prompt,
+      },
+    };
+
+    render(<OutputComparisonView comparison={mappedResult} />);
+
+    // Verify Cold-Start Warning banner renders with exact text and tooltip title message
+    expect(screen.getByText(/Cold-Start Warning \(Warm-Up Failed\)/i)).toBeInTheDocument();
+    expect(
+      screen.getByTitle(/Ollama daemon connection timed out during warm-up phase./i)
+    ).toBeInTheDocument();
+  });
 });
 
 describe('WorkspacePage Output Comparison Flow', () => {

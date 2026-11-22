@@ -677,32 +677,125 @@ class TaskAnalyzer:
         "tensorflow", "keras", "fastapi", "flask", "django", "express", "nodejs",
         "parquet", "json", "csv", "yaml", "xml", "html", "css", "sql", "graphql",
         "rest", "grpc", "git", "github", "gitlab", "ci/cd", "terraform", "ansible",
+        "aws", "gcp", "azure",
+    }
+
+    # Leading determiners and possessive pronouns to strip from extracted relation noun phrases
+    LEADING_DETERMINERS = {"the", "a", "an", "my", "our", "your", "their", "this", "that"}
+
+    # Functional, grammatical, and prompt-imperative vocabulary excluded from generic proper nouns
+    GENERIC_FUNCTIONAL_WORDS = {
+        # Articles & Pronouns
+        "the", "a", "an", "this", "that", "these", "those", "there", "here",
+        "i", "you", "he", "she", "it", "we", "they", "my", "your", "his", "her", "our", "their",
+        "who", "whom", "whose", "which", "what",
+        # Prepositions & Conjunctions
+        "if", "when", "while", "as", "because", "since", "after", "before", "although", "though",
+        "in", "on", "at", "for", "with", "by", "from", "to", "about", "under", "over", "between",
+        "into", "onto", "through", "during", "without", "until", "unless", "and", "or", "but", "nor",
+        # Question & Auxiliary verbs
+        "is", "are", "was", "were", "be", "been", "being",
+        "can", "could", "would", "should", "will", "shall", "may", "might", "must",
+        "do", "does", "did", "have", "has", "had",
+        # Prompt imperative verbs, actions & polite markers
+        "write", "create", "explain", "generate", "please", "help", "summarize", "list",
+        "show", "provide", "review", "check", "fix", "find", "optimize", "convert",
+        "translate", "refactor", "build", "run", "execute", "design", "implement",
+        "analyze", "compare", "verify", "test", "ensure", "assume", "consider", "note",
+        "given", "suppose", "let", "make", "use", "take", "read", "update", "delete",
+        "add", "remove", "modify", "send", "print", "return", "include", "exclude",
+        "select", "transfer", "fetch", "query", "get", "set", "display", "calculate",
+        "compute", "evaluate", "determine", "count", "parse", "extract", "load", "save",
+        "insert", "drop", "alter", "begin", "commit", "rollback", "start", "stop",
+        "restart", "init", "initialize", "setup", "install", "deploy", "configure",
+        "enable", "disable", "apply", "format", "clean", "sanitize", "validate",
+        "mock", "patch", "copy", "move", "rename", "sync", "synchronize", "replicate",
+        "backup", "restore", "archive", "compress", "decompress", "receive", "publish",
+        "subscribe", "listen", "watch", "monitor", "log", "trace", "profile", "benchmark",
+        "detail", "describe", "outline", "clarify", "tell", "give", "suggest", "recommend",
+        "audit", "inspect", "examine", "assess", "explore", "debug", "scan",
+        "follow", "identify", "develop", "construct", "maintain", "perform",
+        # Transitions & adverbs commonly capitalized at sentence starts
+        "also", "additionally", "furthermore", "moreover", "however", "therefore", "otherwise",
+        "meanwhile", "instead", "finally", "next", "then", "first", "second", "third", "lastly",
+        # Generic grammatical & structural nouns
+        "user", "users", "table", "tables", "database", "databases", "file", "files",
+        "code", "script", "function", "method", "class", "model", "data", "input", "output",
+        "prompt", "response", "system", "service", "app", "application", "page", "server", "client"
     }
 
     @classmethod
     def _extract_entities(cls, text: str) -> List[str]:
-        """Extract domain entities, technologies, tools, and technical nouns."""
+        """Extract domain entities, technologies, tools, proper nouns, and technical identifiers."""
         found_entities = set()
-        # Strip code blocks so markdown syntax tags and payload data aren't extracted as prompt entities
+        # Strip code blocks and markdown headings so syntax tags, payload data, and headings aren't extracted as prompt entities
         prose_text = re.sub(r"```[\s\S]*?```", " ", text)
+        prose_text = re.sub(r"(?m)^\s*#+\s+.*$", " ", prose_text)
         words = re.findall(r"\b[a-zA-Z0-9_\-\.\/+]+\b", prose_text)
 
+        # 1. Known technical entities from static dictionary
         for w in words:
             w_clean = w.strip(".,;:()[]{}\"'").lower()
             if w_clean in cls.KNOWN_TECH_ENTITIES:
                 found_entities.add(w.strip(".,;:()[]{}\"'"))
 
-        # Also extract CamelCase and technical PascalCase words (e.g. ServiceMonitors, BeautifulSoup, OpenSSL)
+        # 2. CamelCase and technical PascalCase words (e.g. ServiceMonitors, BeautifulSoup, OpenSSL)
         for m in re.finditer(r"\b[A-Z][a-z0-9]+(?:[A-Z][a-zA-Z0-9]+)+\b", prose_text):
             found_entities.add(m.group(0))
 
-        # Extract capital abbreviations (e.g. RSA, CSR, SQL, URL, API, CPU, GPU, RAM)
+        # 3. Capital abbreviations (e.g. RSA, CSR, SQL, URL, API, CPU, GPU, RAM)
         for m in re.finditer(r"\b[A-Z]{2,6}\b", prose_text):
             tok = m.group(0)
             if tok not in {"THE", "AND", "FOR", "WITH", "THAT", "THIS", "FROM", "TRUE", "NOT", "CAN", "YOU", "MUST", "SHOW", "POST"}:
                 found_entities.add(tok)
 
-        return sorted(list(found_entities))
+        # 4. Multi-word proper nouns / title-cased entities (e.g. Alliance University, Globex Industries, Gotham City)
+        multi_pat = r"\b[A-Z][a-z]+(?:\s+(?:of|the|de|da)\s+[A-Z][a-z]+|\s+[A-Z][a-z]+)+\b"
+        for m in re.finditer(multi_pat, prose_text):
+            phrase = m.group(0).strip()
+            w_parts = phrase.split()
+            # Strip leading and trailing functional/imperative words from title-cased sequences
+            while w_parts and w_parts[0].lower() in cls.GENERIC_FUNCTIONAL_WORDS:
+                w_parts.pop(0)
+            while w_parts and w_parts[-1].lower() in cls.GENERIC_FUNCTIONAL_WORDS:
+                w_parts.pop(-1)
+            # If any word in the remaining phrase is in GENERIC_FUNCTIONAL_WORDS, don't form a compound entity
+            if any(w.lower() in cls.GENERIC_FUNCTIONAL_WORDS for w in w_parts):
+                continue
+            if len(w_parts) > 1:
+                found_entities.add(" ".join(w_parts))
+            elif len(w_parts) == 1:
+                single_tok = w_parts[0]
+                if len(single_tok) >= 3 and single_tok.lower() not in cls.GENERIC_FUNCTIONAL_WORDS:
+                    found_entities.add(single_tok)
+
+        # 5. Single proper nouns (mid-sentence capitalized words: idx > 0)
+        sentences = re.split(r"([.?!;\n]+)", prose_text)
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent:
+                continue
+            tokens = re.findall(r"\b[a-zA-Z0-9_\-]+\b", sent)
+            for idx, tok in enumerate(tokens):
+                if idx > 0 and re.match(r"^[A-Z][a-z]+$", tok):
+                    tok_lower = tok.lower()
+                    if tok_lower in cls.GENERIC_FUNCTIONAL_WORDS:
+                        continue
+                    if len(tok) < 3:
+                        continue
+                    found_entities.add(tok)
+
+        # Deduplicate: if a single-word entity is already part of an extracted multi-word entity,
+        # remove the redundant single token UNLESS it is an explicitly known tech entity.
+        multi_entities = [e for e in found_entities if " " in e]
+        final_entities = set()
+        for e in found_entities:
+            if " " not in e and e.lower() not in cls.KNOWN_TECH_ENTITIES:
+                if any(re.search(rf"\b{re.escape(e)}\b", m, re.IGNORECASE) for m in multi_entities):
+                    continue
+            final_entities.add(e)
+
+        return sorted(list(final_entities))
 
     CONVERSATIONAL_NEGATION_FILLERS = {
         "miss anything", "miss any", "worry", "hesitate", "matter",
@@ -807,13 +900,66 @@ class TaskAnalyzer:
         for m in of_matches:
             relations.append((m.group(1).strip(), "has_quantity", m.group(2).strip()))
 
-        # 5. Directional relations: from <Source> to <Destination> (e.g. from savings to checking, from /var/log to /backup)
-        dir_matches = re.finditer(r"\bfrom\s+([a-zA-Z0-9_\-\.\/]+)\s+to\s+([a-zA-Z0-9_\-\.\/]+)\b", text, re.IGNORECASE)
-        for m in dir_matches:
+        # 5. Directional relations: from <Source> to <Destination>
+        # (e.g. from savings to checking account, from savings account to checking account, from /var/log to /backup)
+        temporal_words = {
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+            "january", "february", "march", "april", "may", "june", "july", "august",
+            "september", "october", "november", "december", "beginning", "start", "end", "finish",
+        }
+        time_pattern = r"^\d+(?::\d+)?(?:\s*(?:am|pm|hours?|mins?|minutes?|days?|years?))?$"
+
+        # 5a. Single token adjacent: from <src> to <dst> (matches "from savings to checking account", "from /var/log to /backup")
+        for m in re.finditer(r"\bfrom\s+([a-zA-Z0-9_\-\.\/]+)\s+to\s+([a-zA-Z0-9_\-\.\/]+)\b", text, re.IGNORECASE):
             src = m.group(1).strip()
             dst = m.group(2).strip()
-            if src.lower() not in cls.STOPWORDS and dst.lower() not in cls.STOPWORDS:
+            src = re.sub(r"^(?:the|a|an|my|our|your|their|this|that)\s+", "", src, flags=re.IGNORECASE).strip()
+            dst = re.sub(r"^(?:the|a|an|my|our|your|their|this|that)\s+", "", dst, flags=re.IGNORECASE).strip()
+            if re.match(r"^\d+(?:\.\d+)?$", src) and re.match(r"^\d+(?:\.\d+)?$", dst):
+                continue
+            if src.lower() in temporal_words or dst.lower() in temporal_words or re.match(time_pattern, src, re.IGNORECASE) or re.match(time_pattern, dst, re.IGNORECASE):
+                continue
+            if src.lower() not in cls.STOPWORDS and dst.lower() not in cls.STOPWORDS and src.lower() != dst.lower():
                 relations.append((src, "to", dst))
+
+        # 5b. Multi-word phrases (matches "from savings account to checking account", "from primary database to backup replica")
+        dir_pat = (
+            r"\bfrom\s+([a-zA-Z0-9_\-\.\/\s]+?)\s+to\s+([a-zA-Z0-9_\-\.\/\s]+?)"
+            r"(?:[.,;!?\n]|\s+(?:immediately|without|before|after|and|or|prior|with|using|by|via|promptly|safely|while|during|where|when|which|that|so|then|in|for|at|on|into|as)\b|$)"
+        )
+        for m in re.finditer(dir_pat, text, re.IGNORECASE):
+            src = m.group(1).strip()
+            dst = m.group(2).strip()
+            src = re.sub(r"^(?:the|a|an|my|our|your|their|this|that)\s+", "", src, flags=re.IGNORECASE).strip()
+            dst = re.sub(r"^(?:the|a|an|my|our|your|their|this|that)\s+", "", dst, flags=re.IGNORECASE).strip()
+            src_words = src.split()
+            dst_words = dst.split()
+
+            if not (len(src_words) > 1 or len(dst_words) > 1):
+                continue
+            if not (1 <= len(src_words) <= 4 and 1 <= len(dst_words) <= 4):
+                continue
+
+            # Ignore numeric ranges (e.g. from 1 to 10)
+            if re.match(r"^\d+(?:\.\d+)?$", src) and re.match(r"^\d+(?:\.\d+)?$", dst):
+                continue
+
+            # Ignore temporal/time/day/month ranges
+            if any(w.lower() in temporal_words for w in src_words) or any(w.lower() in temporal_words for w in dst_words):
+                continue
+
+            if re.match(time_pattern, src, re.IGNORECASE) and re.match(time_pattern, dst, re.IGNORECASE):
+                continue
+
+            # Ignore pure stopwords
+            if src.lower() in cls.STOPWORDS or dst.lower() in cls.STOPWORDS:
+                continue
+
+            src = src.rstrip(".,;:")
+            dst = dst.rstrip(".,;:")
+            if src and dst and src.lower() != dst.lower():
+                if not any(r[0] == src and r[2] == dst for r in relations):
+                    relations.append((src, "to", dst))
 
         # 6. Entity-Predicate assertions: <Entity> is a/an <Concept> (e.g. alliance university is a name of country)
         is_a_matches = re.finditer(r"\b([a-zA-Z0-9_\-\s]{2,30}?)\s+is\s+(?:a|an|the)\s+([a-zA-Z0-9_\-\s]{2,30}?)(?:\s+(?:that|which|who|will|and|\.|\n|,|$)|$)", text, re.IGNORECASE)

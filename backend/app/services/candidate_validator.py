@@ -391,10 +391,12 @@ class CandidateValidator:
 
         # Check 14: Relational Triples, Subject/Object Roles & Directionality Preservation
         # 14a. Directional Relations ("from X to Y")
+        det_prefix = r"(?:the\s+|my\s+|our\s+|your\s+|their\s+|a\s+|an\s+)?"
         for subj, rel, obj in analysis.entity_relations:
             if rel == "to":
-                inv_pat = rf"\bfrom\s+{re.escape(obj.lower())}\s+to\s+{re.escape(subj.lower())}\b"
-                if re.search(inv_pat, cand_lower):
+                inv_pat1 = rf"\bfrom\s+{det_prefix}{re.escape(obj.lower())}\s+to\s+{det_prefix}{re.escape(subj.lower())}\b"
+                inv_pat2 = rf"\bto\s+{det_prefix}{re.escape(subj.lower())}\s+from\s+{det_prefix}{re.escape(obj.lower())}\b"
+                if re.search(inv_pat1, cand_lower) or re.search(inv_pat2, cand_lower):
                     return ValidationResult(
                         is_valid=False,
                         status="fallback",

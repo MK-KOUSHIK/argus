@@ -1247,3 +1247,126 @@ async def test_live_ollama_prompt_optimization_execution(async_client: AsyncClie
     assert data["token_measurement_method"] in {"ollama_native", "tiktoken_cl100k"}
     assert data["original_token_count"] > 0
     assert data["dispatched_token_count"] > 0
+
+
+@pytest.mark.ollama_integration
+@pytest.mark.asyncio
+async def test_live_ollama_unfamiliar_organization_and_university_preservation(async_client: AsyncClient):
+    """Verify live Ollama preservation of unfamiliar multi-word organization, university, and location names."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            v_resp = await client.get(f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/version")
+            if v_resp.status_code != 200:
+                pytest.skip("Local Ollama daemon not reachable.")
+    except Exception:
+        pytest.skip("Local Ollama daemon not reachable.")
+
+    prompt = (
+        "Acme Global Logistics partnered with Alliance University in Bengaluru, Karnataka "
+        "to construct a high-throughput distribution center."
+    )
+    res = await async_client.post(
+        "/api/optimize",
+        json={"prompt": prompt, "mode": "balanced"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+
+    # Dispatched prompt must always retain the core organizations and locations
+    dispatched = data["optimized_prompt"]
+    assert "Acme Global Logistics" in dispatched
+    assert "Alliance University" in dispatched
+    assert "Bengaluru" in dispatched
+    assert "Karnataka" in dispatched
+
+
+@pytest.mark.ollama_integration
+@pytest.mark.asyncio
+async def test_live_ollama_sentence_initial_proper_noun(async_client: AsyncClient):
+    """Verify live Ollama preservation of sentence-initial multi-word proper nouns and locations."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            v_resp = await client.get(f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/version")
+            if v_resp.status_code != 200:
+                pytest.skip("Local Ollama daemon not reachable.")
+    except Exception:
+        pytest.skip("Local Ollama daemon not reachable.")
+
+    prompt = "Globex Corporation introduced strict compliance policies across Zurich operations today."
+    res = await async_client.post(
+        "/api/optimize",
+        json={"prompt": prompt, "mode": "balanced"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+
+    dispatched = data["optimized_prompt"]
+    assert "Globex Corporation" in dispatched
+    assert "Zurich" in dispatched
+
+
+@pytest.mark.ollama_integration
+@pytest.mark.asyncio
+async def test_live_ollama_multi_word_directional_and_reversal_guardrail(async_client: AsyncClient):
+    """Verify live multi-word directional extraction, reversal guardrail, and verbatim fallback."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            v_resp = await client.get(f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/version")
+            if v_resp.status_code != 200:
+                pytest.skip("Local Ollama daemon not reachable.")
+    except Exception:
+        pytest.skip("Local Ollama daemon not reachable.")
+
+    prompt = "Transfer $500 from savings account to checking account immediately. Do not delay."
+    res = await async_client.post(
+        "/api/optimize",
+        json={"prompt": prompt, "mode": "balanced"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+
+    dispatched = data["optimized_prompt"]
+    # Direction must never be inverted
+    assert "from checking account to savings account" not in dispatched
+    assert "to savings account from checking account" not in dispatched
+
+    # Adversarial test: directly test CandidateValidator with inverted candidate against TaskAnalyzer extraction
+    analysis = TaskAnalyzer.analyze(prompt)
+    assert ("savings account", "to", "checking account") in analysis.entity_relations
+
+    inv_cand1 = "Transfer $500 from checking account to savings account immediately. Do not delay."
+    res1 = CandidateValidator.validate(prompt, inv_cand1, analysis)
+    assert res1.is_valid is False
+    assert "inverted directional relationship" in res1.reason
+
+    inv_cand2 = "Transfer $500 to savings account from checking account immediately. Do not delay."
+    res2 = CandidateValidator.validate(prompt, inv_cand2, analysis)
+    assert res2.is_valid is False
+    assert "inverted directional relationship" in res2.reason
+
+
+@pytest.mark.ollama_integration
+@pytest.mark.asyncio
+async def test_live_ollama_equal_and_larger_token_candidate_rejection_and_verbatim_fallback(async_client: AsyncClient):
+    """Verify that candidate with equal/larger tokens is rejected and original prompt is dispatched verbatim."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            v_resp = await client.get(f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/version")
+            if v_resp.status_code != 200:
+                pytest.skip("Local Ollama daemon not reachable.")
+    except Exception:
+        pytest.skip("Local Ollama daemon not reachable.")
+
+    prompt = "Verify checksum 0xDEADBEEF for file /var/data/chunk_42.bin before continuing."
+    res = await async_client.post(
+        "/api/optimize",
+        json={"prompt": prompt, "mode": "concise"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+
+    # Highly compact technical prompt has no fluff; candidate is either identical or non-reducing
+    assert data["candidate_accepted"] is False
+    assert data["actual_tokens_saved"] == 0
+    assert data["optimized_prompt"] == prompt
+    assert data["outcome"] in {"unchanged_original", "fallback"}

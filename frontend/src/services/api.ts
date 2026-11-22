@@ -254,6 +254,14 @@ export class ApiService {
       optimizedExecution: data.optimized_execution,
       metrics: data.metrics,
       downstreamModel: data.downstream_model,
+      effective_settings: data.effective_settings,
+      trials: data.trials,
+      warmup: data.warmup,
+      warmup_attempted: data.warmup_attempted,
+      warmup_succeeded: data.warmup_succeeded,
+      warmup_error: data.warmup_error,
+      trial_measurements: data.trial_measurements,
+      aggregate_latency: data.aggregate_latency,
       timestamp: data.timestamp,
       optimizerDetails: transformOptimizeResponse(data.optimizer_details),
     };
@@ -261,6 +269,9 @@ export class ApiService {
 }
 
 export function transformOptimizeResponse(data: any): OptimizationResult {
+  if (!data) {
+    throw new Error('transformOptimizeResponse received null or undefined data');
+  }
   return {
     originalPrompt: data.original_prompt,
     optimizedPrompt: data.optimized_prompt,

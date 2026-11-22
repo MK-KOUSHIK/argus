@@ -220,12 +220,33 @@ async def test_native_telemetry_done_reason_stop():
     mock_resp.status_code = 200
     mock_resp.json.return_value = fake_response
 
+    mock_tags = MagicMock(status_code=200)
+    mock_tags.json.return_value = {
+        "models": [
+            {
+                "name": "qwen2.5:1.5b",
+                "model": "qwen2.5:1.5b",
+                "size": 986061892,
+                "details": {
+                    "parent_model": "",
+                    "format": "gguf",
+                    "family": "qwen2",
+                    "families": ["qwen2"],
+                    "parameter_size": "1.5B",
+                    "quantization_level": "Q4_K_M",
+                },
+            }
+        ]
+    }
+
     mock_client = AsyncMock()
     mock_client.post.return_value = mock_resp
+    mock_client.get.return_value = mock_tags
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
 
-    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client), \
+         patch("app.services.routing.registry.httpx.AsyncClient", return_value=mock_client):
         allocation = OutputBudgetAllocation(
             allocated_budget=200,
             requested_budget=None,
@@ -263,12 +284,33 @@ async def test_native_telemetry_done_reason_length():
     mock_resp.status_code = 200
     mock_resp.json.return_value = fake_response
 
+    mock_tags = MagicMock(status_code=200)
+    mock_tags.json.return_value = {
+        "models": [
+            {
+                "name": "qwen2.5:1.5b",
+                "model": "qwen2.5:1.5b",
+                "size": 986061892,
+                "details": {
+                    "parent_model": "",
+                    "format": "gguf",
+                    "family": "qwen2",
+                    "families": ["qwen2"],
+                    "parameter_size": "1.5B",
+                    "quantization_level": "Q4_K_M",
+                },
+            }
+        ]
+    }
+
     mock_client = AsyncMock()
     mock_client.post.return_value = mock_resp
+    mock_client.get.return_value = mock_tags
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
 
-    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client), \
+         patch("app.services.routing.registry.httpx.AsyncClient", return_value=mock_client):
         allocation = OutputBudgetAllocation(
             allocated_budget=150,
             requested_budget=None,
@@ -300,12 +342,33 @@ async def test_missing_telemetry_leaves_nulls():
     mock_resp.status_code = 200
     mock_resp.json.return_value = fake_response
 
+    mock_tags = MagicMock(status_code=200)
+    mock_tags.json.return_value = {
+        "models": [
+            {
+                "name": "qwen2.5:1.5b",
+                "model": "qwen2.5:1.5b",
+                "size": 986061892,
+                "details": {
+                    "parent_model": "",
+                    "format": "gguf",
+                    "family": "qwen2",
+                    "families": ["qwen2"],
+                    "parameter_size": "1.5B",
+                    "quantization_level": "Q4_K_M",
+                },
+            }
+        ]
+    }
+
     mock_client = AsyncMock()
     mock_client.post.return_value = mock_resp
+    mock_client.get.return_value = mock_tags
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
 
-    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client), \
+         patch("app.services.routing.registry.httpx.AsyncClient", return_value=mock_client):
         allocation = OutputBudgetAllocation(
             allocated_budget=256,
             requested_budget=None,
@@ -344,12 +407,33 @@ async def test_end_to_end_optimize_endpoint_with_requested_budget(async_client: 
     mock_resp.status_code = 200
     mock_resp.json.return_value = fake_response
 
+    mock_tags = MagicMock(status_code=200)
+    mock_tags.json.return_value = {
+        "models": [
+            {
+                "name": "qwen2.5:1.5b",
+                "model": "qwen2.5:1.5b",
+                "size": 986061892,
+                "details": {
+                    "parent_model": "",
+                    "format": "gguf",
+                    "family": "qwen2",
+                    "families": ["qwen2"],
+                    "parameter_size": "1.5B",
+                    "quantization_level": "Q4_K_M",
+                },
+            }
+        ]
+    }
+
     mock_client = AsyncMock()
     mock_client.post.return_value = mock_resp
+    mock_client.get.return_value = mock_tags
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
 
-    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.services.ollama_service.httpx.AsyncClient", return_value=mock_client), \
+         patch("app.services.routing.registry.httpx.AsyncClient", return_value=mock_client):
         payload = {
             "prompt": "Create a function to calculate Fibonacci numbers.",
             "mode": "concise",

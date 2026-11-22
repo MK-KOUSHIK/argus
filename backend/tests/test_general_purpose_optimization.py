@@ -186,3 +186,133 @@ async def test_grammar_corrected_longer_candidate_rejected(async_client: AsyncCl
         assert data["optimized_prompt"] == orig
         assert data["actual_tokens_saved"] == 0
         assert data["outcome"] == "unchanged_original"
+
+
+def test_multi_word_directional_relation_extraction():
+    """Verify TaskAnalyzer extracts multi-word phrases for source and destination in directional relations."""
+    p1 = "Transfer $500 from savings account to checking account immediately."
+    a1 = TaskAnalyzer.analyze(p1)
+    assert ("savings account", "to", "checking account") in a1.entity_relations
+
+    p2 = "Migrate user data from primary database to backup replica safely."
+    a2 = TaskAnalyzer.analyze(p2)
+    assert ("primary database", "to", "backup replica") in a2.entity_relations
+
+
+def test_directional_reversal_rejected_by_validator():
+    """Verify CandidateValidator rejects candidates that invert directional source/destination."""
+    prompt = "Transfer $500 from savings account to checking account immediately."
+    analysis = TaskAnalyzer.analyze(prompt)
+
+    # Inversion pattern 1: from Destination to Source
+    cand_inv1 = "Transfer $500 from checking account to savings account immediately."
+    res1 = CandidateValidator.validate(prompt, cand_inv1, analysis)
+    assert res1.is_valid is False
+    assert "inverted directional relationship" in res1.reason
+
+    # Inversion pattern 2: to Source from Destination
+    cand_inv2 = "Transfer $500 to savings account from checking account immediately."
+    res2 = CandidateValidator.validate(prompt, cand_inv2, analysis)
+    assert res2.is_valid is False
+    assert "inverted directional relationship" in res2.reason
+
+    # Preservation pattern: unchanged direction
+    cand_ok = "Transfer $500 from savings account to checking account now."
+    res_ok = CandidateValidator.validate(prompt, cand_ok, analysis)
+    assert res_ok.is_valid is True
+
+
+def test_non_directional_from_to_ranges_ignored():
+    """Verify non-directional uses of 'from ... to ...' (numeric, temporal, day ranges) are not extracted as relations."""
+    assert TaskAnalyzer.analyze("Count from 1 to 10.").entity_relations == []
+    assert TaskAnalyzer.analyze("The store is open from 9am to 5pm.").entity_relations == []
+    assert TaskAnalyzer.analyze("Office hours are from Monday to Friday.").entity_relations == []
+    assert TaskAnalyzer.analyze("Read the document from start to finish.").entity_relations == []
+
+
+def test_generic_named_entity_extraction():
+    """Verify extraction of multi-word and proper noun entities beyond hardcoded tech names."""
+    prompt = (
+        "Alliance University is located in Bengaluru, Karnataka. "
+        "Wayne Enterprises partnered with Globex Industries in Gotham City."
+    )
+    entities = TaskAnalyzer._extract_entities(prompt)
+    assert "Alliance University" in entities
+    assert "Bengaluru" in entities
+    assert "Karnataka" in entities
+    assert "Wayne Enterprises" in entities
+    assert "Globex Industries" in entities
+    assert "Gotham City" in entities
+
+    # Imperative verbs and common prompt instructions at sentence start must not be treated as proper nouns
+    inst_prompt = "Select all records. Create a report. Explain the workflow. Optimize the query."
+    inst_entities = TaskAnalyzer._extract_entities(inst_prompt)
+    assert "Select" not in inst_entities
+    assert "Create" not in inst_entities
+    assert "Explain" not in inst_entities
+    assert "Optimize" not in inst_entities
+
+
+def test_candidate_validator_rejects_missing_generic_entity():
+    """Verify CandidateValidator rejects candidates that drop generic proper nouns / domain entities."""
+    prompt = "Provide historical background and campus facilities for Alliance University in Bengaluru, Karnataka."
+    analysis = TaskAnalyzer.analyze(prompt)
+    assert "Alliance University" in analysis.entities
+    assert "Bengaluru" in analysis.entities
+    assert "Karnataka" in analysis.entities
+
+    # Dropping multi-word entity
+    cand_missing_org = "Provide historical background and campus facilities in Bengaluru, Karnataka."
+    res1 = CandidateValidator.validate(prompt, cand_missing_org, analysis)
+    assert res1.is_valid is False
+    assert "Alliance University" in res1.reason
+
+    # Dropping city entity
+    cand_missing_city = "Provide historical background and campus facilities for Alliance University in Karnataka."
+    res2 = CandidateValidator.validate(prompt, cand_missing_city, analysis)
+    assert res2.is_valid is False
+    assert "Bengaluru" in res2.reason
+
+    # Preserving all entities
+    cand_valid = "Summarize the history and facilities of Alliance University in Bengaluru, Karnataka."
+    res3 = CandidateValidator.validate(prompt, cand_valid, analysis)
+    assert res3.is_valid is True
+
+
+def test_directional_preposition_boundary_and_article_handling():
+    """Verify directional relations exclude trailing prepositions and strip leading determiners."""
+    p1 = "Migrate user data from the primary database to a backup replica for disaster recovery."
+    a1 = TaskAnalyzer.analyze(p1)
+    assert ("primary database", "to", "backup replica") in a1.entity_relations
+
+    p2 = "Transfer $500 from the savings account to my checking account immediately."
+    a2 = TaskAnalyzer.analyze(p2)
+    assert ("savings account", "to", "checking account") in a2.entity_relations
+
+    # Candidate drops articles when inverting direction: validator must still catch it
+    cand_inv_no_articles = "Transfer $500 from checking account to savings account immediately."
+    res1 = CandidateValidator.validate(p2, cand_inv_no_articles, a2)
+    assert res1.is_valid is False
+    assert "inverted directional relationship" in res1.reason
+
+    # Candidate retains articles when inverting direction: validator must still catch it
+    cand_inv_with_articles = "Transfer $500 from the checking account to the savings account immediately."
+    res2 = CandidateValidator.validate(p2, cand_inv_with_articles, a2)
+    assert res2.is_valid is False
+    assert "inverted directional relationship" in res2.reason
+
+
+def test_markdown_heading_and_compound_tech_entities():
+    """Verify markdown headings are stripped and compound tech entities are preserved."""
+    prompt = (
+        "# Architectural Plan\n"
+        "### Project Requirements\n"
+        "The Python Software Foundation released updates for React Native and Docker Desktop on Azure."
+    )
+    entities = TaskAnalyzer._extract_entities(prompt)
+    assert "Architectural Plan" not in entities
+    assert "Project Requirements" not in entities
+    assert "Python Software Foundation" in entities
+    assert "React Native" in entities
+    assert "Docker Desktop" in entities
+    assert "Azure" in entities
