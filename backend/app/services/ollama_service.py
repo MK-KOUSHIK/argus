@@ -35,6 +35,7 @@ from app.services.candidate_validator import CandidateValidator, ValidationResul
 from app.services.concurrency_controller import concurrency_controller
 from app.services.adaptive_context_manager import AdaptiveContextManager, ContextOverflowError
 from app.services.output_budget_controller import OutputBudgetController, OutputBudgetAllocation
+from app.services.tokenizer_service import TokenizerService
 from app.services.ollama_process_manager import OllamaProcessManager
 from app.services.hardware_telemetry import HardwareTelemetryProvider
 from app.services.routing.models import (
@@ -97,6 +98,31 @@ class OllamaService:
         return TokenEstimation(char_count=char_count, estimated_tokens=tokens)
 
     @classmethod
+    async def measure_tokens(
+        cls, text: str, model: Optional[str] = None
+    ) -> Tuple[int, str]:
+        """Measure token count using the exact local model tokenizer when available.
+
+        Falls back to tiktoken (cl100k_base) or conservative heuristic if Ollama is unreachable.
+        Returns:
+            Tuple of (token_count, measurement_method).
+        """
+        return await TokenizerService.measure_tokens(text, model=model)
+
+    @classmethod
+    async def measure_tokens_pair(
+        cls,
+        original_text: str,
+        candidate_text: str,
+        model: Optional[str] = None,
+    ) -> Tuple[int, int, str]:
+        """Measure both original and candidate prompts using the identical tokenizer and model.
+
+        Guarantees symmetric and strictly comparable token counts.
+        """
+        return await TokenizerService.measure_tokens_pair(original_text, candidate_text, model=model)
+
+    @classmethod
     def clean_optimized_output(cls, raw_output: str, original_prompt: str) -> str:
         """Strip conversational filler, meta-announcements, and echoed system instructions."""
         output = raw_output.strip()
@@ -105,8 +131,10 @@ class OllamaService:
         conversational_prefixes = [
             r"^Here is (?:an?|the) (?:optimized|rewritten|improved|concise|structured) (?:version|prompt)[^:\n]*:\s*\n*",
             r"^Here'?s (?:an?|the) (?:optimized|rewritten|improved|concise|structured) (?:version|prompt)[^:\n]*:\s*\n*",
+            r"^Sure,?\s*(?:here'?s|here is)\s+(?:the|an)?\s*(?:optimized|rewritten|improved|concise|structured)?\s*(?:version|prompt)?[^:\n]*:\s*\n*",
             r"^Sure! Here is[^\n]*:\s*\n*",
             r"^Certainly! Here is[^\n]*:\s*\n*",
+            r"^(?:Here is|Here's)\s+how\s+you\s+(?:can|could)\s+(?:rewrite|rephrase)[^:\n]*:\s*\n*",
             r"^(?:Optimized|Rewritten) (?:Prompt|Version):\s*\n*",
             r"^Below is (?:the|an) (?:optimized|improved) (?:prompt|version)[^:\n]*:\s*\n*",
         ]
@@ -635,12 +663,62 @@ class OllamaService:
             raise OllamaServiceError(exc.message, status_code=exc.status_code) from exc
 
         # --- STAGE C: Rewrite Prompt (or PRESERVE directly) ---
+        candidate_prompt: Optional[str] = None
+        candidate_accepted: bool = False
+        rejection_reason: Optional[str] = None
+
         if strategy == "preserve":
             # Prompt is already concise, unambiguous, and effective
-            optimized_prompt = working_prompt
-            validation_status = "passed"
-            is_preserved = True
-            total_duration_ms = 1
+            if compression_res.tokens_reduced > 0 and working_prompt != request.prompt:
+                # Stage 0 content-aware compression achieved verified reduction
+                optimized_prompt = working_prompt
+                candidate_prompt = working_prompt
+                candidate_accepted = True
+                rejection_reason = None
+                validation_status = "passed"
+                is_preserved = False
+                total_duration_ms = 1
+
+                orig_tokens, cand_tokens, token_measurement_method = await cls.measure_tokens_pair(
+                    request.prompt, working_prompt, model=effective_model
+                )
+                dispatched_tokens = cand_tokens
+                token_diff = orig_tokens - cand_tokens
+                actual_tokens_saved = max(0, token_diff)
+                actual_reduction_percent = (
+                    round((actual_tokens_saved / orig_tokens) * 100, 2)
+                    if orig_tokens > 0
+                    else 0.0
+                )
+                token_savings = actual_tokens_saved
+                token_reduction_percent = round(actual_reduction_percent)
+                token_change_percent = -round(actual_reduction_percent)
+                char_delta = len(working_prompt) - len(request.prompt)
+                length_result = "compressed" if char_delta < 0 else "unchanged"
+                outcome = "validated_rewrite"
+                applied_strategy = "compress"
+            else:
+                candidate_prompt = request.prompt
+                candidate_accepted = False
+                rejection_reason = "Original prompt preserved verbatim: already concise and effective."
+                optimized_prompt = request.prompt
+                validation_status = "passed"
+                is_preserved = True
+                total_duration_ms = 1
+
+                orig_tokens, cand_tokens, token_measurement_method = await cls.measure_tokens_pair(
+                    request.prompt, request.prompt, model=effective_model
+                )
+                dispatched_tokens = orig_tokens
+                actual_tokens_saved = 0
+                actual_reduction_percent = 0.0
+                token_savings = 0
+                token_reduction_percent = 0
+                token_change_percent = 0
+                char_delta = 0
+                length_result = "unchanged"
+                outcome = "unchanged_original"
+                applied_strategy = "preserve"
         else:
             raw_candidate, call_ms, call_telemetry = await cls._execute_model_call(
                 system_instruction=system_instruction or "",
@@ -651,6 +729,7 @@ class OllamaService:
             inference_telemetry.append(call_telemetry)
             total_duration_ms += call_ms
             cleaned_candidate = cls.clean_optimized_output(raw_candidate, working_prompt)
+            candidate_prompt = cleaned_candidate
 
             # --- STAGE D: Validate Candidate ---
             validation = CandidateValidator.validate(
@@ -659,10 +738,9 @@ class OllamaService:
                 analysis=analysis,
             )
 
+            candidate_to_evaluate: Optional[str] = None
             if validation.is_valid:
-                optimized_prompt = cleaned_candidate
-                validation_status = "passed"
-                is_preserved = (optimized_prompt == request.prompt)
+                candidate_to_evaluate = cleaned_candidate
             else:
                 # Controlled retry with targeted correction notice using the same effective model
                 retry_instruction = PromptRewriter.build_system_instruction(
@@ -682,6 +760,7 @@ class OllamaService:
                     inference_telemetry.append(retry_telemetry)
                     total_duration_ms += retry_ms
                     retry_cleaned = cls.clean_optimized_output(retry_raw, working_prompt)
+                    candidate_prompt = retry_cleaned
                     retry_validation = CandidateValidator.validate(
                         original_prompt=request.prompt,
                         candidate_prompt=retry_cleaned,
@@ -689,75 +768,142 @@ class OllamaService:
                     )
 
                     if retry_validation.is_valid:
-                        optimized_prompt = retry_cleaned
-                        validation_status = "passed"
-                        is_preserved = (optimized_prompt == request.prompt)
+                        candidate_to_evaluate = retry_cleaned
                     else:
-                        # Safety fallback: preserve original prompt
-                        optimized_prompt = request.prompt
-                        validation_status = "fallback"
-                        is_preserved = True
-                except Exception:
-                    # If retry fails unexpectedly, preserve original prompt safely
-                    optimized_prompt = request.prompt
-                    validation_status = "fallback"
-                    is_preserved = True
+                        candidate_accepted = False
+                        rejection_reason = f"Semantic validation failed: {retry_validation.reason}"
+                except Exception as exc:
+                    candidate_accepted = False
+                    rejection_reason = f"Candidate retry failed unexpectedly: {str(exc)}"
 
-        # Ensure content-based check for is_preserved
-        is_preserved = (optimized_prompt.strip() == request.prompt.strip())
-
-        # Calculate metrics and telemetry
-        original_metrics = cls.estimate_tokens(request.prompt)
-        optimized_metrics = cls.estimate_tokens(optimized_prompt)
-
-        orig_len = len(request.prompt)
-        opt_len = len(optimized_prompt)
-
-        # Consistent convention: final_character_count - original_character_count
-        char_delta = opt_len - orig_len
-
-        orig_tokens = original_metrics.estimated_tokens
-        opt_tokens = optimized_metrics.estimated_tokens
-        token_delta = opt_tokens - orig_tokens
-
-        token_change_percent = (
-            round((token_delta / orig_tokens) * 100)
-            if orig_tokens > 0
-            else 0
-        )
-        token_reduction_percent = max(0, -token_change_percent)
-
-        # Do not report token savings when the final prompt is longer
-        token_savings = max(0, orig_tokens - opt_tokens)
-
-        # Determine length result
-        if char_delta < 0:
-            length_result = "compressed"
-        elif char_delta > 0:
-            length_result = "expanded"
-        else:
-            length_result = "unchanged"
-
-        # Determine outcome
-        if validation_status == "fallback":
-            outcome = "fallback"
-        elif is_preserved:
-            outcome = "unchanged_original"
-        else:
-            outcome = "validated_rewrite"
-
-        # Determine applied strategy accurately
-        if outcome in {"fallback", "unchanged_original"}:
-            applied_strategy = "preserve"
-        elif strategy == "structure":
-            has_structure = bool(
-                re.search(r"(?:^|\n)\s*(?:[-*•]|\d+[\.\)]|[A-Z][a-zA-Z\s]+:|\#+)\s+", optimized_prompt)
+            # Measure token counts using the identical tokenizer and model
+            orig_tokens, cand_tokens, token_measurement_method = await cls.measure_tokens_pair(
+                request.prompt, candidate_prompt if candidate_prompt is not None else "", model=effective_model
             )
-            applied_strategy = "structure" if has_structure else "compress"
-        elif strategy == "compress" and length_result == "expanded":
-            applied_strategy = "clarify"
-        else:
-            applied_strategy = strategy
+
+            if candidate_to_evaluate is None:
+                # Semantic validation failed -> Reject candidate and safely dispatch original prompt
+                candidate_accepted = False
+                if not rejection_reason:
+                    rejection_reason = f"Semantic validation failed: {validation.reason}"
+                optimized_prompt = request.prompt
+                dispatched_tokens = orig_tokens
+                actual_tokens_saved = 0
+                actual_reduction_percent = 0.0
+                token_savings = 0
+                token_reduction_percent = 0
+                token_change_percent = 0
+                char_delta = 0
+                length_result = "unchanged"
+                outcome = "fallback"
+                validation_status = "fallback"
+                applied_strategy = "preserve"
+                is_preserved = True
+            else:
+                # Semantic validation passed -> Evaluate token savings acceptance criteria
+                token_diff = orig_tokens - cand_tokens
+                pct_savings = (
+                    round((token_diff / orig_tokens) * 100, 2)
+                    if orig_tokens > 0
+                    else 0.0
+                )
+
+                # Check for identical text candidate
+                is_identical_candidate = bool(
+                    candidate_to_evaluate and candidate_to_evaluate.strip() == request.prompt.strip()
+                )
+
+                # Determine if an explicitly caller-authorized non-compression objective applies:
+                # 1. Caller explicitly enabled expansion mode (request.allow_expansion == True)
+                # 2. Underspecified prompt clarified with additional detail (analysis.is_underspecified and cand_tokens > orig_tokens and mode != concise)
+                # 3. Structure-focused mode where structured formatting was applied (request.mode == "structure" and has_structure)
+                has_structure = bool(
+                    re.search(r"(?:^|\n)\s*(?:[-*•]|\d+[\.\)]|[A-Z][a-zA-Z\s]+:|\#+)\s+", candidate_to_evaluate)
+                )
+                expansion_justified = bool(
+                    request.allow_expansion
+                    or (strategy == "clarify" and analysis.is_underspecified and cand_tokens > orig_tokens and request.mode != "concise")
+                    or (request.mode == "structure" and has_structure and cand_tokens > orig_tokens)
+                )
+
+                # Strict Rule: Reject candidates if:
+                # - Candidate text is identical to original, OR
+                # - Candidate token count is >= original, unless an explicit non-compression objective applies
+                if is_identical_candidate or (cand_tokens >= orig_tokens and not expansion_justified):
+                    candidate_accepted = False
+                    if is_identical_candidate:
+                        rejection_reason = (
+                            "Candidate rewrite is identical to original prompt. "
+                            "No token reduction achieved under compression policy."
+                        )
+                    elif cand_tokens > orig_tokens:
+                        rejection_reason = (
+                            f"Candidate token count ({cand_tokens}) is greater than original ({orig_tokens}) "
+                            f"by {cand_tokens - orig_tokens} tokens (+{abs(pct_savings):.1f}% expansion). "
+                            "No token reduction achieved."
+                        )
+                    else:
+                        rejection_reason = (
+                            f"Candidate token count ({cand_tokens}) is equal to original ({orig_tokens}). "
+                            "No token reduction achieved under compression policy."
+                        )
+
+                    # On rejection, dispatch the original prompt downstream
+                    optimized_prompt = request.prompt
+                    dispatched_tokens = orig_tokens
+                    actual_tokens_saved = 0
+                    actual_reduction_percent = 0.0
+                    token_savings = 0
+                    token_reduction_percent = 0
+                    token_change_percent = 0
+                    char_delta = 0
+                    length_result = "unchanged"
+                    outcome = "unchanged_original"
+                    applied_strategy = "preserve"
+                    is_preserved = True
+                    validation_status = "passed"
+                else:
+                    # Candidate accepted: verified token reduction (or explicitly justified expansion)
+                    candidate_accepted = True
+                    rejection_reason = None
+                    optimized_prompt = candidate_to_evaluate
+                    dispatched_tokens = cand_tokens
+
+                    if token_diff > 0:
+                        actual_tokens_saved = token_diff
+                        actual_reduction_percent = pct_savings
+                        token_savings = token_diff
+                        token_reduction_percent = round(pct_savings)
+                        token_change_percent = -round(pct_savings)
+                        char_delta = len(optimized_prompt) - len(request.prompt)
+                        length_result = "compressed" if char_delta < 0 else "unchanged"
+                    else:
+                        # Expansion was justified (e.g. clarification of underspecified task)
+                        # Never report negative savings as successful compression!
+                        actual_tokens_saved = 0
+                        actual_reduction_percent = 0.0
+                        token_savings = 0
+                        token_reduction_percent = 0
+                        token_change_percent = round(abs(pct_savings))
+                        char_delta = len(optimized_prompt) - len(request.prompt)
+                        length_result = "expanded" if char_delta > 0 else ("compressed" if char_delta < 0 else "unchanged")
+
+                    outcome = "validated_rewrite"
+                    is_preserved = (optimized_prompt.strip() == request.prompt.strip())
+                    if strategy == "structure":
+                        applied_strategy = "structure" if has_structure else "compress"
+                    else:
+                        applied_strategy = strategy
+                    validation_status = "passed"
+
+        original_metrics = TokenEstimation(
+            char_count=len(request.prompt),
+            estimated_tokens=orig_tokens,
+        )
+        optimized_metrics = TokenEstimation(
+            char_count=len(optimized_prompt),
+            estimated_tokens=dispatched_tokens,
+        )
 
         preserved_constraints = cls.identify_preserved_constraints(
             request.prompt, optimized_prompt, request.mode
@@ -858,10 +1004,19 @@ class OllamaService:
         return OptimizeResponse(
             original_prompt=request.prompt,
             optimized_prompt=optimized_prompt,
+            candidate_prompt=candidate_prompt,
+            original_token_count=orig_tokens,
+            candidate_token_count=cand_tokens,
+            dispatched_token_count=dispatched_tokens,
+            actual_tokens_saved=actual_tokens_saved,
+            actual_reduction_percent=actual_reduction_percent,
+            candidate_accepted=candidate_accepted,
+            rejection_reason=rejection_reason,
+            token_measurement_method=token_measurement_method,
             mode=request.mode,
             target_model=request.target_model,
             task_category=analysis.task_category,
-            strategy=applied_strategy,
+            strategy=strategy,
             applied_strategy=applied_strategy,
             outcome=outcome,
             length_result=length_result,
@@ -871,6 +1026,9 @@ class OllamaService:
             primary_deliverable=analysis.primary_deliverable,
             explicit_constraints=analysis.explicit_constraints,
             required_operations=[op.normalized_phrase for op in analysis.required_operations],
+            entities=analysis.entities,
+            conditions=analysis.conditions,
+            facts_and_constants=analysis.facts_and_constants,
             original_metrics=original_metrics,
             optimized_metrics=optimized_metrics,
             token_reduction_percent=token_reduction_percent,

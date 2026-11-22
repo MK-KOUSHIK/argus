@@ -167,6 +167,10 @@ class OptimizeRequest(BaseModel):
         default=False,
         description="Whether to permit fallback to a safe installed model if manual override requested model cannot be safely admitted",
     )
+    allow_expansion: bool = Field(
+        default=False,
+        description="Whether to permit candidate expansion when explicitly justified by structural or clarification objectives",
+    )
 
     @field_validator("prompt")
     @classmethod
@@ -230,6 +234,22 @@ class OptimizeResponse(BaseModel):
         default_factory=list,
         description="Extracted required functional operations, calculations, and data flows",
     )
+    entities: List[str] = Field(
+        default_factory=list,
+        description="Identified technical and domain entities",
+    )
+    conditions: List[str] = Field(
+        default_factory=list,
+        description="Identified conditions, filters, and boundaries",
+    )
+    facts_and_constants: List[str] = Field(
+        default_factory=list,
+        description="Identified numbers, units, facts, and technical constants",
+    )
+    semantic_preservation_score: Optional[float] = Field(
+        default=None,
+        description="Semantic preservation evaluation score (0.0 to 1.0)",
+    )
 
     # Metrics & Telemetry
     original_metrics: TokenEstimation = Field(description="Token footprint of the original prompt")
@@ -248,6 +268,43 @@ class OptimizeResponse(BaseModel):
     char_delta: int = Field(
         default=0,
         description="Character delta: final_character_count - original_character_count (negative=shorter, positive=longer, 0=equal)",
+    )
+    # Explicit Acceptance & Rejection Telemetry
+    candidate_prompt: Optional[str] = Field(
+        default=None,
+        description="The candidate rewrite produced by the model before acceptance evaluation",
+    )
+    original_token_count: int = Field(
+        default=0,
+        description="Exact token count of the original prompt measured by the active tokenizer",
+    )
+    candidate_token_count: Optional[int] = Field(
+        default=None,
+        description="Token count of the candidate rewrite measured by the active tokenizer",
+    )
+    dispatched_token_count: int = Field(
+        default=0,
+        description="Token count of the actual dispatched prompt downstream",
+    )
+    actual_tokens_saved: int = Field(
+        default=0,
+        description="Actual tokens saved by the dispatched prompt (0 if candidate rejected or original dispatched)",
+    )
+    actual_reduction_percent: float = Field(
+        default=0.0,
+        description="Actual reduction percentage of dispatched prompt (0.0 if candidate rejected or original dispatched)",
+    )
+    candidate_accepted: bool = Field(
+        default=False,
+        description="Whether the candidate rewrite was accepted for downstream dispatch",
+    )
+    rejection_reason: Optional[str] = Field(
+        default=None,
+        description="Reason the candidate rewrite was rejected and original prompt preserved",
+    )
+    token_measurement_method: str = Field(
+        default="estimated_conservative_heuristic",
+        description="Tokenizer method used (ollama_native, tiktoken_cl100k, estimated_conservative_heuristic)",
     )
     preserved_constraints: List[str] = Field(
         default_factory=list,

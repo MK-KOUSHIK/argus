@@ -360,6 +360,11 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ ollamaStatus }) =>
                 isPreserved={result.isPreserved}
                 validationStatus={result.validationStatus}
                 model={result.model}
+                candidateAccepted={result.candidateAccepted}
+                rejectionReason={result.rejectionReason}
+                candidateTokenCount={result.candidateTokenCount}
+                candidatePrompt={result.candidatePrompt}
+                tokenMeasurementMethod={result.tokenMeasurementMethod}
               />
             </div>
           )}

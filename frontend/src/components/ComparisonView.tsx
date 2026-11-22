@@ -17,6 +17,11 @@ export interface ComparisonViewProps {
   isPreserved?: boolean;
   validationStatus?: ValidationStatus;
   model?: string;
+  candidateAccepted?: boolean;
+  rejectionReason?: string | null;
+  candidateTokenCount?: number | null;
+  candidatePrompt?: string | null;
+  tokenMeasurementMethod?: string;
 }
 
 export const ComparisonView: React.FC<ComparisonViewProps> = ({
@@ -32,9 +37,15 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
   isPreserved = false,
   validationStatus = 'passed',
   model = 'qwen2.5:1.5b',
+  candidateAccepted,
+  rejectionReason,
+  candidateTokenCount,
+  candidatePrompt,
+  tokenMeasurementMethod,
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
   const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [showRejectedCandidate, setShowRejectedCandidate] = useState<boolean>(false);
 
   const handleCopy = async () => {
     try {
@@ -65,7 +76,12 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/30 uppercase tracking-wider">
             Strategy: {strategy}
           </span>
-          {isPreserved && (
+          {candidateAccepted === false && (
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-500/30">
+              Candidate Rejected
+            </span>
+          )}
+          {isPreserved && candidateAccepted !== false && (
             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/30">
               Preserved
             </span>
@@ -84,18 +100,27 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
             <span className={tokenSavings >= 0 ? 'text-cyan-300 font-semibold' : 'text-amber-300 font-semibold'}>
               {optimizedMetrics.estimatedTokens} est. tokens
             </span>
+            {candidateAccepted === false && candidateTokenCount != null && (
+              <span className="text-amber-400/80 text-[10px] ml-1">
+                (cand: {candidateTokenCount})
+              </span>
+            )}
           </div>
 
           <div
             className={`text-xs font-mono px-2 py-1 rounded-md font-semibold ${
-              tokenSavings > 0
+              candidateAccepted === false
+                ? 'bg-amber-950/40 text-amber-300 border border-amber-500/30'
+                : tokenSavings > 0
                 ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/30'
                 : tokenSavings < 0
                 ? 'bg-amber-950/60 text-amber-400 border border-amber-500/30'
                 : 'bg-slate-800 text-slate-300 border border-slate-700'
             }`}
           >
-            {tokenSavings > 0
+            {candidateAccepted === false
+              ? '0% change (candidate rejected)'
+              : tokenSavings > 0
               ? `-${tokenReductionPercent}% estimated tokens`
               : tokenSavings < 0
               ? `+${tokenChangePercent}% estimated expansion`
@@ -129,9 +154,17 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
 
         {/* Right: Optimized Prompt (Interactive / Copyable / Editable) */}
         <Card
-          title={isPreserved ? 'Preserved Prompt (Original Retained)' : 'Optimized Prompt (Rewritten)'}
+          title={
+            candidateAccepted === false
+              ? 'Dispatched Prompt (Original Retained)'
+              : isPreserved
+              ? 'Preserved Prompt (Original Retained)'
+              : 'Optimized Prompt (Rewritten)'
+          }
           subtitle={
-            isPreserved
+            candidateAccepted === false
+              ? (rejectionReason || 'Candidate rejected: original retained to prevent regression')
+              : isPreserved
               ? 'Original retained to guarantee safety and prevent distortion'
               : 'Actionable payload optimized for downstream execution'
           }
@@ -199,9 +232,39 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
         </Card>
       </div>
 
-      {/* Token Approximation Notice */}
-      <div className="text-[11px] text-slate-500 italic px-1">
-        * Token counts are approximations based on standard ~4 characters per token heuristics.
+      {/* Inspect Rejected Candidate Drawer (if candidate was rejected) */}
+      {candidateAccepted === false && candidatePrompt && (
+        <div className="p-3.5 rounded-xl bg-[#0d1424] border border-amber-500/20 text-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-amber-400 font-semibold">Rejected Candidate Rewrite</span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-500/30">
+                Discarded by Guardrails
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowRejectedCandidate(!showRejectedCandidate)}
+              className="text-[11px] font-mono text-amber-300 hover:text-amber-200 underline focus:outline-none"
+            >
+              {showRejectedCandidate ? 'Hide Rejected Candidate' : 'View Rejected Candidate'}
+            </button>
+          </div>
+          {showRejectedCandidate && (
+            <div className="mt-3 p-3 rounded-lg bg-[#060a12] border border-amber-500/20 text-slate-300 font-mono text-xs whitespace-pre-wrap leading-relaxed max-h-[220px] overflow-y-auto">
+              {candidatePrompt}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Token Measurement & Provenance Notice */}
+      <div className="text-[11px] text-slate-500 italic px-1 flex items-center justify-between">
+        <span>
+          {tokenMeasurementMethod
+            ? `Token measurement provenance: ${tokenMeasurementMethod}`
+            : '* Token counts are approximations based on standard ~4 characters per token heuristics.'}
+        </span>
       </div>
     </div>
   );
