@@ -186,51 +186,7 @@ export class ApiService {
     }
 
     const data = await response.json();
-
-    return {
-      originalPrompt: data.original_prompt,
-      optimizedPrompt: data.optimized_prompt,
-      mode: data.mode,
-      targetModel: data.target_model,
-      taskCategory: data.task_category || 'general',
-      strategy: data.strategy || 'compress',
-      appliedStrategy: data.applied_strategy || data.strategy || 'compress',
-      outcome: data.outcome || (data.validation_status === 'fallback' ? 'fallback' : data.is_preserved ? 'unchanged_original' : 'validated_rewrite'),
-      lengthResult: data.length_result || (data.char_delta < 0 ? 'compressed' : data.char_delta > 0 ? 'expanded' : 'unchanged'),
-      validationStatus: data.validation_status || 'passed',
-      isPreserved: Boolean(data.is_preserved),
-      primaryAction: data.primary_action,
-      primaryDeliverable: data.primary_deliverable,
-      explicitConstraints: data.explicit_constraints || [],
-      requiredOperations: data.required_operations || [],
-      originalMetrics: {
-        charCount: data.original_metrics.char_count,
-        estimatedTokens: data.original_metrics.estimated_tokens,
-      },
-      optimizedMetrics: {
-        charCount: data.optimized_metrics.char_count,
-        estimatedTokens: data.optimized_metrics.estimated_tokens,
-      },
-      tokenReductionPercent: data.token_reduction_percent ?? 0,
-      tokenChangePercent: data.token_change_percent ?? 0,
-      tokenSavings: data.token_savings ?? 0,
-      charDelta: data.char_delta ?? 0,
-      preservedConstraints: data.preserved_constraints || [],
-      executionTimeMs: data.execution_time_ms,
-      model: data.model,
-      timestamp: data.timestamp,
-      isSimulated: false,
-      inferenceTelemetry: data.inference_telemetry
-        ? {
-            calls: data.inference_telemetry.calls || [],
-            native_metrics_available: Boolean(data.inference_telemetry.native_metrics_available),
-          }
-        : null,
-      outputBudget: data.output_budget || null,
-      compression: data.compression || null,
-      routing: data.routing || null,
-      kvRuntimePolicy: data.kv_runtime_policy || null,
-    };
+    return transformOptimizeResponse(data);
   }
 
   /**
@@ -293,68 +249,108 @@ export class ApiService {
     }
 
     const data = await response.json();
-    const opt = data.optimizer_details;
-
     return {
       originalExecution: data.original_execution,
       optimizedExecution: data.optimized_execution,
       metrics: data.metrics,
       downstreamModel: data.downstream_model,
       timestamp: data.timestamp,
-      optimizerDetails: {
-        originalPrompt: opt.original_prompt,
-        optimizedPrompt: opt.optimized_prompt,
-        mode: opt.mode,
-        targetModel: opt.target_model,
-        taskCategory: opt.task_category || 'general',
-        strategy: opt.strategy || 'compress',
-        appliedStrategy: opt.applied_strategy || opt.strategy || 'compress',
-        outcome:
-          opt.outcome ||
-          (opt.validation_status === 'fallback'
-            ? 'fallback'
-            : opt.is_preserved
-            ? 'unchanged_original'
-            : 'validated_rewrite'),
-        lengthResult:
-          opt.length_result ||
-          (opt.char_delta < 0 ? 'compressed' : opt.char_delta > 0 ? 'expanded' : 'unchanged'),
-        validationStatus: opt.validation_status || 'passed',
-        isPreserved: Boolean(opt.is_preserved),
-        primaryAction: opt.primary_action,
-        primaryDeliverable: opt.primary_deliverable,
-        explicitConstraints: opt.explicit_constraints || [],
-        requiredOperations: opt.required_operations || [],
-        originalMetrics: {
-          charCount: opt.original_metrics.char_count,
-          estimatedTokens: opt.original_metrics.estimated_tokens,
-        },
-        optimizedMetrics: {
-          charCount: opt.optimized_metrics.char_count,
-          estimatedTokens: opt.optimized_metrics.estimated_tokens,
-        },
-        tokenReductionPercent: opt.token_reduction_percent ?? 0,
-        tokenChangePercent: opt.token_change_percent ?? 0,
-        tokenSavings: opt.token_savings ?? 0,
-        charDelta: opt.char_delta ?? 0,
-        preservedConstraints: opt.preserved_constraints || [],
-        executionTimeMs: opt.execution_time_ms,
-        model: opt.model,
-        timestamp: opt.timestamp,
-        isSimulated: false,
-        inferenceTelemetry: opt.inference_telemetry
-          ? {
-              calls: opt.inference_telemetry.calls || [],
-              native_metrics_available: Boolean(opt.inference_telemetry.native_metrics_available),
-            }
-          : null,
-        outputBudget: opt.output_budget || null,
-        compression: opt.compression || null,
-        routing: opt.routing || null,
-        kvRuntimePolicy: opt.kv_runtime_policy || null,
-      },
+      optimizerDetails: transformOptimizeResponse(data.optimizer_details),
     };
   }
+}
+
+export function transformOptimizeResponse(data: any): OptimizationResult {
+  return {
+    originalPrompt: data.original_prompt,
+    optimizedPrompt: data.optimized_prompt,
+    mode: data.mode,
+    targetModel: data.target_model,
+    taskCategory: data.task_category || 'general',
+    strategy: data.strategy || 'compress',
+    appliedStrategy: data.applied_strategy || data.strategy || 'compress',
+    outcome: data.outcome || (data.validation_status === 'fallback' ? 'fallback' : data.is_preserved ? 'unchanged_original' : 'validated_rewrite'),
+    lengthResult: data.length_result || (data.char_delta < 0 ? 'compressed' : data.char_delta > 0 ? 'expanded' : 'unchanged'),
+    validationStatus: data.validation_status || 'passed',
+    isPreserved: Boolean(data.is_preserved),
+    primaryAction: data.primary_action,
+    primaryDeliverable: data.primary_deliverable,
+    explicitConstraints: data.explicit_constraints || [],
+    requiredOperations: data.required_operations || [],
+    entities: data.entities || [],
+    conditions: data.conditions || [],
+    factsAndConstants: data.facts_and_constants || [],
+    semanticPreservationScore: data.semantic_preservation_score,
+    originalMetrics: {
+      charCount: data.original_metrics?.char_count ?? (data.original_prompt?.length || 0),
+      estimatedTokens: data.original_metrics?.estimated_tokens ?? (data.original_token_count || 0),
+    },
+    optimizedMetrics: {
+      charCount: data.optimized_metrics?.char_count ?? (data.optimized_prompt?.length || 0),
+      estimatedTokens: data.optimized_metrics?.estimated_tokens ?? (data.dispatched_token_count || 0),
+    },
+    tokenReductionPercent: data.token_reduction_percent ?? 0,
+    tokenChangePercent: data.token_change_percent ?? 0,
+    tokenSavings: data.token_savings ?? 0,
+    charDelta: data.char_delta ?? 0,
+    preservedConstraints: data.preserved_constraints || [],
+    executionTimeMs: data.execution_time_ms ?? 0,
+    model: data.model || 'qwen2.5:1.5b',
+    timestamp: data.timestamp || new Date().toISOString(),
+    isSimulated: false,
+    inferenceTelemetry: data.inference_telemetry
+      ? {
+        calls: data.inference_telemetry.calls || [],
+        native_metrics_available: Boolean(data.inference_telemetry.native_metrics_available),
+      }
+      : null,
+    outputBudget: data.output_budget || null,
+    compression: data.compression
+      ? {
+        ...data.compression,
+        applied: data.compression.applied ?? data.compression.enabled ?? false,
+        content_type:
+          data.compression.content_type ?? data.compression.detected_content_type ?? 'general',
+        strategy:
+          data.compression.strategy ?? data.compression.strategy_applied ?? 'none',
+        original_chars:
+          data.compression.original_chars ?? data.compression.original_tokens ?? 0,
+        compressed_chars:
+          data.compression.compressed_chars ?? data.compression.compressed_tokens ?? 0,
+        char_reduction_percent:
+          data.compression.char_reduction_percent ?? data.compression.reduction_percent ?? 0,
+        compression_time_ms:
+          data.compression.compression_time_ms ?? data.compression.processing_time_ms,
+        processing_time_ms:
+          data.compression.processing_time_ms ?? data.compression.compression_time_ms,
+        reversible:
+          data.compression.reversible ?? Boolean(data.compression.restoration_reference),
+        restoration_reference: data.compression.restoration_reference || null,
+        segments: data.compression.segments || [],
+        validation_passed:
+          typeof data.compression.validation_passed === 'boolean'
+            ? data.compression.validation_passed
+            : data.compression.validation_status === 'passed',
+        reason:
+          data.compression.reason ||
+          data.compression.fallback_reason ||
+          (data.compression.enabled || data.compression.applied
+            ? 'Content-aware compression applied successfully'
+            : 'Original content preserved verbatim'),
+      }
+      : null,
+    routing: data.routing || null,
+    kvRuntimePolicy: data.kv_runtime_policy || null,
+    candidatePrompt: data.candidate_prompt ?? null,
+    originalTokenCount: data.original_token_count ?? data.original_metrics?.estimated_tokens,
+    candidateTokenCount: data.candidate_token_count ?? null,
+    dispatchedTokenCount: data.dispatched_token_count ?? data.optimized_metrics?.estimated_tokens,
+    actualTokensSaved: data.actual_tokens_saved ?? data.token_savings ?? 0,
+    actualReductionPercent: data.actual_reduction_percent ?? data.token_reduction_percent ?? 0,
+    candidateAccepted: typeof data.candidate_accepted === 'boolean' ? data.candidate_accepted : !data.is_preserved,
+    rejectionReason: data.rejection_reason ?? null,
+    tokenMeasurementMethod: data.token_measurement_method ?? 'heuristic_chars',
+  };
 }
 
 export const apiService = new ApiService();

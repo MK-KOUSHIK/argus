@@ -253,4 +253,41 @@ describe('Argus Workspace Dashboard (Phase 3)', () => {
       expect(screen.getByText(/Simple task \(complexity 0\.28 <= 0\.60\)/i)).toBeInTheDocument();
     });
   });
+
+  it('renders MetricsPanel and compression telemetry without runtime crash on Optimize Prompt', async () => {
+    // Response matching real backend CompressionTelemetry schema with processing_time_ms
+    const resultWithBackendCompression: OptimizationResult = {
+      ...MOCK_OPTIMIZE_RESULT,
+      compression: {
+        applied: true,
+        content_type: 'text',
+        strategy: 'text_redundancy',
+        original_chars: 100,
+        compressed_chars: 80,
+        char_reduction_percent: 20,
+        // Notice compression_time_ms is intentionally undefined to replicate the exact crash trigger
+        compression_time_ms: undefined as unknown as number,
+        processing_time_ms: 0.78,
+        validation_passed: true,
+        reason: 'Redundancy removed',
+      },
+    };
+
+    vi.spyOn(apiService, 'optimizePrompt').mockResolvedValue(resultWithBackendCompression);
+
+    render(<WorkspacePage />);
+    const textarea = screen.getByLabelText(/raw prompt text input/i);
+    fireEvent.change(textarea, { target: { value: 'Test prompt for compression telemetry' } });
+
+    const optimizeBtn = screen.getByRole('button', { name: /optimize prompt/i });
+    fireEvent.click(optimizeBtn);
+
+    // Verify MetricsPanel renders without throwing TypeError: Cannot read properties of undefined (reading 'toFixed')
+    await waitFor(() => {
+      expect(screen.getByText(/Optimization & Efficiency Metrics/i)).toBeInTheDocument();
+      expect(screen.getByText(/Content-Aware Compression Engine/i)).toBeInTheDocument();
+      // Verifies processing_time_ms (0.78 ms) is displayed cleanly
+      expect(screen.getByText(/0\.78 ms/i)).toBeInTheDocument();
+    });
+  });
 });

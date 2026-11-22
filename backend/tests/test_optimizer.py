@@ -7,6 +7,8 @@ from httpx import AsyncClient
 
 from app.services.candidate_validator import CandidateValidator
 from app.services.task_analyzer import TaskAnalyzer
+from app.services.tokenizer_service import TokenizerService
+from app.core.config import settings
 
 
 SAMPLE_PROMPT = (
@@ -75,6 +77,8 @@ def create_mock_client(
     mock_cls.return_value.__aenter__.return_value = mock_instance
     mock_cls.return_value.__aexit__.return_value = None
     return mock_cls
+
+
 
 
 @pytest.mark.asyncio
@@ -302,7 +306,7 @@ async def test_case_b_explicit_constraints_preserved(async_client: AsyncClient):
         json={
             "response": (
                 "Write a Python script to calculate monthly revenue from sales.csv "
-                "and save the output to monthly_report.csv. Do not use pandas."
+                "and save to monthly_report.csv. Do not use pandas."
             )
         },
         request=httpx.Request("POST", "http://127.0.0.1:11434/api/generate"),
@@ -999,7 +1003,7 @@ async def test_phase_3_2_2_test_e_valid_expansion(async_client: AsyncClient):
     with patch("app.services.ollama_service.httpx.AsyncClient", create_mock_client(post_response=mock_resp)):
         response = await async_client.post(
             "/api/optimize",
-            json={"prompt": prompt, "mode": "balanced"},
+            json={"prompt": prompt, "mode": "balanced", "allow_expansion": True},
         )
         assert response.status_code == 200
         data = response.json()
@@ -1054,7 +1058,8 @@ async def test_phase_3_2_2_test_h_metric_consistency(async_client: AsyncClient):
         d2 = r2.json()
         assert d2["char_delta"] == 0
         assert d2["length_result"] == "unchanged"
-        assert d2["is_preserved"] is False  # content differs!
+        assert d2["is_preserved"] is True  # Same-length candidate rejected, original preserved
+        assert d2["candidate_accepted"] is False
 
     # 3. Completely unchanged content
     orig_3 = "Keep this exact text."
@@ -1208,3 +1213,37 @@ def test_settings_validation_max_num_ctx():
 
     with pytest.raises(ValidationError):
         Settings(OLLAMA_NUM_CTX=4096, OLLAMA_MAX_NUM_CTX=2048)
+
+
+# ---------------------------------------------------------------------------
+# Live Ollama Integration Test (Explicitly Marked and Isolated)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.ollama_integration
+@pytest.mark.asyncio
+async def test_live_ollama_prompt_optimization_execution(async_client: AsyncClient):
+    """Verify live prompt optimization and tokenizer measurement against the local Ollama daemon.
+
+    Explicitly marked as ollama_integration and skipped gracefully if the daemon is offline.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            v_resp = await client.get(f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/version")
+            if v_resp.status_code != 200:
+                pytest.skip("Local Ollama daemon not reachable.")
+    except Exception:
+        pytest.skip("Local Ollama daemon not reachable.")
+
+    res = await async_client.post(
+        "/api/optimize",
+        json={
+            "prompt": "Please review this Python code thoroughly and check for memory leaks. Do not use recursion.",
+            "mode": "balanced",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "token_measurement_method" in data
+    assert data["token_measurement_method"] in {"ollama_native", "tiktoken_cl100k"}
+    assert data["original_token_count"] > 0
+    assert data["dispatched_token_count"] > 0

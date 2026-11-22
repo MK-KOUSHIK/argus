@@ -84,18 +84,34 @@ export interface CompressionSegmentTelemetry {
 }
 
 export interface CompressionTelemetry {
-  applied: boolean;
-  content_type: string;
-  strategy: string;
-  original_chars: number;
-  compressed_chars: number;
-  char_reduction_percent: number;
-  compression_time_ms: number;
-  reversible: boolean;
+  // Frontend normalized fields
+  applied?: boolean;
+  content_type?: string;
+  strategy?: string;
+  original_chars?: number;
+  compressed_chars?: number;
+  char_reduction_percent?: number;
+  compression_time_ms?: number;
+  reversible?: boolean;
   restoration_reference?: string | null;
   segments?: CompressionSegmentTelemetry[];
-  validation_passed: boolean;
-  reason: string;
+  validation_passed?: boolean;
+  reason?: string;
+
+  // Backend response schema fields (backend/app/schemas/optimizer.py)
+  enabled?: boolean;
+  detected_content_type?: string;
+  confidence_score?: number;
+  strategy_applied?: string;
+  original_tokens?: number;
+  compressed_tokens?: number;
+  tokens_reduced?: number;
+  compression_ratio?: number;
+  reduction_percent?: number;
+  token_measurement_method?: string;
+  validation_status?: string;
+  processing_time_ms?: number;
+  fallback_reason?: string | null;
 }
 
 export interface OutputBudgetTelemetry {
@@ -206,6 +222,7 @@ export interface OptimizeRequestPayload {
   requested_model?: string;
   enable_routing?: boolean;
   allow_override_fallback?: boolean;
+  allow_expansion?: boolean;
 }
 
 export interface RouteRequestPayload {
@@ -263,6 +280,10 @@ export interface OptimizationResult {
   primaryDeliverable?: string;
   explicitConstraints: string[];
   requiredOperations?: string[];
+  entities?: string[];
+  conditions?: string[];
+  factsAndConstants?: string[];
+  semanticPreservationScore?: number;
 
   // Token & Length Metrics (Heuristic)
   originalMetrics: TokenEstimation;
@@ -284,6 +305,16 @@ export interface OptimizationResult {
 
   compression?: CompressionTelemetry | null;
   routing?: RoutingDecisionTelemetry | null;
+  // Acceptance & Rejection Telemetry
+  candidatePrompt?: string | null;
+  originalTokenCount?: number;
+  candidateTokenCount?: number | null;
+  dispatchedTokenCount?: number;
+  actualTokensSaved?: number;
+  actualReductionPercent?: number;
+  candidateAccepted?: boolean;
+  rejectionReason?: string | null;
+  tokenMeasurementMethod?: string;
   kvRuntimePolicy?: {
     requested_num_ctx: number;
     requested_num_predict: number;

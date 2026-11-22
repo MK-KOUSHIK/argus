@@ -704,9 +704,10 @@ async def test_optimizer_retry_model_consistency(mock_two_models):
         req = OptimizeRequest(prompt=complex_prompt, requested_model="qwen2.5:7b")
         resp = await OllamaService.optimize_prompt(req)
 
-        assert len(captured_payloads) == 2
-        assert captured_payloads[0]["model"] == "qwen2.5:7b"
-        assert captured_payloads[1]["model"] == "qwen2.5:7b"
+        generation_payloads = [p for p in captured_payloads if "system" in p]
+        assert len(generation_payloads) == 2
+        assert generation_payloads[0]["model"] == "qwen2.5:7b"
+        assert generation_payloads[1]["model"] == "qwen2.5:7b"
         assert resp.model == "qwen2.5:7b"
 
 

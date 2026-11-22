@@ -45,6 +45,17 @@ class TaskAnalysisResult:
     has_redundancy: bool = False
     has_conversational_filler: bool = False
     complexity_score: int = 1
+    # General-Purpose Intent & Semantic Features (Phase 7)
+    entities: List[str] = field(default_factory=list)
+    entity_relations: List[Tuple[str, str, str]] = field(default_factory=list)
+    conditions: List[str] = field(default_factory=list)
+    negations: List[str] = field(default_factory=list)
+    facts_and_constants: List[str] = field(default_factory=list)
+    ambiguities: List[str] = field(default_factory=list)
+    grammatical_issues_detected: List[str] = field(default_factory=list)
+    # Multi-Constraint & Precondition Understanding (Phase 7.1)
+    is_inquiry: bool = False
+    preconditions: List[str] = field(default_factory=list)
 
 
 class TaskAnalyzer:
@@ -289,6 +300,33 @@ class TaskAnalyzer:
                 "return", "returns", "returning",
             },
         ),
+        # Maintenance / Backup / Archive
+        "backup": (
+            "backup",
+            "maintenance",
+            {
+                "backup", "backups", "backing up", "archive", "archives", "archiving",
+                "compress", "compresses", "compressing",
+            },
+        ),
+        # Communication / Notification
+        "notify": (
+            "notify",
+            "communication",
+            {
+                "notify", "notifies", "notifying", "alert", "alerts", "alerting",
+                "send", "sends", "sending", "email", "emails", "emailing",
+            },
+        ),
+        # Infrastructure / Deployment
+        "deploy": (
+            "deploy",
+            "infrastructure",
+            {
+                "deploy", "deploys", "deploying", "provision", "provisions", "provisioning",
+                "configure", "configures", "configuring", "install", "installs", "installing",
+            },
+        ),
     }
 
     # Canonical concept synonyms and semantic clusters
@@ -340,6 +378,8 @@ class TaskAnalyzer:
         r"\b(?:don't miss anything important|include everything important|dont miss anything)\b",
         r"\b(?:do whatever you think is best|you decide|any way you want)\b",
         r"\b(?:build me something|make something)\b",
+        r"^help (?:me )?with\b",
+        r"\bexplain\s+[a-zA-Z0-9_\-\s]+\s+to a (?:beginner|child|layman)\b",
     ]
 
     @classmethod
@@ -356,6 +396,7 @@ class TaskAnalyzer:
 
         # 3. Detect Prohibitions (e.g. "Do not use pandas", "no numpy", "without X")
         prohibitions = cls._extract_prohibitions(text)
+        generalized_negations = cls._extract_generalized_negations(text)
 
         # 4. Detect Filenames and specific file references
         filenames = cls._extract_filenames(text)
@@ -366,7 +407,17 @@ class TaskAnalyzer:
         # 6. Detect Requested Format
         format_requested = cls._extract_format(lower)
 
-        # 7. Detect Required Operations (Phase 3.2.1 Operation Preservation)
+        # 7. Detect Entities, Facts, Relations, Conditions (Phase 7 General-Purpose Intent)
+        entities = cls._extract_entities(text)
+        facts_and_constants = cls._extract_facts_and_constants(text)
+        entity_relations = cls._extract_entity_relations(text)
+        conditions = cls._extract_conditions(text)
+        preconditions = cls._extract_preconditions(text)
+        is_inquiry = cls._detect_inquiry(text, deliv_fam, action)
+        ambiguities = cls._detect_ambiguities(text)
+        grammatical_issues = cls._detect_grammatical_issues(text)
+
+        # 8. Detect Required Operations (Phase 3.2.1 Operation Preservation)
         required_operations = cls._extract_required_operations(
             text=text,
             filenames=filenames,
@@ -375,14 +426,14 @@ class TaskAnalyzer:
             primary_deliverable=deliverable,
         )
 
-        # 8. Detect Filler & Redundancy
-        has_filler = any(re.search(pat, text, re.IGNORECASE) for pat in cls.FILLER_PATTERNS)
+        # 9. Detect Filler & Redundancy
+        has_filler = any(re.search(pat, text, re.IGNORECASE) for pat in cls.FILLER_PATTERNS) or bool(grammatical_issues)
         has_redundancy = cls._detect_redundancy(lower) or has_filler
 
-        # 9. Detect Underspecification
-        is_underspecified = any(re.search(pat, text, re.IGNORECASE) for pat in cls.VAGUE_PATTERNS)
+        # 10. Detect Underspecification
+        is_underspecified = any(re.search(pat, text, re.IGNORECASE) for pat in cls.VAGUE_PATTERNS) or bool(ambiguities)
 
-        # 10. Detect if prompt is already effective & concise
+        # 11. Detect if prompt is already effective & concise
         is_already_effective = cls._check_already_effective(
             text=text,
             has_filler=has_filler,
@@ -397,12 +448,22 @@ class TaskAnalyzer:
             explicit_constraints.append(f"Deliverable: {deliverable.capitalize()}")
         for p in prohibitions:
             explicit_constraints.append(f"Prohibition: No {p}")
+        for neg in generalized_negations:
+            if not any(p.lower() in neg.lower() for p in prohibitions):
+                explicit_constraints.append(f"Constraint: {neg}")
         for op in required_operations:
             explicit_constraints.append(f"Operation: {op.normalized_phrase.capitalize()}")
         for fn in filenames:
             explicit_constraints.append(f"File reference: {fn}")
         for k in specific_keys:
             explicit_constraints.append(f"Output key: '{k}'")
+        for cond in conditions:
+            explicit_constraints.append(f"Condition: {cond}")
+        for prec in preconditions:
+            explicit_constraints.append(f"Precondition: {prec}")
+        for fact in facts_and_constants:
+            if not any(fact in c for c in explicit_constraints):
+                explicit_constraints.append(f"Fact/Invariant: {fact}")
         if format_requested:
             explicit_constraints.append(f"Format: {format_requested}")
 
@@ -428,6 +489,15 @@ class TaskAnalyzer:
             has_redundancy=has_redundancy,
             has_conversational_filler=has_filler,
             complexity_score=complexity_score,
+            entities=entities,
+            entity_relations=entity_relations,
+            conditions=conditions,
+            negations=generalized_negations,
+            facts_and_constants=facts_and_constants,
+            ambiguities=ambiguities,
+            grammatical_issues_detected=grammatical_issues,
+            is_inquiry=is_inquiry,
+            preconditions=preconditions,
         )
 
     @classmethod
@@ -595,6 +665,297 @@ class TaskAnalyzer:
         if "csv format" in lower:
             return "CSV"
         return None
+
+    # Common technical terms and domain entities (generalized dictionary)
+    KNOWN_TECH_ENTITIES = {
+        "postgresql", "postgres", "mysql", "sqlite", "mongodb", "redis", "cassandra",
+        "docker", "kubernetes", "k8s", "prometheus", "servicemonitors", "grafana",
+        "openssl", "rsa", "csr", "curl", "bash", "zsh", "linux", "ubuntu", "debian",
+        "centos", "rhel", "nginx", "apache", "python", "typescript", "javascript",
+        "react", "vue", "angular", "rust", "golang", "java", "c++", "c#", "dotnet",
+        "beautifulsoup", "bs4", "pandas", "numpy", "scipy", "sklearn", "pytorch",
+        "tensorflow", "keras", "fastapi", "flask", "django", "express", "nodejs",
+        "parquet", "json", "csv", "yaml", "xml", "html", "css", "sql", "graphql",
+        "rest", "grpc", "git", "github", "gitlab", "ci/cd", "terraform", "ansible",
+    }
+
+    @classmethod
+    def _extract_entities(cls, text: str) -> List[str]:
+        """Extract domain entities, technologies, tools, and technical nouns."""
+        found_entities = set()
+        # Strip code blocks so markdown syntax tags and payload data aren't extracted as prompt entities
+        prose_text = re.sub(r"```[\s\S]*?```", " ", text)
+        words = re.findall(r"\b[a-zA-Z0-9_\-\.\/+]+\b", prose_text)
+
+        for w in words:
+            w_clean = w.strip(".,;:()[]{}\"'").lower()
+            if w_clean in cls.KNOWN_TECH_ENTITIES:
+                found_entities.add(w.strip(".,;:()[]{}\"'"))
+
+        # Also extract CamelCase and technical PascalCase words (e.g. ServiceMonitors, BeautifulSoup, OpenSSL)
+        for m in re.finditer(r"\b[A-Z][a-z0-9]+(?:[A-Z][a-zA-Z0-9]+)+\b", prose_text):
+            found_entities.add(m.group(0))
+
+        # Extract capital abbreviations (e.g. RSA, CSR, SQL, URL, API, CPU, GPU, RAM)
+        for m in re.finditer(r"\b[A-Z]{2,6}\b", prose_text):
+            tok = m.group(0)
+            if tok not in {"THE", "AND", "FOR", "WITH", "THAT", "THIS", "FROM", "TRUE", "NOT", "CAN", "YOU", "MUST", "SHOW", "POST"}:
+                found_entities.add(tok)
+
+        return sorted(list(found_entities))
+
+    CONVERSATIONAL_NEGATION_FILLERS = {
+        "miss anything", "miss any", "worry", "hesitate", "matter",
+        "forget anything", "leave anything", "skip anything",
+    }
+
+    @classmethod
+    def _extract_facts_and_constants(cls, text: str) -> List[str]:
+        """Extract concrete numbers, versions, dates, times, units, URLs, and constants."""
+        facts = set()
+
+        # Strip code blocks and data payloads so inner data values aren't treated as prompt-level constraints
+        prose_text = re.sub(r"```[\s\S]*?```", " ", text)
+
+        # 1. URLs
+        for m in re.finditer(r"https?://[^\s\"'<>]+", prose_text):
+            facts.add(m.group(0).rstrip(".,;)"))
+
+        # 2. Email addresses
+        for m in re.finditer(r"\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+\b", prose_text):
+            facts.add(m.group(0))
+
+        # 3. Currency / Monetary ($50,000, €100, etc.)
+        for m in re.finditer(r"[\$€£¥]\d+(?:,\d{3})*(?:\.\d+)?", prose_text):
+            facts.add(m.group(0))
+
+        # 4. Dates (e.g. 2026-01-15, November 15, 2026)
+        date_pat = r"\b(?:\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,\s*\d{4})?)\b"
+        for m in re.finditer(date_pat, prose_text, re.IGNORECASE):
+            facts.add(m.group(0))
+
+        # 5. Times (e.g. 02:00 UTC, 14:30)
+        time_pat = r"\b\d{1,2}:\d{2}(?:\s*(?:UTC|GMT|PST|EST|CST|[AP]M))?\b"
+        for m in re.finditer(time_pat, prose_text, re.IGNORECASE):
+            facts.add(m.group(0))
+
+        # 6. Numbers with units/modifiers (e.g. 4096-bit, 120 minutes, 100 words, 14+, 22.04 LTS, version 15, 512MB, 1Gi, 500m)
+        unit_pat = r"\b\d+(?:\.\d+)?(?:\+|\-bit|mCPU|\s*(?:words?|minutes?|hours?|seconds?|days?|MB|GB|KB|TB|Mi|Gi|Ki|Ti|LTS|%|epochs?|layers?|samples?|m))\b"
+        for m in re.finditer(unit_pat, prose_text, re.IGNORECASE):
+            facts.add(m.group(0).strip())
+
+        # 7. Version numbers (e.g. version 15, v14, PostgreSQL 14+)
+        ver_pat = r"\b(?:version|v\.?)\s*(\d+(?:\.\d+)*(?:\+)?)\b"
+        for m in re.finditer(ver_pat, prose_text, re.IGNORECASE):
+            facts.add(m.group(1))
+
+        # 8. Bare versions with + (e.g. 14+)
+        for m in re.finditer(r"\b\d+\+", prose_text):
+            facts.add(m.group(0))
+
+        # 9. Key-value associations ("named X", "called X", "set to X", "token X")
+        kv_pat = r"\b(?:named|called|set to|token|bearer)\s+['\"]?([a-zA-Z0-9_\-\.]+)"
+        for m in re.finditer(kv_pat, prose_text, re.IGNORECASE):
+            val = m.group(1).strip("'\".,;")
+            if len(val) > 1 and val.lower() not in {"a", "an", "the", "that", "this", "it"}:
+                facts.add(val)
+
+        # 10. SCREAMING_SNAKE or code identifiers (e.g. POSTGRES_PASSWORD, ABC123XYZ)
+        for m in re.finditer(r"\b[A-Z0-9_]{3,}\b", prose_text):
+            tok = m.group(0)
+            if tok not in {"SHOW", "POST", "JSON", "HTTP", "YAML", "THAT", "WITH", "FROM", "TRUE", "THIS", "STEP"}:
+                facts.add(tok)
+
+        # Clean up any substrings of larger facts (e.g. avoid '00 UTC' if '02:00 UTC' is present)
+        sorted_facts = sorted(list(facts), key=len, reverse=True)
+        filtered = []
+        for f in sorted_facts:
+            if not any(f != existing and f in existing for existing in filtered):
+                filtered.append(f)
+
+        return sorted(filtered)
+
+    @classmethod
+    def _extract_entity_relations(cls, text: str) -> List[Tuple[str, str, str]]:
+        """Extract relational triples (subject, relation, object) between entities and values."""
+        relations = []
+
+        # 1. <Entity> version <Version> (e.g. PostgreSQL 15, PostgreSQL 14+, Ubuntu 22.04 LTS)
+        ver_matches = re.finditer(r"\b([A-Z][a-zA-Z0-9_\-]+)\s+(?:version\s+|v\.?\s*)?(\d+(?:\.\d+)*(?:\+|(?:\s+LTS))?)\b", text)
+        for m in ver_matches:
+            ent = m.group(1)
+            ver = m.group(2)
+            if ent.lower() not in {"step", "chapter", "section", "part", "table", "figure"}:
+                relations.append((ent, "version", ver))
+
+        # 2. <Noun> named/called <Name>
+        named_matches = re.finditer(r"\b([a-zA-Z0-9_\-\s]+?)\s+(?:named|called)\s+['\"]?([a-zA-Z0-9_\-\.]+)['\"]?", text, re.IGNORECASE)
+        for m in named_matches:
+            subj = m.group(1).strip()
+            obj = m.group(2).strip(".,;'\"")
+            words = subj.split()
+            if len(words) <= 4 and words[-1].lower() in {"volume", "database", "table", "file", "container", "service", "variable", "column", "key"}:
+                relations.append((subj, "named", obj))
+
+        # 3. <Key/Variable> set to <Value>
+        set_matches = re.finditer(r"\b([a-zA-Z0-9_]+)\s+set\s+to\s+['\"]?([a-zA-Z0-9_\-\.]+)['\"]?", text, re.IGNORECASE)
+        for m in set_matches:
+            relations.append((m.group(1).strip(), "set_to", m.group(2).strip(".,;'\"")))
+
+        # 4. <Entity> of <Value> (e.g. downtime of 120 minutes)
+        of_matches = re.finditer(r"\b([a-zA-Z0-9_\-]+)\s+of\s+(\d+(?:\s+[a-zA-Z]+|-bit))\b", text, re.IGNORECASE)
+        for m in of_matches:
+            relations.append((m.group(1).strip(), "has_quantity", m.group(2).strip()))
+
+        # 5. Directional relations: from <Source> to <Destination> (e.g. from savings to checking, from /var/log to /backup)
+        dir_matches = re.finditer(r"\bfrom\s+([a-zA-Z0-9_\-\.\/]+)\s+to\s+([a-zA-Z0-9_\-\.\/]+)\b", text, re.IGNORECASE)
+        for m in dir_matches:
+            src = m.group(1).strip()
+            dst = m.group(2).strip()
+            if src.lower() not in cls.STOPWORDS and dst.lower() not in cls.STOPWORDS:
+                relations.append((src, "to", dst))
+
+        # 6. Entity-Predicate assertions: <Entity> is a/an <Concept> (e.g. alliance university is a name of country)
+        is_a_matches = re.finditer(r"\b([a-zA-Z0-9_\-\s]{2,30}?)\s+is\s+(?:a|an|the)\s+([a-zA-Z0-9_\-\s]{2,30}?)(?:\s+(?:that|which|who|will|and|\.|\n|,|$)|$)", text, re.IGNORECASE)
+        for m in is_a_matches:
+            subj = m.group(1).strip()
+            obj = m.group(2).strip(" .,;")
+            if subj.lower() not in {"it", "this", "that", "there", "what", "which", "here"} and len(subj.split()) <= 4 and len(obj.split()) <= 4:
+                relations.append((subj, "is_a", obj))
+
+        # 7. Action relations between entities: <Subj> <Verb> <Obj> (e.g. Alice manages Bob, frontend calls backend)
+        subj_obj_matches = re.finditer(r"\b([a-zA-Z0-9_]+)\s+(manages|calls|triggers|notifies|supervises|replaces)\s+([a-zA-Z0-9_]+)\b", text, re.IGNORECASE)
+        for m in subj_obj_matches:
+            subj = m.group(1).strip()
+            action_rel = m.group(2).strip().lower()
+            obj = m.group(3).strip()
+            if subj.lower() not in cls.STOPWORDS and obj.lower() not in cls.STOPWORDS:
+                relations.append((subj, action_rel, obj))
+
+        return relations
+
+    @classmethod
+    def _extract_conditions(cls, text: str) -> List[str]:
+        """Extract explicit conditions, filters, ordering, and boundary constraints."""
+        conditions = []
+
+        # 1. Comparison operations: field [><=] val or count > 1
+        for m in re.finditer(r"\b([a-zA-Z0-9_\.]+\s*(?:[><=!]=?|>=|<=)\s*[\$]?[a-zA-Z0-9_,\.]+)\b", text):
+            conditions.append(m.group(0).strip())
+
+        # 2. SQL clauses: where ..., order by ..., group by ..., having ...
+        for m in re.finditer(r"\b(?:where|filter where|order by|group by|having)\s+([a-zA-Z0-9_\-\s><=!,]+?)(?:\.|\n|, and| and |$)", text, re.IGNORECASE):
+            clause = m.group(0).strip(" .,")
+            if len(clause) > 3 and len(clause) < 50:
+                conditions.append(clause)
+
+        # 3. Temporal conditions: created after/before ..., starting from ...
+        for m in re.finditer(r"\b(?:created|registered|occurring|scheduled)\s+(?:after|before|since|on)\s+([a-zA-Z0-9_\-\s,]+?)(?:\.|\n| with| and|$)", text, re.IGNORECASE):
+            conditions.append(m.group(0).strip(" .,"))
+
+        # 4. Limits & bounds: under X words, max X, at most X, not exceed X, at least X, minimum of X
+        for m in re.finditer(r"\b(?:under|within|maximum|at most|not exceed|limit to|at least|minimum of|no less than|no more than)\s+([a-zA-Z0-9_\-\s]+?)(?:\.|\n|,|$)", text, re.IGNORECASE):
+            conditions.append(m.group(0).strip(" .,"))
+
+        # 5. Numerical spending / threshold clauses: spent over $10,000, exceeding 100, etc.
+        for m in re.finditer(r"\b(?:spent over|exceeding|more than|greater than)\s+([\$]?[0-9a-zA-Z_,\.\-]+(?:\s+[a-zA-Z]+)?)\b", text, re.IGNORECASE):
+            conditions.append(m.group(0).strip(" .,"))
+
+        # 6. Range bounds: between X and Y
+        for m in re.finditer(r"\bbetween\s+([a-zA-Z0-9_\-\.:\$]+)\s+and\s+([a-zA-Z0-9_\-\.:\$]+)\b", text, re.IGNORECASE):
+            conditions.append(m.group(0).strip(" .,"))
+
+        # 7. Scope duration: lasting 45 minutes
+        for m in re.finditer(r"\blasting\s+([0-9]+\s*(?:minutes?|hours?|days?|seconds?|weeks?))\b", text, re.IGNORECASE):
+            conditions.append(m.group(0).strip(" .,"))
+
+        # 8. Schedules & recurrence: every Sunday at 03:00 UTC
+        for m in re.finditer(r"\bevery\s+(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|day|week|month|hour|\d+\s*(?:minutes?|seconds?|hours?))(?:\s+at\s+\d{1,2}:\d{2}(?:\s*UTC)?)?\b", text, re.IGNORECASE):
+            conditions.append(m.group(0).strip(" .,"))
+
+        return sorted(list(set(conditions)))
+
+    @classmethod
+    def _extract_preconditions(cls, text: str) -> List[str]:
+        """Extract sequential dependencies and verification pre-checks."""
+        preconditions = []
+        # Pattern: check if / verify that / ensure X before / prior to Y
+        pat = r"\b(?:check if|verify(?: that)?|ensure(?: that)?|test(?: if)?)\s+([a-zA-Z0-9_\-\/\.\s]+?)\s+(?:before|prior to)\s+([a-zA-Z0-9_\-\s]+)"
+        for m in re.finditer(pat, text, re.IGNORECASE):
+            cond_check = m.group(1).strip()
+            action_after = m.group(2).strip()
+            preconditions.append(f"check {cond_check} before {action_after}")
+
+        # Also capture standalone timing dependencies: "before archiving", "prior to deployment"
+        for m in re.finditer(r"\b(?:before|prior to)\s+([a-zA-Z0-9_\-\s]+?)(?:\.|\n|,|$)", text, re.IGNORECASE):
+            dep = m.group(0).strip(" .,")
+            if len(dep) > 5 and len(dep) < 40 and not any(dep in p for p in preconditions):
+                preconditions.append(dep)
+
+        return sorted(list(set(preconditions)))
+
+    @classmethod
+    def _detect_inquiry(cls, text: str, deliverable_family: Optional[str], primary_action: Optional[str]) -> bool:
+        """Detect whether prompt is an inquiry/question rather than a code/software creation request."""
+        clean = text.strip()
+        lower = clean.lower()
+        if deliverable_family == "software":
+            return False
+        if primary_action in {"build", "create", "write", "implement", "develop", "code", "generate", "program"}:
+            software_nouns = {"script", "function", "program", "code", "class", "app", "application", "module", "api", "endpoint"}
+            if any(re.search(rf"\b{re.escape(sn)}\b", lower) for sn in software_nouns):
+                return False
+        if clean.endswith("?"):
+            return True
+        inquiry_patterns = [
+            r"^(?:what|how|why|when|where|who|which|is|are|will|can|could|would)\b",
+            r"\bwill\s+[a-zA-Z0-9_\-\s]{2,40}?\s+(?:pass or fail|succeed or fail)\b",
+            r"\b(?:explain why|tell me why|tell me how|describe why|describe how)\b",
+            r"\bwhether\s+[a-zA-Z0-9_\-\s]{2,40}?\s+is\b",
+        ]
+        return any(re.search(pat, lower) for pat in inquiry_patterns)
+
+    @classmethod
+    def _extract_generalized_negations(cls, text: str) -> List[str]:
+        """Extract all explicit negations, prohibitions, and negative constraints."""
+        negations = set()
+        pat = r"\b(?:do not|don't|does not|doesn't|without|never|avoid|must not|no)\s+([a-zA-Z0-9_\-]+(?:\s+[a-zA-Z0-9_\-]+){0,4})"
+        for m in re.finditer(pat, text, re.IGNORECASE):
+            neg = m.group(0).strip(" .,;")
+            neg_lower = neg.lower()
+            if not any(f in neg_lower for f in cls.CONVERSATIONAL_NEGATION_FILLERS) and not any(f in neg_lower for f in ["worry", "hesitate", "matter", "stop", "fail"]):
+                negations.add(neg)
+        return sorted(list(negations))
+
+    @classmethod
+    def _detect_ambiguities(cls, text: str) -> List[str]:
+        """Identify vague pronouns or unspecified parameters."""
+        ambiguities = []
+        if re.search(r"\b(?:fix|optimize|refactor|improve|make|do)\s+(?:it|this|that|them)\b", text, re.IGNORECASE):
+            ambiguities.append("Vague pronominal reference without specified object")
+        if re.search(r"\b(?:faster|better|more efficient)\b", text, re.IGNORECASE) and not re.search(r"\b(?:latency|throughput|memory|runtime|complexity)\b", text, re.IGNORECASE):
+            ambiguities.append("Unquantified performance objective")
+        return ambiguities
+
+    @classmethod
+    def _detect_grammatical_issues(cls, text: str) -> List[str]:
+        """Identify grammatical errors, typos, slang, and informal contractions."""
+        issues = []
+        slang_patterns = [
+            (r"\bpls\b|\bplz\b", "Informal abbreviation 'pls/plz'"),
+            (r"\bu\b|\bur\b", "Informal abbreviation 'u/ur'"),
+            (r"\bcan\s+u\b|\bcan\s+you\s+pls\b", "Informal conversational request phrasing"),
+            (r"\bthx\b|\bthanks\b", "Conversational closing pleasantry"),
+            (r"\bfuncton\b|\bfunctin\b", "Misspelled 'function'"),
+            (r"\bfibonaci\b|\bfibonnaci\b", "Misspelled 'Fibonacci'"),
+            (r"\bquerey\b", "Misspelled 'query'"),
+            (r"\bfastly\b", "Non-standard adverb 'fastly'"),
+            (r"\bneed\s+u\s+write\b|\bi\s+need\s+u\b", "Missing auxiliary verb in request clause"),
+        ]
+        for pat, desc in slang_patterns:
+            if re.search(pat, text, re.IGNORECASE):
+                issues.append(desc)
+        return issues
 
     @classmethod
     def _detect_redundancy(cls, lower: str) -> bool:
